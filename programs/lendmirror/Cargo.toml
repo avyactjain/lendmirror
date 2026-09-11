@@ -1,0 +1,22 @@
+[package]
+name = "lendmirror"
+version = "0.0.1"
+description = "LendMirror Solana OApp"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "lendmirror"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["oapp/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+solana-helper = "0.1.0"
+oapp = { package = "oapp-latest", git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", rev = "c09287a" }
