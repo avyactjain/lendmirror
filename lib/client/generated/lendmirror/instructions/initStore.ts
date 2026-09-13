@@ -18,10 +18,23 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type InitStoreInstructionAccounts = {
+    /**
+     * mut = writable (lamports leave this account to pay rent).
+     * Signer = this pubkey signed the tx.
+     * Anyone can call once. First caller wins. We will lock this later.
+     */
+
     payer?: Signer
+    /**
+     * init = create this account now. Fails if it already exists.
+     * payer = who pays rent. space = bytes allocated.
+     * seeds + bump = address MUST be PDA(STORE_SEED, this program).
+     * Bare `bump` (no `= store.bump`) means: find the bump, then create.
+     * Later instructions use `bump = store.bump` to verify, not recreate.
+     */
+
     store: PublicKey | Pda
-    lzReceiveTypesAccounts: PublicKey | Pda
-    alt?: PublicKey | Pda
+    /** System program creates accounts. Must be in the list or init fails. */
     systemProgram?: PublicKey | Pda
 }
 
@@ -62,9 +75,7 @@ export function initStore(
     const resolvedAccounts = {
         payer: { index: 0, isWritable: true as boolean, value: input.payer ?? null },
         store: { index: 1, isWritable: true as boolean, value: input.store ?? null },
-        lzReceiveTypesAccounts: { index: 2, isWritable: true as boolean, value: input.lzReceiveTypesAccounts ?? null },
-        alt: { index: 3, isWritable: false as boolean, value: input.alt ?? null },
-        systemProgram: { index: 4, isWritable: false as boolean, value: input.systemProgram ?? null },
+        systemProgram: { index: 2, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

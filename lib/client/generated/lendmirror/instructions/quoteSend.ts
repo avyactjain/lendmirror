@@ -7,7 +7,7 @@
  */
 
 import { Context, Pda, PublicKey, TransactionBuilder, transactionBuilder } from '@metaplex-foundation/umi'
-import { Serializer, bool, bytes, mapSerializer, string, struct, u32 } from '@metaplex-foundation/umi/serializers'
+import { Serializer, bool, bytes, mapSerializer, struct, u32 } from '@metaplex-foundation/umi/serializers'
 import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners } from '../shared'
 
 // Accounts.
@@ -22,7 +22,8 @@ export type QuoteSendInstructionData = {
     discriminator: Uint8Array
     dstEid: number
     receiver: Uint8Array
-    message: string
+    /** LayerZero payload bytes. Build with [`QuoteSendParams::from_message`]. */
+    message: Uint8Array
     options: Uint8Array
     payInLzToken: boolean
 }
@@ -30,7 +31,8 @@ export type QuoteSendInstructionData = {
 export type QuoteSendInstructionDataArgs = {
     dstEid: number
     receiver: Uint8Array
-    message: string
+    /** LayerZero payload bytes. Build with [`QuoteSendParams::from_message`]. */
+    message: Uint8Array
     options: Uint8Array
     payInLzToken: boolean
 }
@@ -45,7 +47,7 @@ export function getQuoteSendInstructionDataSerializer(): Serializer<
                 ['discriminator', bytes({ size: 8 })],
                 ['dstEid', u32()],
                 ['receiver', bytes({ size: 32 })],
-                ['message', string()],
+                ['message', bytes({ size: u32() })],
                 ['options', bytes({ size: u32() })],
                 ['payInLzToken', bool()],
             ],

@@ -7,18 +7,18 @@
  */
 
 import { Context, Pda, PublicKey, TransactionBuilder, transactionBuilder } from '@metaplex-foundation/umi'
-import { Serializer, bytes, mapSerializer, string, struct, u32, u64 } from '@metaplex-foundation/umi/serializers'
+import { Serializer, bytes, mapSerializer, struct, u32, u64 } from '@metaplex-foundation/umi/serializers'
 import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners } from '../shared'
 
 // Accounts.
 export type SendInstructionAccounts = {
+    /** Who we send to on dst_eid (Ethereum contract, 32 bytes) plus gas options. */
+    peer: PublicKey | Pda
     /**
-     * Configuration for the destination chain. Holds the peer address and any
-     * enforced messaging options.
+     * Our OApp identity. This pubkey is the `sender` in PacketSent.
+     * The Store PDA also "signs" the CPI into the Endpoint (see seeds below).
      */
 
-    peer: PublicKey | Pda
-    /** OApp Store PDA that signs the send instruction */
     store: PublicKey | Pda
     endpoint: PublicKey | Pda
 }
@@ -27,7 +27,8 @@ export type SendInstructionAccounts = {
 export type SendInstructionData = {
     discriminator: Uint8Array
     dstEid: number
-    message: string
+    /** LayerZero payload bytes. Build with [`SendMessageParams::from_message`]. */
+    message: Uint8Array
     options: Uint8Array
     nativeFee: bigint
     lzTokenFee: bigint
@@ -35,7 +36,8 @@ export type SendInstructionData = {
 
 export type SendInstructionDataArgs = {
     dstEid: number
-    message: string
+    /** LayerZero payload bytes. Build with [`SendMessageParams::from_message`]. */
+    message: Uint8Array
     options: Uint8Array
     nativeFee: number | bigint
     lzTokenFee: number | bigint
@@ -47,7 +49,7 @@ export function getSendInstructionDataSerializer(): Serializer<SendInstructionDa
             [
                 ['discriminator', bytes({ size: 8 })],
                 ['dstEid', u32()],
-                ['message', string()],
+                ['message', bytes({ size: u32() })],
                 ['options', bytes({ size: u32() })],
                 ['nativeFee', u64()],
                 ['lzTokenFee', u64()],

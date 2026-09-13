@@ -1,4 +1,5 @@
 use crate::*;
+use crate::msg_codec::LzMessage;
 use anchor_lang::prelude::*;
 use oapp::endpoint::{
     instructions::QuoteParams, state::EndpointSettings, ENDPOINT_SEED,
@@ -26,7 +27,7 @@ pub struct QuoteSend<'info> {
 impl<'info> QuoteSend<'info> {
     pub fn apply(ctx: &Context<QuoteSend>, params: &QuoteSendParams) -> Result<MessagingFee> {
         // Encode the payload for quoting
-        let message = msg_codec::encode(&params.message);
+        let message = params.message.encode();
 
         // Ask the Endpoint how much a send would cost
         let quote_params = QuoteParams {
@@ -49,7 +50,26 @@ impl<'info> QuoteSend<'info> {
 pub struct QuoteSendParams {
     pub dst_eid: u32,
     pub receiver: [u8; 32],
-    pub message: String,
+    /// LayerZero payload bytes. Build with [`QuoteSendParams::from_message`].
+    pub message: Vec<u8>,
     pub options: Vec<u8>,
     pub pay_in_lz_token: bool,
+}
+
+impl QuoteSendParams {
+    pub fn from_message<M: LzMessage>(
+        dst_eid: u32,
+        receiver: [u8; 32],
+        message: &M,
+        options: Vec<u8>,
+        pay_in_lz_token: bool,
+    ) -> Self {
+        Self {
+            dst_eid,
+            receiver,
+            message: message.encode(),
+            options,
+            pay_in_lz_token,
+        }
+    }
 }

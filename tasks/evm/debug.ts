@@ -7,21 +7,34 @@ interface DebugTaskArgs {
     contractName: string
 }
 
+type LastPrice = {
+    pythAccount: string
+    feedId: string
+    price: { toString(): string }
+    conf: { toString(): string }
+    exponent: { toString(): string }
+    publishTime: { toString(): string }
+}
+
 const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatRuntimeEnvironment) => {
     const contract = await hre.ethers.getContract(contractName)
-    const readableContract = contract as unknown as { data: () => Promise<string> }
 
-    const storedData = await readableContract.data()
+    const last = (await (contract as unknown as { lastPrice: () => Promise<LastPrice> }).lastPrice()) as LastPrice
 
-    DebugLogger.header('EVM OApp Store Information')
+    DebugLogger.header('EVM OApp last Pyth snapshot')
     DebugLogger.keyValue('Network', hre.network.name)
     DebugLogger.keyValue('Contract Name', contractName)
     DebugLogger.keyValue('Contract Address', contract.address)
-    DebugLogger.keyValue('String', storedData)
+    DebugLogger.keyValue('pythAccount', last.pythAccount)
+    DebugLogger.keyValue('feedId', last.feedId)
+    DebugLogger.keyValue('price', last.price.toString())
+    DebugLogger.keyValue('conf', last.conf.toString())
+    DebugLogger.keyValue('exponent', last.exponent.toString())
+    DebugLogger.keyValue('publishTime', last.publishTime.toString())
     DebugLogger.separator()
 }
 
-task('lz:oapp:evm:debug', 'Reads the stored string data from the EVM OApp', action).addOptionalParam(
+task('lz:oapp:evm:debug', 'Reads the last Pyth snapshot on the EVM OApp', action).addOptionalParam(
     'contractName',
     'Name of the deployed EVM OApp contract (default: LendMirror)',
     'LendMirror',

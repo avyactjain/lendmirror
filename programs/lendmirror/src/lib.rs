@@ -5,26 +5,22 @@ mod state;
 
 use anchor_lang::prelude::*;
 use instructions::*;
-use oapp::{
-    endpoint::MessagingFee,
-    LzReceiveParams,
-    lz_receive_types_v2::{LzReceiveTypesV2Accounts, LzReceiveTypesV2Result}
-};
+use oapp::endpoint::MessagingFee;
 use solana_helper::program_id_from_env;
 use state::*;
 
 // to build in verifiable mode and using environment variable (what the README instructs), run:
 // anchor build -v -e LENDMIRROR_ID=<OAPP_PROGRAM_ID>
 // to build in normal mode and using environment, run:
-// LENDMIRROR_ID=$PROGRAM_ID anchor build 
+// LENDMIRROR_ID=$PROGRAM_ID anchor build
 declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_id_from_env!(
     "LENDMIRROR_ID",
     "H84BoBhYfCsLofgrAwQWt9YmFZRPKLkNznzfmeJS1xj1" // It's not necessary to change the ID here if you are building using environment variable
 )));
 
-const LZ_RECEIVE_TYPES_SEED: &[u8] = b"LzReceiveTypes"; // The Executor relies on this exact seed to derive the LzReceiveTypes PDA. Keep it the same.
-const STORE_SEED: &[u8] = b"Store"; // You are free to edit this seed.
-const PEER_SEED: &[u8] = b"Peer"; // Not used by the Executor.
+const STORE_SEED: &[u8] = b"LendMirrorStore";
+const PEER_SEED: &[u8] = b"LendMirrorPeer";
+const PYTH_PRICE_SEED: &[u8] = b"PythPrice";
 
 /// LendMirror Piece 2 — Solana side of a LayerZero OApp.
 ///
@@ -68,24 +64,13 @@ pub mod lendmirror {
         Send::apply(&mut ctx, &params)
     }
 
-    // Starter leftover: receive ON Solana. LendMirror does not use this for the loan.
-    pub fn lz_receive(mut ctx: Context<LzReceive>, params: LzReceiveParams) -> Result<()> {
-        LzReceive::apply(&mut ctx, &params)
-    }
+    // Get the Pyth price for a given feed id and set it in the stores
+    pub fn get_pyth_price(
+        mut ctx: Context<GetPythPrice>,
+        params: GetPythPriceParams,
+    ) -> Result<PythPrice> {
+        let pyth_price = GetPythPrice::apply(&mut ctx, &params)?;
 
-    pub fn lz_receive_types_v2(
-        ctx: Context<LzReceiveTypesV2>,
-        params: LzReceiveParams,
-    ) -> Result<LzReceiveTypesV2Result> {
-        LzReceiveTypesV2::apply(&ctx, &params)
+        Ok(pyth_price)
     }
-
-    // returns the version and the accounts required to execute lz_receive_types_v2
-    pub fn lz_receive_types_info(
-        ctx: Context<LzReceiveTypesInfo>,
-        params: LzReceiveParams,
-    ) -> Result<(u8, LzReceiveTypesV2Accounts)> {
-        LzReceiveTypesInfo::apply(&ctx, &params)
-    }
-
 }

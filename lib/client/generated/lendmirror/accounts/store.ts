@@ -9,6 +9,8 @@
 import {
     Account,
     Context,
+    Option,
+    OptionOrNullable,
     Pda,
     PublicKey,
     RpcAccount,
@@ -23,11 +25,12 @@ import {
     Serializer,
     bytes,
     mapSerializer,
+    option,
     publicKey as publicKeySerializer,
-    string,
     struct,
     u8,
 } from '@metaplex-foundation/umi/serializers'
+import { PythPrice, PythPriceArgs, getPythPriceSerializer } from '../types'
 
 export type Store = Account<StoreAccountData>
 
@@ -36,10 +39,15 @@ export type StoreAccountData = {
     admin: PublicKey
     bump: number
     endpointProgram: PublicKey
-    string: string
+    priceStore: Option<PythPrice>
 }
 
-export type StoreAccountDataArgs = { admin: PublicKey; bump: number; endpointProgram: PublicKey; string: string }
+export type StoreAccountDataArgs = {
+    admin: PublicKey
+    bump: number
+    endpointProgram: PublicKey
+    priceStore: OptionOrNullable<PythPriceArgs>
+}
 
 export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs, StoreAccountData> {
     return mapSerializer<StoreAccountDataArgs, any, StoreAccountData>(
@@ -49,7 +57,7 @@ export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs
                 ['admin', publicKeySerializer()],
                 ['bump', u8()],
                 ['endpointProgram', publicKeySerializer()],
-                ['string', string()],
+                ['priceStore', option(getPythPriceSerializer())],
             ],
             { description: 'StoreAccountData' }
         ),
@@ -117,13 +125,13 @@ export function getStoreGpaBuilder(context: Pick<Context, 'rpc' | 'programs'>) {
             admin: PublicKey
             bump: number
             endpointProgram: PublicKey
-            string: string
+            priceStore: OptionOrNullable<PythPriceArgs>
         }>({
             discriminator: [0, bytes({ size: 8 })],
             admin: [8, publicKeySerializer()],
             bump: [40, u8()],
             endpointProgram: [41, publicKeySerializer()],
-            string: [73, string()],
+            priceStore: [73, option(getPythPriceSerializer())],
         })
         .deserializeUsing<Store>((account) => deserializeStore(account))
         .whereField('discriminator', new Uint8Array([130, 48, 247, 244, 182, 191, 30, 26]))

@@ -1,5 +1,4 @@
 use crate::*;
-use anchor_lang::solana_program::address_lookup_table::program::ID as ALT_PROGRAM_ID;
 use oapp::endpoint::{instructions::RegisterOAppParams, ID as ENDPOINT_ID};
 
 /// Anchor: #[derive(Accounts)] writes the checks that run BEFORE apply().
@@ -10,7 +9,6 @@ use oapp::endpoint::{instructions::RegisterOAppParams, ID as ENDPOINT_ID};
 ///
 /// 'info = these account refs live only for this instruction.
 #[derive(Accounts)]
-#[instruction(params: InitStoreParams)]
 pub struct InitStore<'info> {
     /// mut = writable (lamports leave this account to pay rent).
     /// Signer = this pubkey signed the tx.
@@ -25,25 +23,12 @@ pub struct InitStore<'info> {
     #[account(
         init,
         payer = payer,
-        space = Store::SIZE,
+        space = 8 + Store::INIT_SPACE,
         seeds = [STORE_SEED],
         bump
     )]
     pub store: Account<'info, Store>,
-    /// Second PDA. Seed includes the new store address, so it is 1:1 with Store.
-    /// Executor looks this up by this exact seed string.
-    #[account(
-        init,
-        payer = payer,
-        space = LzReceiveTypesAccounts::SIZE,
-        seeds = [LZ_RECEIVE_TYPES_SEED, &store.key().to_bytes()],
-        bump
-    )]
-    pub lz_receive_types_accounts: Account<'info, LzReceiveTypesAccounts>,
-    /// Optional. owner = only accept if this program owns the account.
-    /// UncheckedAccount = do not deserialize a typed layout.
-    #[account(owner = ALT_PROGRAM_ID)]
-    pub alt: Option<UncheckedAccount<'info>>,
+
     /// System program creates accounts. Must be in the list or init fails.
     pub system_program: Program<'info, System>,
 }
@@ -56,14 +41,9 @@ impl InitStore<'_> {
         ctx.accounts.store.admin = params.admin;
         ctx.accounts.store.bump = ctx.bumps.store;
         ctx.accounts.store.endpoint_program = params.endpoint;
-        ctx.accounts.lz_receive_types_accounts.store = ctx.accounts.store.key();
-        ctx.accounts.lz_receive_types_accounts.alt =
-            ctx.accounts.alt.as_ref().map(|a| a.key()).unwrap_or_default();
-        ctx.accounts.lz_receive_types_accounts.bump = ctx.bumps.lz_receive_types_accounts;
-        // the above lines are required for all OApp implementations
 
         // the line below is specific to this string-passing example
-        ctx.accounts.store.string = "Nothing received yet.".to_string();
+        ctx.accounts.store.price_store = None;
 
         // Prepare the delegate address for the OApp registration.
         let register_params = RegisterOAppParams { delegate: ctx.accounts.store.admin };

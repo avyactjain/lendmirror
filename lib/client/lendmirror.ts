@@ -31,11 +31,63 @@ import * as accounts from './generated/lendmirror/accounts'
 import * as errors from './generated/lendmirror/errors'
 import * as instructions from './generated/lendmirror/instructions'
 import * as types from './generated/lendmirror/types'
-import { LendMirrorPDA as LendMirrorPDA } from './pda'
+import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
 export { accounts, errors, instructions, types }
 export { LENDMIRROR_PROGRAM_ID } from './generated/lendmirror'
+
+export const PYTH_PRICE_BODY_LEN = 92
+
+/** Same 32-byte length header as `msg_codec::encode` on Solana. */
+export function encodeLzString(message: string): Uint8Array {
+    const body = Buffer.from(message, 'utf8')
+    const out = Buffer.alloc(32 + body.length)
+    out.writeUInt32BE(body.length, 28)
+    body.copy(out, 32)
+    return Uint8Array.from(out)
+}
+
+export type PythPriceFields = {
+    pythAccount: Uint8Array
+    feedId: Uint8Array
+    price: bigint
+    conf: bigint
+    exponent: number
+    publishTime: bigint
+}
+
+/** Same layout as `impl LzMessage for PythPrice` on Solana. Do not wrap this again with encodeLzString. */
+export function encodePythPrice(price: PythPriceFields): Uint8Array {
+    if (price.pythAccount.length !== 32) {
+        throw new Error('pythAccount must be 32 bytes')
+    }
+    if (price.feedId.length !== 32) {
+        throw new Error('feedId must be 32 bytes')
+    }
+    const out = new Uint8Array(32 + PYTH_PRICE_BODY_LEN)
+    const view = new DataView(out.buffer)
+    view.setUint32(28, PYTH_PRICE_BODY_LEN)
+    out.set(price.pythAccount, 32)
+    out.set(price.feedId, 64)
+    view.setBigInt64(96, price.price)
+    view.setBigUint64(104, price.conf)
+    view.setInt32(112, price.exponent)
+    view.setBigInt64(116, price.publishTime)
+    return out
+}
+
+export function parseFeedId(hex: string): Uint8Array {
+    const stripped = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex
+    if (stripped.length !== 64) {
+        throw new Error('feedId must be 32 bytes hex (64 chars)')
+    }
+    const out = Buffer.from(stripped, 'hex')
+    if (out.length !== 32) {
+        throw new Error('feedId must be 32 bytes hex')
+    }
+    return Uint8Array.from(out)
+}
 
 const ENDPOINT_PROGRAM_ID: PublicKey = EndpointProgram.ENDPOINT_PROGRAM_ID
 
@@ -94,7 +146,7 @@ export class LendMirror {
         return accounts.safeFetchStore({ rpc }, count, { commitment })
     }
 
-    initStore(payer: Signer, admin: PublicKey, alt?: PublicKey): WrappedInstruction {
+    initStore(payer: Signer, admin: PublicKey): WrappedInstruction {
         const [oapp] = this.pda.oapp()
         const remainingAccounts = this.endpointSDK.getRegisterOappIxAccountMetaForCPI(payer.publicKey, oapp)
         return instructions
@@ -103,15 +155,27 @@ export class LendMirror {
                 {
                     payer,
                     store: oapp,
-                    lzReceiveTypesAccounts: this.pda.lzReceiveTypesAccounts()[0],
-                    alt,
-
-                    // args
                     admin: admin,
                     endpoint: this.endpointSDK.programId,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
+    }
+
+    getPythPrice(payer: Signer, feedId: Uint8Array, priceFeed?: PublicKey, shardId = 0): WrappedInstruction {
+        const [store] = this.pda.oapp()
+        const [priceStore] = this.pda.pythPrice(feedId)
+        const [derivedFeed] = pythPushFeedAccount(feedId, shardId)
+        return instructions.getPythPrice(
+            { payer, programs: this.programRepo },
+            {
+                payer,
+                priceFeed: priceFeed ?? derivedFeed,
+                priceStore,
+                store,
+                feedId,
+            }
+        ).items[0]
     }
 
     async send(
@@ -121,12 +185,37 @@ export class LendMirror {
             dstEid: number
             message: string
             options: Uint8Array
-            composeMsg?: Uint8Array
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<WrappedInstruction> {
-        const { dstEid, nativeFee, lzTokenFee, message, options, composeMsg } = params
+        return this.sendPayload(
+            rpc,
+            payer,
+            {
+                dstEid: params.dstEid,
+                message: encodeLzString(params.message),
+                options: params.options,
+                nativeFee: params.nativeFee,
+                lzTokenFee: params.lzTokenFee,
+            },
+            remainingAccounts,
+            commitment
+        )
+    }
+
+    async sendPayload(
+        rpc: RpcInterface,
+        payer: PublicKey,
+        params: EndpointProgram.types.MessagingFee & {
+            dstEid: number
+            message: Uint8Array
+            options: Uint8Array
+        },
+        remainingAccounts?: AccountMeta[],
+        commitment: Commitment = 'confirmed'
+    ): Promise<WrappedInstruction> {
+        const { dstEid, nativeFee, lzTokenFee, message, options } = params
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
@@ -157,10 +246,8 @@ export class LendMirror {
                     store: oapp,
                     peer: peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
-                    // args
                     dstEid,
                     message,
-                    composeMsg: composeMsg ?? null,
                     options,
                     nativeFee: nativeFee,
                     lzTokenFee: lzTokenFee ?? 0,
@@ -215,17 +302,40 @@ export class LendMirror {
             dstEid: number
             message: string
             options: Uint8Array
-            composeMsg?: Uint8Array
             payInLzToken: boolean
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<EndpointProgram.types.MessagingFee> {
-        const { dstEid, message, options, payInLzToken, composeMsg } = params
+        return this.quotePayload(
+            rpc,
+            payer,
+            {
+                dstEid: params.dstEid,
+                message: encodeLzString(params.message),
+                options: params.options,
+                payInLzToken: params.payInLzToken,
+            },
+            remainingAccounts,
+            commitment
+        )
+    }
+
+    async quotePayload(
+        rpc: RpcInterface,
+        payer: PublicKey,
+        params: {
+            dstEid: number
+            message: Uint8Array
+            options: Uint8Array
+            payInLzToken: boolean
+        },
+        remainingAccounts?: AccountMeta[],
+        commitment: Commitment = 'confirmed'
+    ): Promise<EndpointProgram.types.MessagingFee> {
+        const { dstEid, message, options, payInLzToken } = params
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
-
-        // const [endpointSettingPDA] = endpoint.deriver.setting()
         const [peer] = this.pda.peer(dstEid)
         const receiverInfo = await accounts.fetchPeerConfig({ rpc }, peer, { commitment })
         const packetPath: SolanaPacketPath = {
@@ -251,10 +361,8 @@ export class LendMirror {
                     store: oapp,
                     peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
-                    // args
                     dstEid,
                     message,
-                    composeMsg: composeMsg ?? null,
                     options,
                     payInLzToken,
                     receiver: packetPath.receiver,

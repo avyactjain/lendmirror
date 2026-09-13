@@ -1,4 +1,5 @@
 use crate::*;
+use crate::msg_codec::LzMessage;
 use anchor_lang::prelude::*;
 use oapp::endpoint::{
     instructions::SendParams, state::EndpointSettings, ENDPOINT_SEED, ID as ENDPOINT_ID,
@@ -27,10 +28,10 @@ pub struct Send<'info> {
     #[account(seeds = [ENDPOINT_SEED], bump = endpoint.bump, seeds::program = ENDPOINT_ID)]
     pub endpoint: Account<'info, EndpointSettings>,
 }
+
 impl<'info> Send<'info> {
     pub fn apply(ctx: &mut Context<Send>, params: &SendMessageParams) -> Result<()> {
-        // Same byte layout as contracts/libs/StringMsgCodec.sol
-        let message = msg_codec::encode(&params.message);
+        let message = params.message.encode();
         // Store PDA signs the Endpoint CPI. Without this, Endpoint would reject us.
         let seeds: &[&[u8]] = &[STORE_SEED, &[ctx.accounts.store.bump]];
 
@@ -42,7 +43,7 @@ impl<'info> Send<'info> {
                 .accounts
                 .peer
                 .enforced_options
-                .combine_options( &None::<Vec<u8>>, &params.options)?,
+                .combine_options(&None::<Vec<u8>>, &params.options)?,
             native_fee: params.native_fee, // SOL, from quote_send
             lz_token_fee: params.lz_token_fee,
         };
@@ -62,8 +63,27 @@ impl<'info> Send<'info> {
 #[derive(Clone, AnchorSerialize, AnchorDeserialize)]
 pub struct SendMessageParams {
     pub dst_eid: u32,
-    pub message: String,
+    /// LayerZero payload bytes. Build with [`SendMessageParams::from_message`].
+    pub message: Vec<u8>,
     pub options: Vec<u8>,
     pub native_fee: u64, // lamports. The tx fee-payer (your wallet) actually pays.
     pub lz_token_fee: u64,
+}
+
+impl SendMessageParams {
+    pub fn from_message<M: LzMessage>(
+        dst_eid: u32,
+        message: &M,
+        options: Vec<u8>,
+        native_fee: u64,
+        lz_token_fee: u64,
+    ) -> Self {
+        Self {
+            dst_eid,
+            message: message.encode(),
+            options,
+            native_fee,
+            lz_token_fee,
+        }
+    }
 }

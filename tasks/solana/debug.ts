@@ -1,4 +1,4 @@
-import { publicKey } from '@metaplex-foundation/umi'
+import { publicKey, unwrapOption } from '@metaplex-foundation/umi'
 import { toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import { Keypair, PublicKey } from '@solana/web3.js'
 import { task } from 'hardhat/config'
@@ -81,7 +81,17 @@ task('lz:oapp:solana:debug', 'Prints OApp Store and Peer information')
             DebugLogger.keyValue('Owner', storeInfo.header.owner)
             DebugLogger.keyValue('Admin', storeInfo.admin)
             DebugLogger.keyValue('Endpoint Program', storeInfo.endpointProgram)
-            DebugLogger.keyValue('String', storeInfo.string)
+            const snap = unwrapOption(storeInfo.priceStore)
+            if (snap) {
+                DebugLogger.keyValue('pythAccount', String(snap.pythAccount))
+                DebugLogger.keyValue('feedId', Buffer.from(snap.feedId).toString('hex'))
+                DebugLogger.keyValue('price', String(snap.price))
+                DebugLogger.keyValue('conf', String(snap.conf))
+                DebugLogger.keyValue('exponent', String(snap.exponent))
+                DebugLogger.keyValue('publishTime', String(snap.publishTime))
+            } else {
+                DebugLogger.keyValue('priceStore', 'none')
+            }
             DebugLogger.separator()
         }
 

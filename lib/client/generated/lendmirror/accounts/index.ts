@@ -7,6 +7,7 @@
  */
 
 export * from './endpointSettings'
-export * from './lzReceiveTypesAccounts'
 export * from './peerConfig'
+export * from './priceUpdateV2'
+export * from './pythPriceAccount'
 export * from './store'

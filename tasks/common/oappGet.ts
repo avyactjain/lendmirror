@@ -25,11 +25,11 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
         if (isSolanaEid(eid)) {
             const solanaState = await fetchSolanaOappState(eid)
             console.log('Solana OApp PDA:', solanaState._oappPda)
-            console.log('Solana OApp Data:', solanaState.string)
+            console.log('Solana last Pyth snapshot:', solanaState.priceStore)
         } else if (isEvmEid(eid)) {
             const evm = await fetchEvmOappState(eid, hre, contractName)
             console.log('EVM OApp Address:', evm.address)
-            console.log('EVM OApp Data:', evm.data)
+            console.log('EVM last Pyth snapshot:', evm.lastPrice)
         } else {
             console.log('Unknown endpoint type:', eid)
         }
@@ -41,10 +41,10 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
 
 async function fetchEvmOappState(eid: EndpointId, hre: HardhatRuntimeEnvironment, contractName: string) {
     const contract = await hre.ethers.getContract(contractName)
+    const lastPrice = await (contract as unknown as { lastPrice: () => Promise<unknown> }).lastPrice()
     return {
         address: contract.address,
-        // @ts-expect-error data method exists on LendMirror
-        data: await contract.data(),
+        lastPrice,
     }
 }
 
