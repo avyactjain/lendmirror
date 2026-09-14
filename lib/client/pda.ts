@@ -4,6 +4,8 @@ import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 
 import { OmniAppPDA } from '@layerzerolabs/lz-solana-sdk-v2/umi'
 
+import { u16Le, u32Le } from './jupiter'
+
 const eddsa = createWeb3JsEddsa()
 
 export const LZ_RECEIVE_TYPES_SEED = 'LzReceiveTypes'
@@ -25,6 +27,7 @@ export class LendMirrorPDA extends OmniAppPDA {
     static STORE_SEED = 'LendMirrorStore'
     static PEER_SEED = 'LendMirrorPeer'
     static PYTH_PRICE_SEED = 'PythPrice'
+    static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'
 
     constructor(public readonly programId: PublicKey) {
@@ -68,5 +71,14 @@ export class LendMirrorPDA extends OmniAppPDA {
             throw new Error('feedId must be 32 bytes')
         }
         return eddsa.findPda(this.programId, [Buffer.from(LendMirrorPDA.PYTH_PRICE_SEED, 'utf8'), feedId])
+    }
+
+    // seeds = [JUP_POSITION_SEED, vault_id le, nft_id le]
+    jupPosition(vaultId: number, nftId: number): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.JUP_POSITION_SEED, 'utf8'),
+            u16Le(vaultId),
+            u32Le(nftId),
+        ])
     }
 }

@@ -11,6 +11,7 @@ import {
     Signer,
     WrappedInstruction,
     createNullRpc,
+    publicKey,
 } from '@metaplex-foundation/umi'
 import { createDefaultProgramRepository } from '@metaplex-foundation/umi-program-repository'
 import { toWeb3JsInstruction } from '@metaplex-foundation/umi-web3js-adapters'
@@ -31,13 +32,22 @@ import * as accounts from './generated/lendmirror/accounts'
 import * as errors from './generated/lendmirror/errors'
 import * as instructions from './generated/lendmirror/instructions'
 import * as types from './generated/lendmirror/types'
+import {
+    decodeJupiterPositionTick,
+    jupiterPositionPda,
+    jupiterTickPda,
+    jupiterVaultConfigPda,
+    jupiterVaultStatePda,
+} from './jupiter'
 import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
 export { accounts, errors, instructions, types }
-export { LENDMIRROR_PROGRAM_ID } from './generated/lendmirror'
+export const JUPITER_VAULTS_MAINNET = publicKey('jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi')
+export const JUPITER_VAULTS_DEVNET = publicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 
 export const PYTH_PRICE_BODY_LEN = 92
+export const POSITION_SNAPSHOT_BODY_LEN = 200
 
 /** Same 32-byte length header as `msg_codec::encode` on Solana. */
 export function encodeLzString(message: string): Uint8Array {
@@ -74,6 +84,61 @@ export function encodePythPrice(price: PythPriceFields): Uint8Array {
     view.setBigUint64(104, price.conf)
     view.setInt32(112, price.exponent)
     view.setBigInt64(116, price.publishTime)
+    return out
+}
+
+export type PositionSnapshotFields = {
+    position: Uint8Array
+    vaultId: number
+    nftId: number
+    positionMint: Uint8Array
+    supplyToken: Uint8Array
+    borrowToken: Uint8Array
+    colRaw: bigint
+    debtRaw: bigint
+    dustDebt: bigint
+    netDebt: bigint
+    tick: number
+    tickId: number
+    isSupplyOnly: boolean
+    isLiquidated: boolean
+    vaultSupplyExchangePrice: bigint
+    vaultBorrowExchangePrice: bigint
+    snapshotTime: bigint
+}
+
+function require32(name: string, bytes: Uint8Array) {
+    if (bytes.length !== 32) {
+        throw new Error(`${name} must be 32 bytes`)
+    }
+}
+
+/** Same layout as `impl LzMessage for PositionSnapshot` on Solana. Do not wrap this again with encodeLzString. */
+export function encodePositionSnapshot(snap: PositionSnapshotFields): Uint8Array {
+    require32('position', snap.position)
+    require32('positionMint', snap.positionMint)
+    require32('supplyToken', snap.supplyToken)
+    require32('borrowToken', snap.borrowToken)
+    const out = new Uint8Array(32 + POSITION_SNAPSHOT_BODY_LEN)
+    const view = new DataView(out.buffer)
+    view.setUint32(28, POSITION_SNAPSHOT_BODY_LEN)
+    out.set(snap.position, 32)
+    view.setUint16(64, snap.vaultId)
+    view.setUint32(66, snap.nftId)
+    out.set(snap.positionMint, 70)
+    out.set(snap.supplyToken, 102)
+    out.set(snap.borrowToken, 134)
+    view.setBigUint64(166, snap.colRaw)
+    view.setBigUint64(174, snap.debtRaw)
+    view.setBigUint64(182, snap.dustDebt)
+    view.setBigUint64(190, snap.netDebt)
+    view.setInt32(198, snap.tick)
+    view.setUint32(202, snap.tickId)
+    out[206] = snap.isSupplyOnly ? 1 : 0
+    out[207] = snap.isLiquidated ? 1 : 0
+    view.setBigUint64(208, snap.vaultSupplyExchangePrice)
+    view.setBigUint64(216, snap.vaultBorrowExchangePrice)
+    view.setBigInt64(224, snap.snapshotTime)
     return out
 }
 
@@ -146,7 +211,7 @@ export class LendMirror {
         return accounts.safeFetchStore({ rpc }, count, { commitment })
     }
 
-    initStore(payer: Signer, admin: PublicKey): WrappedInstruction {
+    initStore(payer: Signer, admin: PublicKey, vaultsProgram: PublicKey): WrappedInstruction {
         const [oapp] = this.pda.oapp()
         const remainingAccounts = this.endpointSDK.getRegisterOappIxAccountMetaForCPI(payer.publicKey, oapp)
         return instructions
@@ -157,9 +222,45 @@ export class LendMirror {
                     store: oapp,
                     admin: admin,
                     endpoint: this.endpointSDK.programId,
+                    vaultsProgram,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
+    }
+
+    async getJupiterPosition(
+        rpc: RpcInterface,
+        payer: Signer,
+        vaultId: number,
+        nftId: number,
+        vaultsProgram: PublicKey
+    ): Promise<WrappedInstruction> {
+        const [store] = this.pda.oapp()
+        const [position] = jupiterPositionPda(vaultsProgram, vaultId, nftId)
+        const [vaultState] = jupiterVaultStatePda(vaultsProgram, vaultId)
+        const [vaultConfig] = jupiterVaultConfigPda(vaultsProgram, vaultId)
+        const [positionStore] = this.pda.jupPosition(vaultId, nftId)
+        const positionAccount = await rpc.getAccount(position)
+        if (!positionAccount.exists) {
+            throw new Error(`No Jupiter position for vault ${vaultId} nft ${nftId} (${position})`)
+        }
+        const tick = decodeJupiterPositionTick(positionAccount.data)
+        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, tick)
+        return instructions.getJupiterPosition(
+            { payer, programs: this.programRepo },
+            {
+                payer,
+                store,
+                vaultsProgram,
+                position,
+                vaultState,
+                vaultConfig,
+                tick: tickPda,
+                positionStore,
+                vaultId,
+                nftId,
+            }
+        ).items[0]
     }
 
     getPythPrice(payer: Signer, feedId: Uint8Array, priceFeed?: PublicKey, shardId = 0): WrappedInstruction {

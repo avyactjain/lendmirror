@@ -2,6 +2,7 @@ mod errors;
 mod instructions;
 mod msg_codec;
 mod state;
+mod tick_math;
 
 use anchor_lang::prelude::*;
 use instructions::*;
@@ -21,6 +22,7 @@ declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_
 const STORE_SEED: &[u8] = b"LendMirrorStore";
 const PEER_SEED: &[u8] = b"LendMirrorPeer";
 const PYTH_PRICE_SEED: &[u8] = b"PythPrice";
+const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 
 /// LendMirror Piece 2 — Solana side of a LayerZero OApp.
 ///
@@ -72,5 +74,13 @@ pub mod lendmirror {
         let pyth_price = GetPythPrice::apply(&mut ctx, &params)?;
 
         Ok(pyth_price)
+    }
+
+    // Read Jupiter Lend Position + Tick + VaultState/Config. Does not send.
+    pub fn get_jupiter_position(
+        mut ctx: Context<GetJupiterPosition>,
+        params: GetJupiterPositionParams,
+    ) -> Result<PositionSnapshot> {
+        GetJupiterPosition::apply(&mut ctx, &params)
     }
 }

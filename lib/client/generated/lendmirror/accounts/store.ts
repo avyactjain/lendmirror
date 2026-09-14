@@ -30,7 +30,14 @@ import {
     struct,
     u8,
 } from '@metaplex-foundation/umi/serializers'
-import { PythPrice, PythPriceArgs, getPythPriceSerializer } from '../types'
+import {
+    PositionSnapshot,
+    PositionSnapshotArgs,
+    PythPrice,
+    PythPriceArgs,
+    getPositionSnapshotSerializer,
+    getPythPriceSerializer,
+} from '../types'
 
 export type Store = Account<StoreAccountData>
 
@@ -39,14 +46,20 @@ export type StoreAccountData = {
     admin: PublicKey
     bump: number
     endpointProgram: PublicKey
+    /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
+    vaultsProgram: PublicKey
     priceStore: Option<PythPrice>
+    lastPosition: Option<PositionSnapshot>
 }
 
 export type StoreAccountDataArgs = {
     admin: PublicKey
     bump: number
     endpointProgram: PublicKey
+    /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
+    vaultsProgram: PublicKey
     priceStore: OptionOrNullable<PythPriceArgs>
+    lastPosition: OptionOrNullable<PositionSnapshotArgs>
 }
 
 export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs, StoreAccountData> {
@@ -57,7 +70,9 @@ export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs
                 ['admin', publicKeySerializer()],
                 ['bump', u8()],
                 ['endpointProgram', publicKeySerializer()],
+                ['vaultsProgram', publicKeySerializer()],
                 ['priceStore', option(getPythPriceSerializer())],
+                ['lastPosition', option(getPositionSnapshotSerializer())],
             ],
             { description: 'StoreAccountData' }
         ),
@@ -125,13 +140,17 @@ export function getStoreGpaBuilder(context: Pick<Context, 'rpc' | 'programs'>) {
             admin: PublicKey
             bump: number
             endpointProgram: PublicKey
+            vaultsProgram: PublicKey
             priceStore: OptionOrNullable<PythPriceArgs>
+            lastPosition: OptionOrNullable<PositionSnapshotArgs>
         }>({
             discriminator: [0, bytes({ size: 8 })],
             admin: [8, publicKeySerializer()],
             bump: [40, u8()],
             endpointProgram: [41, publicKeySerializer()],
-            priceStore: [73, option(getPythPriceSerializer())],
+            vaultsProgram: [73, publicKeySerializer()],
+            priceStore: [105, option(getPythPriceSerializer())],
+            lastPosition: [null, option(getPositionSnapshotSerializer())],
         })
         .deserializeUsing<Store>((account) => deserializeStore(account))
         .whereField('discriminator', new Uint8Array([130, 48, 247, 244, 182, 191, 30, 26]))

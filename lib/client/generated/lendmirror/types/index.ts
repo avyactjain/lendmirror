@@ -9,6 +9,7 @@
 export * from './enforcedOptions'
 export * from './messagingFee'
 export * from './peerConfigParam'
+export * from './positionSnapshot'
 export * from './priceFeedMessage'
 export * from './pythPrice'
 export * from './verificationLevel'
