@@ -23,7 +23,7 @@ const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
     {
         msgType: 1,
         optionType: ExecutorOptionType.LZ_RECEIVE,
-        gas: 200_000,
+        gas: 400_000,
     },
 ]
 

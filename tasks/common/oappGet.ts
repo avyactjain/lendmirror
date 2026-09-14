@@ -26,10 +26,12 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
             const solanaState = await fetchSolanaOappState(eid)
             console.log('Solana OApp PDA:', solanaState._oappPda)
             console.log('Solana last Pyth snapshot:', solanaState.priceStore)
+            console.log('Solana last Jupiter snapshot:', solanaState.lastPosition)
         } else if (isEvmEid(eid)) {
             const evm = await fetchEvmOappState(eid, hre, contractName)
             console.log('EVM OApp Address:', evm.address)
             console.log('EVM last Pyth snapshot:', evm.lastPrice)
+            console.log('EVM last Jupiter snapshot:', evm.lastPosition)
         } else {
             console.log('Unknown endpoint type:', eid)
         }
@@ -42,9 +44,11 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
 async function fetchEvmOappState(eid: EndpointId, hre: HardhatRuntimeEnvironment, contractName: string) {
     const contract = await hre.ethers.getContract(contractName)
     const lastPrice = await (contract as unknown as { lastPrice: () => Promise<unknown> }).lastPrice()
+    const lastPosition = await (contract as unknown as { lastPosition: () => Promise<unknown> }).lastPosition()
     return {
         address: contract.address,
         lastPrice,
+        lastPosition,
     }
 }
 

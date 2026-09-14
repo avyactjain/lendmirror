@@ -13,7 +13,7 @@ error PythInvalidBodyLength();
 library PythPriceMsgCodec {
     uint8 public constant VANILLA_TYPE = 1;
     uint256 internal constant HEADER_LEN = 32;
-    uint256 internal constant BODY_LEN = 92;
+    uint256 public constant BODY_LEN = 92;
 
     struct Snapshot {
         bytes32 pythAccount;

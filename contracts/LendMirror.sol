@@ -8,14 +8,25 @@ import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSen
 import { OAppOptionsType3 } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
 import { StringMsgCodec } from "./libs/StringMsgCodec.sol";
 import { PythPriceMsgCodec } from "./libs/PythPriceMsgCodec.sol";
+import { PositionSnapshotMsgCodec } from "./libs/PositionSnapshotMsgCodec.sol";
+
+error UnknownLzPayload();
+error LzPayloadTooShort();
 
 /// Ethereum receiver for LendMirror. Solana `send` is the sender.
-/// `_lzReceive` stores the last Pyth snapshot unpacked from the Solana payload.
+/// `_lzReceive` picks Pyth vs position from the 32-byte length header.
 contract LendMirror is OApp, OAppOptionsType3 {
     constructor(address _endpoint, address _delegate) OApp(_endpoint, _delegate) Ownable(_delegate) {}
 
     /// Last Pyth snapshot received from Solana.
     PythPriceMsgCodec.Snapshot public lastPrice;
+
+    /// Last Jupiter position snapshot received from Solana.
+    PositionSnapshotMsgCodec.Snapshot internal lastPosition_;
+
+    function lastPosition() external view returns (PositionSnapshotMsgCodec.Snapshot memory) {
+        return lastPosition_;
+    }
 
     /// Starter leftover: send a string FROM Ethereum. LendMirror does not use this for prices.
     function send(
@@ -46,6 +57,14 @@ contract LendMirror is OApp, OAppOptionsType3 {
         address /*_executor*/,
         bytes calldata /*_extraData*/
     ) internal override {
-        lastPrice = PythPriceMsgCodec.decode(payload);
+        if (payload.length < 32) revert LzPayloadTooShort();
+        uint256 declared = uint256(bytes32(payload[0:32]));
+        if (declared == PythPriceMsgCodec.BODY_LEN) {
+            lastPrice = PythPriceMsgCodec.decode(payload);
+        } else if (declared == PositionSnapshotMsgCodec.BODY_LEN) {
+            lastPosition_ = PositionSnapshotMsgCodec.decode(payload);
+        } else {
+            revert UnknownLzPayload();
+        }
     }
 }
