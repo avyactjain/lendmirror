@@ -39,9 +39,14 @@ export type InitStoreInstructionAccounts = {
 }
 
 // Data.
-export type InitStoreInstructionData = { discriminator: Uint8Array; admin: PublicKey; endpoint: PublicKey }
+export type InitStoreInstructionData = {
+    discriminator: Uint8Array
+    admin: PublicKey
+    endpoint: PublicKey
+    vaultsProgram: PublicKey
+}
 
-export type InitStoreInstructionDataArgs = { admin: PublicKey; endpoint: PublicKey }
+export type InitStoreInstructionDataArgs = { admin: PublicKey; endpoint: PublicKey; vaultsProgram: PublicKey }
 
 export function getInitStoreInstructionDataSerializer(): Serializer<
     InitStoreInstructionDataArgs,
@@ -53,6 +58,7 @@ export function getInitStoreInstructionDataSerializer(): Serializer<
                 ['discriminator', bytes({ size: 8 })],
                 ['admin', publicKeySerializer()],
                 ['endpoint', publicKeySerializer()],
+                ['vaultsProgram', publicKeySerializer()],
             ],
             { description: 'InitStoreInstructionData' }
         ),

@@ -23,7 +23,10 @@ const action: ActionType<Args> = async ({ programId, eid }, hre: HardhatRuntimeE
     const lendmirrorInstance: lendmirror.LendMirror = new lendmirror.LendMirror(publicKey(programId))
     const [oapp] = lendmirrorInstance.pda.oapp()
     const { umi, umiWalletSigner } = await deriveConnection(eid)
-    const txBuilder = transactionBuilder().add(lendmirrorInstance.initStore(umiWalletSigner, umiWalletSigner.publicKey))
+    const vaultsProgram = isTestnet ? lendmirror.JUPITER_VAULTS_DEVNET : lendmirror.JUPITER_VAULTS_MAINNET
+    const txBuilder = transactionBuilder().add(
+        lendmirrorInstance.initStore(umiWalletSigner, umiWalletSigner.publicKey, vaultsProgram)
+    )
     const tx = await txBuilder.sendAndConfirm(umi)
     console.log(`createTx: ${getExplorerTxLink(bs58.encode(tx.signature), isTestnet)}`)
     saveSolanaDeployment(eid, programId, oapp)

@@ -11,6 +11,7 @@ import {
     Signer,
     WrappedInstruction,
     createNullRpc,
+    publicKey,
 } from '@metaplex-foundation/umi'
 import { createDefaultProgramRepository } from '@metaplex-foundation/umi-program-repository'
 import { toWeb3JsInstruction } from '@metaplex-foundation/umi-web3js-adapters'
@@ -35,7 +36,8 @@ import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
 export { accounts, errors, instructions, types }
-export { LENDMIRROR_PROGRAM_ID } from './generated/lendmirror'
+export const JUPITER_VAULTS_MAINNET = publicKey('jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi')
+export const JUPITER_VAULTS_DEVNET = publicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 
 export const PYTH_PRICE_BODY_LEN = 92
 
@@ -146,7 +148,7 @@ export class LendMirror {
         return accounts.safeFetchStore({ rpc }, count, { commitment })
     }
 
-    initStore(payer: Signer, admin: PublicKey): WrappedInstruction {
+    initStore(payer: Signer, admin: PublicKey, vaultsProgram: PublicKey): WrappedInstruction {
         const [oapp] = this.pda.oapp()
         const remainingAccounts = this.endpointSDK.getRegisterOappIxAccountMetaForCPI(payer.publicKey, oapp)
         return instructions
@@ -157,6 +159,7 @@ export class LendMirror {
                     store: oapp,
                     admin: admin,
                     endpoint: this.endpointSDK.programId,
+                    vaultsProgram,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
