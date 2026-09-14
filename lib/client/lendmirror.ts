@@ -32,6 +32,13 @@ import * as accounts from './generated/lendmirror/accounts'
 import * as errors from './generated/lendmirror/errors'
 import * as instructions from './generated/lendmirror/instructions'
 import * as types from './generated/lendmirror/types'
+import {
+    decodeJupiterPositionTick,
+    jupiterPositionPda,
+    jupiterTickPda,
+    jupiterVaultConfigPda,
+    jupiterVaultStatePda,
+} from './jupiter'
 import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
@@ -163,6 +170,41 @@ export class LendMirror {
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
+    }
+
+    async getJupiterPosition(
+        rpc: RpcInterface,
+        payer: Signer,
+        vaultId: number,
+        nftId: number,
+        vaultsProgram: PublicKey
+    ): Promise<WrappedInstruction> {
+        const [store] = this.pda.oapp()
+        const [position] = jupiterPositionPda(vaultsProgram, vaultId, nftId)
+        const [vaultState] = jupiterVaultStatePda(vaultsProgram, vaultId)
+        const [vaultConfig] = jupiterVaultConfigPda(vaultsProgram, vaultId)
+        const [positionStore] = this.pda.jupPosition(vaultId, nftId)
+        const positionAccount = await rpc.getAccount(position)
+        if (!positionAccount.exists) {
+            throw new Error(`No Jupiter position for vault ${vaultId} nft ${nftId} (${position})`)
+        }
+        const tick = decodeJupiterPositionTick(positionAccount.data)
+        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, tick)
+        return instructions.getJupiterPosition(
+            { payer, programs: this.programRepo },
+            {
+                payer,
+                store,
+                vaultsProgram,
+                position,
+                vaultState,
+                vaultConfig,
+                tick: tickPda,
+                positionStore,
+                vaultId,
+                nftId,
+            }
+        ).items[0]
     }
 
     getPythPrice(payer: Signer, feedId: Uint8Array, priceFeed?: PublicKey, shardId = 0): WrappedInstruction {
