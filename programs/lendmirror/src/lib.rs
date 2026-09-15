@@ -16,7 +16,7 @@ use state::*;
 // LENDMIRROR_ID=$PROGRAM_ID anchor build
 declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_id_from_env!(
     "LENDMIRROR_ID",
-    "H84BoBhYfCsLofgrAwQWt9YmFZRPKLkNznzfmeJS1xj1" // It's not necessary to change the ID here if you are building using environment variable
+    "GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1"
 )));
 
 const STORE_SEED: &[u8] = b"LendMirrorStore";
