@@ -7,7 +7,6 @@
  */
 
 export * from './getJupiterPosition'
-export * from './getPythPrice'
 export * from './initStore'
 export * from './quoteSend'
 export * from './send'

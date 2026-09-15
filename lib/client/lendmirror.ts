@@ -39,53 +39,14 @@ import {
     jupiterVaultConfigPda,
     jupiterVaultStatePda,
 } from './jupiter'
-import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
+import { LendMirrorPDA as LendMirrorPDA } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
 export { accounts, errors, instructions, types }
 export const JUPITER_VAULTS_MAINNET = publicKey('jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi')
 export const JUPITER_VAULTS_DEVNET = publicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 
-export const PYTH_PRICE_BODY_LEN = 92
 export const POSITION_SNAPSHOT_BODY_LEN = 200
-
-/** Same 32-byte length header as `msg_codec::encode` on Solana. */
-export function encodeLzString(message: string): Uint8Array {
-    const body = Buffer.from(message, 'utf8')
-    const out = Buffer.alloc(32 + body.length)
-    out.writeUInt32BE(body.length, 28)
-    body.copy(out, 32)
-    return Uint8Array.from(out)
-}
-
-export type PythPriceFields = {
-    pythAccount: Uint8Array
-    feedId: Uint8Array
-    price: bigint
-    conf: bigint
-    exponent: number
-    publishTime: bigint
-}
-
-/** Same layout as `impl LzMessage for PythPrice` on Solana. Do not wrap this again with encodeLzString. */
-export function encodePythPrice(price: PythPriceFields): Uint8Array {
-    if (price.pythAccount.length !== 32) {
-        throw new Error('pythAccount must be 32 bytes')
-    }
-    if (price.feedId.length !== 32) {
-        throw new Error('feedId must be 32 bytes')
-    }
-    const out = new Uint8Array(32 + PYTH_PRICE_BODY_LEN)
-    const view = new DataView(out.buffer)
-    view.setUint32(28, PYTH_PRICE_BODY_LEN)
-    out.set(price.pythAccount, 32)
-    out.set(price.feedId, 64)
-    view.setBigInt64(96, price.price)
-    view.setBigUint64(104, price.conf)
-    view.setInt32(112, price.exponent)
-    view.setBigInt64(116, price.publishTime)
-    return out
-}
 
 export type PositionSnapshotFields = {
     position: Uint8Array
@@ -113,7 +74,7 @@ function require32(name: string, bytes: Uint8Array) {
     }
 }
 
-/** Same layout as `impl LzMessage for PositionSnapshot` on Solana. Do not wrap this again with encodeLzString. */
+/** Same layout as `impl LzMessage for PositionSnapshot` on Solana. */
 export function encodePositionSnapshot(snap: PositionSnapshotFields): Uint8Array {
     require32('position', snap.position)
     require32('positionMint', snap.positionMint)
@@ -140,18 +101,6 @@ export function encodePositionSnapshot(snap: PositionSnapshotFields): Uint8Array
     view.setBigUint64(216, snap.vaultBorrowExchangePrice)
     view.setBigInt64(224, snap.snapshotTime)
     return out
-}
-
-export function parseFeedId(hex: string): Uint8Array {
-    const stripped = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex
-    if (stripped.length !== 64) {
-        throw new Error('feedId must be 32 bytes hex (64 chars)')
-    }
-    const out = Buffer.from(stripped, 'hex')
-    if (out.length !== 32) {
-        throw new Error('feedId must be 32 bytes hex')
-    }
-    return Uint8Array.from(out)
 }
 
 const ENDPOINT_PROGRAM_ID: PublicKey = EndpointProgram.ENDPOINT_PROGRAM_ID
@@ -263,48 +212,6 @@ export class LendMirror {
         ).items[0]
     }
 
-    getPythPrice(payer: Signer, feedId: Uint8Array, priceFeed?: PublicKey, shardId = 0): WrappedInstruction {
-        const [store] = this.pda.oapp()
-        const [priceStore] = this.pda.pythPrice(feedId)
-        const [derivedFeed] = pythPushFeedAccount(feedId, shardId)
-        return instructions.getPythPrice(
-            { payer, programs: this.programRepo },
-            {
-                payer,
-                priceFeed: priceFeed ?? derivedFeed,
-                priceStore,
-                store,
-                feedId,
-            }
-        ).items[0]
-    }
-
-    async send(
-        rpc: RpcInterface,
-        payer: PublicKey,
-        params: EndpointProgram.types.MessagingFee & {
-            dstEid: number
-            message: string
-            options: Uint8Array
-        },
-        remainingAccounts?: AccountMeta[],
-        commitment: Commitment = 'confirmed'
-    ): Promise<WrappedInstruction> {
-        return this.sendPayload(
-            rpc,
-            payer,
-            {
-                dstEid: params.dstEid,
-                message: encodeLzString(params.message),
-                options: params.options,
-                nativeFee: params.nativeFee,
-                lzTokenFee: params.lzTokenFee,
-            },
-            remainingAccounts,
-            commitment
-        )
-    }
-
     async sendPayload(
         rpc: RpcInterface,
         payer: PublicKey,
@@ -394,32 +301,6 @@ export class LendMirror {
                 config,
             }
         ).items[0]
-    }
-
-    async quote(
-        rpc: RpcInterface,
-        payer: PublicKey,
-        params: {
-            dstEid: number
-            message: string
-            options: Uint8Array
-            payInLzToken: boolean
-        },
-        remainingAccounts?: AccountMeta[],
-        commitment: Commitment = 'confirmed'
-    ): Promise<EndpointProgram.types.MessagingFee> {
-        return this.quotePayload(
-            rpc,
-            payer,
-            {
-                dstEid: params.dstEid,
-                message: encodeLzString(params.message),
-                options: params.options,
-                payInLzToken: params.payInLzToken,
-            },
-            remainingAccounts,
-            commitment
-        )
     }
 
     async quotePayload(

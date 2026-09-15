@@ -42,9 +42,6 @@ impl InitStore<'_> {
         ctx.accounts.store.bump = ctx.bumps.store;
         ctx.accounts.store.endpoint_program = params.endpoint;
         ctx.accounts.store.vaults_program = params.vaults_program;
-
-        // the line below is specific to this string-passing example
-        ctx.accounts.store.price_store = None;
         ctx.accounts.store.last_position = None;
 
         // Prepare the delegate address for the OApp registration.

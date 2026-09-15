@@ -38,19 +38,6 @@ export class BodyTooShortError extends ProgramError {
 codeToErrorMap.set(0x1771, BodyTooShortError)
 nameToErrorMap.set('BodyTooShort', BodyTooShortError)
 
-/** InvalidUtf8:  */
-export class InvalidUtf8Error extends ProgramError {
-    override readonly name: string = 'InvalidUtf8'
-
-    readonly code: number = 0x1772 // 6002
-
-    constructor(program: Program, cause?: Error) {
-        super('', program, cause)
-    }
-}
-codeToErrorMap.set(0x1772, InvalidUtf8Error)
-nameToErrorMap.set('InvalidUtf8', InvalidUtf8Error)
-
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

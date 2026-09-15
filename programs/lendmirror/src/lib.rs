@@ -21,12 +21,11 @@ declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_
 
 const STORE_SEED: &[u8] = b"LendMirrorStore";
 const PEER_SEED: &[u8] = b"LendMirrorPeer";
-const PYTH_PRICE_SEED: &[u8] = b"PythPrice";
 const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 
-/// LendMirror Piece 2 — Solana side of a LayerZero OApp.
+/// LendMirror — Solana side of a LayerZero OApp.
 ///
-/// This program is the SENDER for LendMirror (Solana → Ethereum).
+/// This program is the SENDER (Solana → Ethereum).
 /// The Ethereum contract in contracts/LendMirror.sol is the RECEIVER.
 ///
 /// Program id vs Store (easy to mix up):
@@ -34,9 +33,7 @@ const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 ///   Store PDA  — the OApp identity. LayerZero records Store as the sender.
 ///                Ethereum's setPeer must be this Store, not the program id.
 ///
-/// LendMirror uses: init_store, set_peer_config, quote_send, send.
-/// lz_receive* exists because the starter is two-way. We do not send the
-/// loan snapshot TO Solana.
+/// Flow: get_jupiter_position → send → LayerZero → Ethereum lastPosition.
 #[program]
 pub mod lendmirror {
     use super::*;
@@ -60,20 +57,10 @@ pub mod lendmirror {
         QuoteSend::apply(&ctx, &params)
     }
 
-    // LendMirror path: pack bytes and CPI into the Solana Endpoint.
+    // Pack bytes and CPI into the Solana Endpoint.
     // After this returns, Ethereum has not updated yet. DVNs still have to verify.
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
-    }
-
-    // Get the Pyth price for a given feed id and set it in the stores
-    pub fn get_pyth_price(
-        mut ctx: Context<GetPythPrice>,
-        params: GetPythPriceParams,
-    ) -> Result<PythPrice> {
-        let pyth_price = GetPythPrice::apply(&mut ctx, &params)?;
-
-        Ok(pyth_price)
     }
 
     // Read Jupiter Lend Position + Tick + VaultState/Config. Does not send.
