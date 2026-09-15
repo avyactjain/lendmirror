@@ -29,6 +29,8 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
         } else if (isEvmEid(eid)) {
             const evm = await fetchEvmOappState(eid, hre, contractName)
             console.log('EVM OApp Address:', evm.address)
+            console.log('EVM lastUpdatedTs:', evm.lastUpdatedTs)
+            console.log('EVM lastUpdatedBlock:', evm.lastUpdatedBlock)
             console.log('EVM last Jupiter snapshot:', evm.lastPosition)
         } else {
             console.log('Unknown endpoint type:', eid)
@@ -41,9 +43,18 @@ const action: ActionType<Args> = async ({ oappConfig, contractName }, hre: Hardh
 
 async function fetchEvmOappState(eid: EndpointId, hre: HardhatRuntimeEnvironment, contractName: string) {
     const contract = await hre.ethers.getContract(contractName)
-    const lastPosition = await (contract as unknown as { lastPosition: () => Promise<unknown> }).lastPosition()
+    const typed = contract as unknown as {
+        lastPosition: () => Promise<unknown>
+        lastUpdatedTs: () => Promise<unknown>
+        lastUpdatedBlock: () => Promise<unknown>
+    }
+    const lastPosition = await typed.lastPosition()
+    const lastUpdatedTs = await typed.lastUpdatedTs()
+    const lastUpdatedBlock = await typed.lastUpdatedBlock()
     return {
         address: contract.address,
+        lastUpdatedTs,
+        lastUpdatedBlock,
         lastPosition,
     }
 }

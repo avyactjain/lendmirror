@@ -31,13 +31,19 @@ const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatR
     const contract = await hre.ethers.getContract(contractName)
     const evm = contract as unknown as {
         lastPosition: () => Promise<LastPosition>
+        lastUpdatedTs: () => Promise<{ toString(): string }>
+        lastUpdatedBlock: () => Promise<{ toString(): string }>
     }
 
     const pos = (await evm.lastPosition()) as LastPosition
+    const lastUpdatedTs = await evm.lastUpdatedTs()
+    const lastUpdatedBlock = await evm.lastUpdatedBlock()
     DebugLogger.header('EVM OApp last Jupiter snapshot')
     DebugLogger.keyValue('Network', hre.network.name)
     DebugLogger.keyValue('Contract Name', contractName)
     DebugLogger.keyValue('Contract Address', contract.address)
+    DebugLogger.keyValue('lastUpdatedTs', lastUpdatedTs.toString())
+    DebugLogger.keyValue('lastUpdatedBlock', lastUpdatedBlock.toString())
     DebugLogger.keyValue('position', pos.position)
     DebugLogger.keyValue('vaultId', pos.vaultId.toString())
     DebugLogger.keyValue('nftId', pos.nftId.toString())

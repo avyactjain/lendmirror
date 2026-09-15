@@ -18,6 +18,13 @@ contract LendMirror is OApp, OAppOptionsType3 {
     /// Last Jupiter position snapshot received from Solana.
     PositionSnapshotMsgCodec.Snapshot internal lastPosition_;
 
+    /// EVM wall-clock when `lastPosition_` was last written (`block.timestamp`).
+    /// Clients use this for freshness; distinct from `snapshot.snapshotTime` (Solana clock).
+    uint64 public lastUpdatedTs;
+
+    /// EVM block number when `lastPosition_` was last written.
+    uint64 public lastUpdatedBlock;
+
     function lastPosition() external view returns (PositionSnapshotMsgCodec.Snapshot memory) {
         return lastPosition_;
     }
@@ -33,5 +40,7 @@ contract LendMirror is OApp, OAppOptionsType3 {
         uint256 declared = uint256(bytes32(payload[0:32]));
         if (declared != PositionSnapshotMsgCodec.BODY_LEN) revert InvalidPositionPayload();
         lastPosition_ = PositionSnapshotMsgCodec.decode(payload);
+        lastUpdatedTs = uint64(block.timestamp);
+        lastUpdatedBlock = uint64(block.number);
     }
 }
