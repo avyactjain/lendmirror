@@ -12,6 +12,9 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type GetJupiterPositionInstructionAccounts = {
+    /** Must be on `store.snapshotters`. */
+    authority?: Signer
+    /** Pays rent for `position_store` if created. */
     payer?: Signer
     store: PublicKey | Pda
     /** Jupiter Vaults program. Must match `store.vaults_program` from init_store. */
@@ -55,7 +58,7 @@ export type GetJupiterPositionInstructionArgs = GetJupiterPositionInstructionDat
 
 // Instruction.
 export function getJupiterPosition(
-    context: Pick<Context, 'payer' | 'programs'>,
+    context: Pick<Context, 'identity' | 'payer' | 'programs'>,
     input: GetJupiterPositionInstructionAccounts & GetJupiterPositionInstructionArgs
 ): TransactionBuilder {
     // Program ID.
@@ -63,21 +66,25 @@ export function getJupiterPosition(
 
     // Accounts.
     const resolvedAccounts = {
-        payer: { index: 0, isWritable: true as boolean, value: input.payer ?? null },
-        store: { index: 1, isWritable: true as boolean, value: input.store ?? null },
-        vaultsProgram: { index: 2, isWritable: false as boolean, value: input.vaultsProgram ?? null },
-        position: { index: 3, isWritable: false as boolean, value: input.position ?? null },
-        vaultState: { index: 4, isWritable: false as boolean, value: input.vaultState ?? null },
-        vaultConfig: { index: 5, isWritable: false as boolean, value: input.vaultConfig ?? null },
-        tick: { index: 6, isWritable: false as boolean, value: input.tick ?? null },
-        positionStore: { index: 7, isWritable: true as boolean, value: input.positionStore ?? null },
-        systemProgram: { index: 8, isWritable: false as boolean, value: input.systemProgram ?? null },
+        authority: { index: 0, isWritable: false as boolean, value: input.authority ?? null },
+        payer: { index: 1, isWritable: true as boolean, value: input.payer ?? null },
+        store: { index: 2, isWritable: true as boolean, value: input.store ?? null },
+        vaultsProgram: { index: 3, isWritable: false as boolean, value: input.vaultsProgram ?? null },
+        position: { index: 4, isWritable: false as boolean, value: input.position ?? null },
+        vaultState: { index: 5, isWritable: false as boolean, value: input.vaultState ?? null },
+        vaultConfig: { index: 6, isWritable: false as boolean, value: input.vaultConfig ?? null },
+        tick: { index: 7, isWritable: false as boolean, value: input.tick ?? null },
+        positionStore: { index: 8, isWritable: true as boolean, value: input.positionStore ?? null },
+        systemProgram: { index: 9, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.
     const resolvedArgs: GetJupiterPositionInstructionArgs = { ...input }
 
     // Default values.
+    if (!resolvedAccounts.authority.value) {
+        resolvedAccounts.authority.value = context.identity
+    }
     if (!resolvedAccounts.payer.value) {
         resolvedAccounts.payer.value = context.payer
     }

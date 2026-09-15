@@ -9,10 +9,19 @@ use anchor_lang::prelude::*;
 #[derive(Accounts)]
 #[instruction(params: GetJupiterPositionParams)]
 pub struct GetJupiterPosition<'info> {
+    /// Must be on `store.snapshotters`.
+    pub authority: Signer<'info>,
+
+    /// Pays rent for `position_store` if created.
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    #[account(mut, seeds = [STORE_SEED], bump = store.bump)]
+    #[account(
+        mut,
+        seeds = [STORE_SEED],
+        bump = store.bump,
+        constraint = store.is_snapshotter(&authority.key()) @ LendMirrorError::Unauthorized
+    )]
     pub store: Account<'info, Store>,
 
     /// Jupiter Vaults program. Must match `store.vaults_program` from init_store.

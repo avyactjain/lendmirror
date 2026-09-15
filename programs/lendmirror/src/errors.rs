@@ -6,4 +6,7 @@ pub enum LendMirrorError {
     PositionIdMismatch,
     TickPdaMismatch,
     TickOutOfRange,
+    Unauthorized,
+    AllowlistTooLong,
+    NoPositionSnapshot,
 }

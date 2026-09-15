@@ -39,7 +39,7 @@ pub mod lendmirror {
     use super::*;
 
     // Create the Store PDA and register it with LayerZero's Endpoint.
-    // Call once. First caller sets admin. Anyone can call in this example.
+    // Call once. Payer must equal params.admin. Seeds admin onto both allowlists.
     pub fn init_store(mut ctx: Context<InitStore>, params: InitStoreParams) -> Result<()> {
         InitStore::apply(&mut ctx, &params)
     }
@@ -52,18 +52,32 @@ pub mod lendmirror {
         SetPeerConfig::apply(&mut ctx, &params)
     }
 
-    // How much SOL to attach to send(). Does not send.
+    // Admin only. Replace wallets allowed to call get_jupiter_position.
+    pub fn set_snapshotters(
+        mut ctx: Context<SetSnapshotters>,
+        params: SetAllowlistParams,
+    ) -> Result<()> {
+        SetSnapshotters::apply(&mut ctx, &params)
+    }
+
+    // Admin only. Replace wallets allowed to call send.
+    pub fn set_senders(mut ctx: Context<SetSenders>, params: SetAllowlistParams) -> Result<()> {
+        SetSenders::apply(&mut ctx, &params)
+    }
+
+    // How much SOL to attach to send(). Does not send. Quotes from store.last_position.
     pub fn quote_send(ctx: Context<QuoteSend>, params: QuoteSendParams) -> Result<MessagingFee> {
         QuoteSend::apply(&ctx, &params)
     }
 
-    // Pack bytes and CPI into the Solana Endpoint.
-    // After this returns, Ethereum has not updated yet. DVNs still have to verify.
+    // Encode store.last_position and CPI into the Solana Endpoint.
+    // Authority must be on the senders allowlist. DVNs still have to verify after.
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
     }
 
     // Read Jupiter Lend Position + Tick + VaultState/Config. Does not send.
+    // Authority must be on the snapshotters allowlist.
     pub fn get_jupiter_position(
         mut ctx: Context<GetJupiterPosition>,
         params: GetJupiterPositionParams,

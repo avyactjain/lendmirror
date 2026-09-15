@@ -23,6 +23,7 @@ import {
 } from '@metaplex-foundation/umi'
 import {
     Serializer,
+    array,
     bytes,
     mapSerializer,
     option,
@@ -41,6 +42,12 @@ export type StoreAccountData = {
     endpointProgram: PublicKey
     /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
     vaultsProgram: PublicKey
+    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    snapshotters: Array<PublicKey>
+    snapshotterCount: number
+    /** Wallets allowed to call `send`. Admin updates only. */
+    senders: Array<PublicKey>
+    senderCount: number
     lastPosition: Option<PositionSnapshot>
 }
 
@@ -50,6 +57,12 @@ export type StoreAccountDataArgs = {
     endpointProgram: PublicKey
     /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
     vaultsProgram: PublicKey
+    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    snapshotters: Array<PublicKey>
+    snapshotterCount: number
+    /** Wallets allowed to call `send`. Admin updates only. */
+    senders: Array<PublicKey>
+    senderCount: number
     lastPosition: OptionOrNullable<PositionSnapshotArgs>
 }
 
@@ -62,6 +75,10 @@ export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs
                 ['bump', u8()],
                 ['endpointProgram', publicKeySerializer()],
                 ['vaultsProgram', publicKeySerializer()],
+                ['snapshotters', array(publicKeySerializer(), { size: 8 })],
+                ['snapshotterCount', u8()],
+                ['senders', array(publicKeySerializer(), { size: 8 })],
+                ['senderCount', u8()],
                 ['lastPosition', option(getPositionSnapshotSerializer())],
             ],
             { description: 'StoreAccountData' }
@@ -131,6 +148,10 @@ export function getStoreGpaBuilder(context: Pick<Context, 'rpc' | 'programs'>) {
             bump: number
             endpointProgram: PublicKey
             vaultsProgram: PublicKey
+            snapshotters: Array<PublicKey>
+            snapshotterCount: number
+            senders: Array<PublicKey>
+            senderCount: number
             lastPosition: OptionOrNullable<PositionSnapshotArgs>
         }>({
             discriminator: [0, bytes({ size: 8 })],
@@ -138,7 +159,11 @@ export function getStoreGpaBuilder(context: Pick<Context, 'rpc' | 'programs'>) {
             bump: [40, u8()],
             endpointProgram: [41, publicKeySerializer()],
             vaultsProgram: [73, publicKeySerializer()],
-            lastPosition: [105, option(getPositionSnapshotSerializer())],
+            snapshotters: [105, array(publicKeySerializer(), { size: 8 })],
+            snapshotterCount: [361, u8()],
+            senders: [362, array(publicKeySerializer(), { size: 8 })],
+            senderCount: [618, u8()],
+            lastPosition: [619, option(getPositionSnapshotSerializer())],
         })
         .deserializeUsing<Store>((account) => deserializeStore(account))
         .whereField('discriminator', new Uint8Array([130, 48, 247, 244, 182, 191, 30, 26]))

@@ -179,11 +179,13 @@ export class LendMirror {
 
     async getJupiterPosition(
         rpc: RpcInterface,
-        payer: Signer,
+        authority: Signer,
         vaultId: number,
         nftId: number,
-        vaultsProgram: PublicKey
+        vaultsProgram: PublicKey,
+        payer?: Signer
     ): Promise<WrappedInstruction> {
+        const feePayer = payer ?? authority
         const [store] = this.pda.oapp()
         const [position] = jupiterPositionPda(vaultsProgram, vaultId, nftId)
         const [vaultState] = jupiterVaultStatePda(vaultsProgram, vaultId)
@@ -196,9 +198,10 @@ export class LendMirror {
         const tick = decodeJupiterPositionTick(positionAccount.data)
         const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, tick)
         return instructions.getJupiterPosition(
-            { payer, programs: this.programRepo },
+            { identity: authority, payer: feePayer, programs: this.programRepo },
             {
-                payer,
+                authority,
+                payer: feePayer,
                 store,
                 vaultsProgram,
                 position,
@@ -214,16 +217,16 @@ export class LendMirror {
 
     async sendPayload(
         rpc: RpcInterface,
-        payer: PublicKey,
+        authority: Signer,
         params: EndpointProgram.types.MessagingFee & {
             dstEid: number
-            message: Uint8Array
             options: Uint8Array
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<WrappedInstruction> {
-        const { dstEid, nativeFee, lzTokenFee, message, options } = params
+        const { dstEid, nativeFee, lzTokenFee, options } = params
+        const payer = authority.publicKey
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
@@ -249,19 +252,41 @@ export class LendMirror {
         }
         return instructions
             .send(
-                { programs: this.programRepo },
+                { identity: authority, programs: this.programRepo },
                 {
+                    authority,
                     store: oapp,
                     peer: peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,
-                    message,
                     options,
                     nativeFee: nativeFee,
                     lzTokenFee: lzTokenFee ?? 0,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
+    }
+
+    setSnapshotters(admin: Signer, keys: PublicKey[]): WrappedInstruction {
+        return instructions.setSnapshotters(
+            { programs: this.programRepo },
+            {
+                admin,
+                store: this.pda.oapp()[0],
+                params: { keys },
+            }
+        ).items[0]
+    }
+
+    setSenders(admin: Signer, keys: PublicKey[]): WrappedInstruction {
+        return instructions.setSenders(
+            { programs: this.programRepo },
+            {
+                admin,
+                store: this.pda.oapp()[0],
+                params: { keys },
+            }
+        ).items[0]
     }
 
     setPeerConfig(
@@ -308,14 +333,13 @@ export class LendMirror {
         payer: PublicKey,
         params: {
             dstEid: number
-            message: Uint8Array
             options: Uint8Array
             payInLzToken: boolean
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<EndpointProgram.types.MessagingFee> {
-        const { dstEid, message, options, payInLzToken } = params
+        const { dstEid, options, payInLzToken } = params
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
@@ -344,7 +368,6 @@ export class LendMirror {
                     peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,
-                    message,
                     options,
                     payInLzToken,
                     receiver: packetPath.receiver,

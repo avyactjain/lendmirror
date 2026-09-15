@@ -1,4 +1,4 @@
-import { publicKey, publicKeyBytes, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
+import { publicKey, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
@@ -29,40 +29,18 @@ task('lz:oapp:solana:send-jupiter', 'Sends the last Store Jupiter snapshot to Et
             throw new Error('Store has no Jupiter snapshot. Run lz:oapp:solana:get-jupiter-position first.')
         }
 
-        const message = lendmirror.encodePositionSnapshot({
-            position: publicKeyBytes(snap.position),
-            vaultId: snap.vaultId,
-            nftId: snap.nftId,
-            positionMint: publicKeyBytes(snap.positionMint),
-            supplyToken: publicKeyBytes(snap.supplyToken),
-            borrowToken: publicKeyBytes(snap.borrowToken),
-            colRaw: BigInt(snap.colRaw),
-            debtRaw: BigInt(snap.debtRaw),
-            dustDebt: BigInt(snap.dustDebt),
-            netDebt: BigInt(snap.netDebt),
-            tick: snap.tick,
-            tickId: snap.tickId,
-            isSupplyOnly: snap.isSupplyOnly,
-            isLiquidated: snap.isLiquidated,
-            vaultSupplyExchangePrice: BigInt(snap.vaultSupplyExchangePrice),
-            vaultBorrowExchangePrice: BigInt(snap.vaultBorrowExchangePrice),
-            snapshotTime: BigInt(snap.snapshotTime),
-        })
-
         const options = Options.newOptions().addExecutorLzReceiveOption(400000, 0).toBytes()
 
         const { nativeFee } = await instance.quotePayload(umi.rpc, umiWalletSigner.publicKey, {
             dstEid,
-            message,
             options,
             payInLzToken: false,
         })
         console.log('Native fee quoted:', nativeFee.toString())
 
         let txBuilder = transactionBuilder().add(
-            await instance.sendPayload(umi.rpc, umiWalletSigner.publicKey, {
+            await instance.sendPayload(umi.rpc, umiWalletSigner, {
                 dstEid,
-                message,
                 options,
                 nativeFee,
             })

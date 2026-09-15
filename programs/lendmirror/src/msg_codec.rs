@@ -49,8 +49,7 @@ pub fn unwrap_lz_payload(buf: &[u8]) -> Result<&[u8], MsgCodecError> {
 }
 
 /// Pack a value into LayerZero payload bytes (and unpack on the other side).
-/// Impl this on any type you want to send. `SendMessageParams.message` stores
-/// those bytes — Anchor instruction data cannot be generic over `M`.
+/// Impl this on any type you want to send across LZ.
 pub trait LzMessage: Sized {
     fn encode(&self) -> Vec<u8>;
     fn decode(buf: &[u8]) -> std::result::Result<Self, MsgCodecError>;

@@ -22,8 +22,6 @@ export type QuoteSendInstructionData = {
     discriminator: Uint8Array
     dstEid: number
     receiver: Uint8Array
-    /** LayerZero payload bytes. Build with [`QuoteSendParams::from_message`]. */
-    message: Uint8Array
     options: Uint8Array
     payInLzToken: boolean
 }
@@ -31,8 +29,6 @@ export type QuoteSendInstructionData = {
 export type QuoteSendInstructionDataArgs = {
     dstEid: number
     receiver: Uint8Array
-    /** LayerZero payload bytes. Build with [`QuoteSendParams::from_message`]. */
-    message: Uint8Array
     options: Uint8Array
     payInLzToken: boolean
 }
@@ -47,7 +43,6 @@ export function getQuoteSendInstructionDataSerializer(): Serializer<
                 ['discriminator', bytes({ size: 8 })],
                 ['dstEid', u32()],
                 ['receiver', bytes({ size: 32 })],
-                ['message', bytes({ size: u32() })],
                 ['options', bytes({ size: u32() })],
                 ['payInLzToken', bool()],
             ],
