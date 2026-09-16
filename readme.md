@@ -254,6 +254,41 @@ If Explorer still looks empty on default Devnet, set its cluster to your **custo
 
 Switch back with `nvm use 18` before Hardhat tasks.
 
+### Verified bytecode badge (OtterSec / `solana-verify`)
+
+This is separate from the IDL. Explorers show a verified badge when the on-chain `.so` matches a public Git commit.
+
+1. Install (Docker required for the reproducible build):
+   ```bash
+   cargo install solana-verify --locked
+   ```
+2. Build with the **exact** program id you deployed (Devnet example):
+   ```bash
+   LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 \
+     anchor build -- --features no-log-ix-name
+   ```
+   If the on-chain binary does not match this commit, upgrade Devnet from that `.so` first.
+3. Push the commit to a **public** GitHub repo, then:
+   ```bash
+   solana-verify verify-from-repo -ud \
+     --program-id GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 \
+     https://github.com/avyactjain/lendmirror \
+     --commit-hash <SHA>
+
+   solana-verify remote submit-job \
+     --program-id GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 \
+     --uploader <UPGRADE_AUTHORITY_PUBKEY>
+   ```
+4. Status: https://verify.osec.io/status/GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1  
+   When green, Solscan / Explorer show the verified badge (use a custom Devnet RPC if the public one lags).
+
+### Authority tests
+
+```bash
+cargo test -p lendmirror          # Store allowlist unit tests
+LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor test   # instruction auth
+```
+
 ## Mainnet
 
 Mainnet deploy commands and LayerZero mainnet config are being added. Until then, use the same flow as testnet with:
