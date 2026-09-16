@@ -13,6 +13,17 @@ error InvalidPositionPayload();
 /// Ethereum receiver for LendMirror. Solana `send` is the sender.
 /// `_lzReceive` stores the last Jupiter position snapshot from the Solana payload.
 contract LendMirror is OApp, OAppOptionsType3 {
+    /// Emitted after a successful LayerZero delivery updates `lastPosition_`.
+    event PositionReceived(
+        uint32 indexed srcEid,
+        bytes32 indexed guid,
+        uint16 vaultId,
+        uint32 nftId,
+        int64 snapshotTime,
+        uint64 updatedTs,
+        uint64 updatedBlock
+    );
+
     constructor(address _endpoint, address _delegate) OApp(_endpoint, _delegate) Ownable(_delegate) {}
 
     /// Last Jupiter position snapshot received from Solana.
@@ -30,8 +41,8 @@ contract LendMirror is OApp, OAppOptionsType3 {
     }
 
     function _lzReceive(
-        Origin calldata /*_origin*/,
-        bytes32 /*_guid*/,
+        Origin calldata _origin,
+        bytes32 _guid,
         bytes calldata payload,
         address /*_executor*/,
         bytes calldata /*_extraData*/
@@ -42,5 +53,14 @@ contract LendMirror is OApp, OAppOptionsType3 {
         lastPosition_ = PositionSnapshotMsgCodec.decode(payload);
         lastUpdatedTs = uint64(block.timestamp);
         lastUpdatedBlock = uint64(block.number);
+        emit PositionReceived(
+            _origin.srcEid,
+            _guid,
+            lastPosition_.vaultId,
+            lastPosition_.nftId,
+            lastPosition_.snapshotTime,
+            lastUpdatedTs,
+            lastUpdatedBlock
+        );
     }
 }
