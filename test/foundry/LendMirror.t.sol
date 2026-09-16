@@ -3,6 +3,7 @@
 pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 
 import { LendMirror } from "../../contracts/LendMirror.sol";
@@ -10,7 +11,7 @@ import { PositionSnapshotMsgCodec } from "../../contracts/libs/PositionSnapshotM
 
 /// Exposes `_lzReceive` for unit tests (skips Endpoint/peer checks).
 contract LendMirrorHarness is LendMirror {
-    constructor(address _endpoint, address _delegate) LendMirror(_endpoint, _delegate) {}
+    constructor(address _endpoint) LendMirror(_endpoint) {}
 
     function exposeLzReceive(Origin calldata origin, bytes32 guid, bytes calldata payload) external {
         _lzReceive(origin, guid, payload, address(0), "");
@@ -23,7 +24,9 @@ contract LendMirrorReceiveTest is Test {
     address internal constant DELEGATE = address(0xD);
 
     function setUp() public {
-        app = new LendMirrorHarness(ENDPOINT, DELEGATE);
+        LendMirrorHarness impl = new LendMirrorHarness(ENDPOINT);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(LendMirror.initialize, (DELEGATE)));
+        app = LendMirrorHarness(address(proxy));
     }
 
     function _payload() internal pure returns (bytes memory) {
@@ -73,5 +76,17 @@ contract LendMirrorReceiveTest is Test {
         assertEq(s.nftId, 29);
         assertEq(app.lastUpdatedTs(), 1_800_000_000);
         assertEq(app.lastUpdatedBlock(), 12_345);
+    }
+
+    function testOwnerCanUpgrade() public {
+        LendMirrorHarness next = new LendMirrorHarness(ENDPOINT);
+        vm.prank(DELEGATE);
+        app.upgradeToAndCall(address(next), "");
+    }
+
+    function testStrangerCannotUpgrade() public {
+        LendMirrorHarness next = new LendMirrorHarness(ENDPOINT);
+        vm.expectRevert();
+        app.upgradeToAndCall(address(next), "");
     }
 }

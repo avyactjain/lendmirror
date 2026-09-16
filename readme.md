@@ -66,7 +66,7 @@ These are different keys. Do not mix them up.
 | **Snapshotter** | Wallet on the Store snapshot list (max 8) | Call `get_jupiter_position` to refresh `last_position`. |
 | **Sender** | Wallet on the Store send list (max 8) | Call `send` to push the stored snapshot to Ethereum. Cannot choose custom bytes — payload is always `last_position`. |
 | **Upgrade authority** | Key that deployed/upgraded the program (usually `lendmirror-keypair.json` until rotated) | Can upgrade program bytecode. Keep this key safe offline. |
-| **Ethereum owner** | Wallet that deployed `LendMirror.sol` | Owns the EVM contract / LayerZero delegate. Sets peers on Ethereum via wire. |
+| **Ethereum owner** | Wallet that called `initialize` on the proxy | Owns the EVM contract / LayerZero delegate. Sets peers. **Upgrades** the proxy (`upgradeToAndCall`). |
 | **Fee payer** | Any wallet paying SOL/ETH for a tx | Pays rent and fees. For snapshot/send it must also be (or accompany) an allowed authority. |
 
 **Rules in plain words**
@@ -123,7 +123,7 @@ Local file after create: `deployments/solana-testnet/OApp.json`.
 **We build**
 
 1. **Solana program** — `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `get_jupiter_position`, `send`
-2. **Ethereum contract** — OApp receiver; `_lzReceive` decodes into `lastPosition()`
+2. **Ethereum contract** — UUPS proxy + OApp receiver; `_lzReceive` decodes into `lastPosition()`. Peer = **proxy** address.
 3. **Shared codec** — `PositionSnapshot` on Solana, `PositionSnapshotMsgCodec.sol` on Ethereum
 4. **Scripts** — create Store, allowlists, snapshot, send-jupiter, evm debug, wire
 
@@ -172,9 +172,13 @@ npx hardhat lz:oapp:solana:create --eid 40168 --program-id <same pubkey>
 # 4. Deploy LendMirror.sol
 npx hardhat lz:deploy --networks sepolia --ci
 
-# 5. Solana send-library config, then peers
+# 5. First time: Solana libraries + DVNs
 npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts
 npx hardhat lz:oapp:wire --oapp-config layerzero.config.ts --ci
+# If wire dies on requiredDvns / PublicKey after a new EVM deploy, set peers only:
+npx hardhat lz:oapp:solana:set-peer --eid 40168 --dst-eid 40161
+npx hardhat lz:oapp:evm:set-peer --network sepolia --src-eid 40168
+npx hardhat lz:oapp:solana:get-peer --eid 40168 --dst-eid 40161
 
 # 6. Snapshot a Devnet Jupiter position, then send to Sepolia
 #    Wallet must be on the snapshotters / senders lists (admin is by default).
