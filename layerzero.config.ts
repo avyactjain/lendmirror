@@ -5,20 +5,16 @@ import { OAppEnforcedOption, OmniPointHardhat } from '@layerzerolabs/toolbox-har
 
 import { getSolanaOAppAddress } from './tasks/solana'
 
-const sepoliaContract: OmniPointHardhat = {
-    eid: EndpointId.SEPOLIA_V2_TESTNET, // 40161
+const arbitrumContract: OmniPointHardhat = {
+    eid: EndpointId.ARBITRUM_V2_MAINNET, // 30110
     contractName: 'LendMirror',
 }
 
 const solanaContract: OmniPointHardhat = {
-    eid: EndpointId.SOLANA_V2_TESTNET, // 40168 = Solana Devnet
-    // This is the Store PDA, not the program id. Created by lz:oapp:solana:create.
-    address: getSolanaOAppAddress(EndpointId.SOLANA_V2_TESTNET),
+    eid: EndpointId.SOLANA_V2_MAINNET, // 30168
+    address: getSolanaOAppAddress(EndpointId.SOLANA_V2_MAINNET),
 }
 
-// For this example's simplicity, we will use the same enforced options values for sending to all chains
-// For production, you should ensure `gas` is set to the correct value through profiling the gas usage of calling OApp._lzReceive(...) on the destination chain
-// To learn more, read https://docs.layerzero.network/v2/concepts/applications/oapp-standard#execution-options-and-enforced-settings
 const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
     {
         msgType: 1,
@@ -35,14 +31,12 @@ const SOLANA_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
     },
 ]
 
-// LendMirror path: Solana Devnet → Ethereum Sepolia.
-// generateConnectionsConfig also wires the reverse path. We send on Solana only.
 const pathways: TwoWayConfig[] = [
     [
-        sepoliaContract,
+        arbitrumContract,
         solanaContract,
-        [['LayerZero Labs'], []], // Piece 8 adds Chainlink as a required DVN
-        [20, 32], // [Sepolia → Solana confirmations, Solana → Sepolia confirmations]
+        [['LayerZero Labs'], []],
+        [20, 32],
         [SOLANA_ENFORCED_OPTIONS, EVM_ENFORCED_OPTIONS],
     ],
 ]
@@ -50,7 +44,7 @@ const pathways: TwoWayConfig[] = [
 export default async function () {
     const connections = await generateConnectionsConfig(pathways)
     return {
-        contracts: [{ contract: sepoliaContract }, { contract: solanaContract }],
+        contracts: [{ contract: arbitrumContract }, { contract: solanaContract }],
         connections,
     }
 }

@@ -36,8 +36,8 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY
 const accounts: HttpNetworkAccountsUserConfig | undefined = MNEMONIC
     ? { mnemonic: MNEMONIC }
     : PRIVATE_KEY
-      ? [PRIVATE_KEY]
-      : undefined
+        ? [PRIVATE_KEY]
+        : undefined
 
 if (accounts == null) {
     console.warn(
@@ -67,6 +67,11 @@ const config: HardhatUserConfig = {
         sepolia: {
             eid: EndpointId.SEPOLIA_V2_TESTNET,
             url: process.env.RPC_URL_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
+            accounts,
+        },
+        arbitrum: {
+            eid: EndpointId.ARBITRUM_V2_MAINNET, // 30110
+            url: process.env.RPC_URL_ARBITRUM,
             accounts,
         },
         hardhat: {

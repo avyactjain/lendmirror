@@ -2,7 +2,7 @@
 
 Copy a Jupiter Lend borrow snapshot from Solana onto Ethereum. It does not move the loan. It does not move tokens.
 
-- **Mainnet path:** Solana (eid `30168`) → Ethereum (eid `30101`)
+- **Mainnet path:** Solana (eid `30168`) → Arbitrum (eid `30110`)
 - **Testnet path:** Solana Devnet (eid `40168`) → Ethereum Sepolia (eid `40161`)
 
 ## Goal
@@ -86,37 +86,39 @@ npx hardhat lz:oapp:solana:set-senders --eid <EID> --keys <pubkey1>,<pubkey2>
 
 ## Addresses
 
-Fill these in after each deploy.
-
 ### Devnet / Sepolia
 
 | Item | Value |
 |------|-------|
-| Solana program id | |
-| Solana Store (OApp) | |
-| Solana admin | |
-| Snapshotters | |
-| Senders | |
-| Ethereum LendMirror | |
-| Ethereum owner | |
+| Solana program id | `GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1` |
+| Solana Store (OApp) | `6KJuMfT3qpD8AFWegQvWRtE41qT6BJsSJmkSmqXqPn7a` |
+| Solana admin | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
+| Snapshotters | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
+| Senders | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
+| Sepolia LendMirror (proxy) | `0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514` |
+| Sepolia implementation | `0xE7A7E4A8555Ca2428421626AE1720d570949D59c` |
+| Sepolia owner | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` |
 | LayerZero pathway | Devnet `40168` → Sepolia `40161` |
 
-Local file after create: `deployments/solana-testnet/OApp.json`.
+Local files: `deployments/solana-testnet/OApp.json`, `deployments/sepolia/LendMirror.json`. Etherscan: https://sepolia.etherscan.io/address/0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514
 
 ### Mainnet
 
 | Item | Value |
 |------|-------|
-| Solana program id | |
-| Solana Store (OApp) | |
-| Solana admin | |
-| Snapshotters | |
-| Senders | |
-| Ethereum LendMirror | |
-| Ethereum owner | |
-| LayerZero pathway | Solana `30168` → Ethereum `30101` |
+| Solana program id | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` |
+| Solana Store (OApp) | `BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4` |
+| Solana admin | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
+| Snapshotters | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
+| Senders | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
+| Arbitrum LendMirror (proxy) | `0xb42E98c712B5CAf1e55dB8106262077515879EA2` |
+| Arbitrum implementation | `0xdAAE65Df8B96e9eE45eb756441B7942e5E128924` |
+| Arbitrum owner | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` |
+| LayerZero pathway | Solana `30168` → Arbitrum `30110` |
 | Solana verified build | |
-| Etherscan | |
+| Arbiscan | https://arbiscan.io/address/0xb42E98c712B5CAf1e55dB8106262077515879EA2 |
+
+Local files: `deployments/solana-mainnet/OApp.json`, `deployments/arbitrum/LendMirror.json`. The proxy is the LayerZero peer, not the implementation.
 
 ## What we build vs what we use
 
@@ -295,11 +297,14 @@ LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor test   # instr
 
 ## Mainnet
 
-Mainnet deploy commands and LayerZero mainnet config are being added. Until then, use the same flow as testnet with:
+Live path is Solana `30168` → Arbitrum `30110`. Addresses are in the table above.
 
-- Solana eid `30168`, Ethereum eid `30101`
-- A **new** program keypair (do not reuse Devnet)
-- Jupiter Vaults mainnet program `jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi` (selected automatically when eid is mainnet)
-- Separate admin / snapshotter / sender wallets as needed
+Same flow as testnet, with:
 
-Fill the **Mainnet** address table above after deploy.
+- `npx hardhat lz:deploy --networks arbitrum --ci`
+- `lz:oapp:solana:set-peer --eid 30168 --dst-eid 30110 --evm-network arbitrum`
+- `lz:oapp:evm:set-peer --network arbitrum --src-eid 30168`
+- `lz:oapp:solana:send-jupiter --from-eid 30168 --dst-eid 30110`
+- `lz:oapp:evm:debug --network arbitrum`
+
+Jupiter Vaults mainnet program `jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi` (selected automatically when eid is `30168`). Do not reuse the Devnet program keypair.
