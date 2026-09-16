@@ -23,6 +23,7 @@ import {
 } from '@metaplex-foundation/umi'
 import {
     Serializer,
+    array,
     bytes,
     mapSerializer,
     option,
@@ -30,7 +31,7 @@ import {
     struct,
     u8,
 } from '@metaplex-foundation/umi/serializers'
-import { PythPrice, PythPriceArgs, getPythPriceSerializer } from '../types'
+import { PositionSnapshot, PositionSnapshotArgs, getPositionSnapshotSerializer } from '../types'
 
 export type Store = Account<StoreAccountData>
 
@@ -39,14 +40,30 @@ export type StoreAccountData = {
     admin: PublicKey
     bump: number
     endpointProgram: PublicKey
-    priceStore: Option<PythPrice>
+    /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
+    vaultsProgram: PublicKey
+    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    snapshotters: Array<PublicKey>
+    snapshotterCount: number
+    /** Wallets allowed to call `send`. Admin updates only. */
+    senders: Array<PublicKey>
+    senderCount: number
+    lastPosition: Option<PositionSnapshot>
 }
 
 export type StoreAccountDataArgs = {
     admin: PublicKey
     bump: number
     endpointProgram: PublicKey
-    priceStore: OptionOrNullable<PythPriceArgs>
+    /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
+    vaultsProgram: PublicKey
+    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    snapshotters: Array<PublicKey>
+    snapshotterCount: number
+    /** Wallets allowed to call `send`. Admin updates only. */
+    senders: Array<PublicKey>
+    senderCount: number
+    lastPosition: OptionOrNullable<PositionSnapshotArgs>
 }
 
 export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs, StoreAccountData> {
@@ -57,7 +74,12 @@ export function getStoreAccountDataSerializer(): Serializer<StoreAccountDataArgs
                 ['admin', publicKeySerializer()],
                 ['bump', u8()],
                 ['endpointProgram', publicKeySerializer()],
-                ['priceStore', option(getPythPriceSerializer())],
+                ['vaultsProgram', publicKeySerializer()],
+                ['snapshotters', array(publicKeySerializer(), { size: 8 })],
+                ['snapshotterCount', u8()],
+                ['senders', array(publicKeySerializer(), { size: 8 })],
+                ['senderCount', u8()],
+                ['lastPosition', option(getPositionSnapshotSerializer())],
             ],
             { description: 'StoreAccountData' }
         ),
@@ -125,13 +147,23 @@ export function getStoreGpaBuilder(context: Pick<Context, 'rpc' | 'programs'>) {
             admin: PublicKey
             bump: number
             endpointProgram: PublicKey
-            priceStore: OptionOrNullable<PythPriceArgs>
+            vaultsProgram: PublicKey
+            snapshotters: Array<PublicKey>
+            snapshotterCount: number
+            senders: Array<PublicKey>
+            senderCount: number
+            lastPosition: OptionOrNullable<PositionSnapshotArgs>
         }>({
             discriminator: [0, bytes({ size: 8 })],
             admin: [8, publicKeySerializer()],
             bump: [40, u8()],
             endpointProgram: [41, publicKeySerializer()],
-            priceStore: [73, option(getPythPriceSerializer())],
+            vaultsProgram: [73, publicKeySerializer()],
+            snapshotters: [105, array(publicKeySerializer(), { size: 8 })],
+            snapshotterCount: [361, u8()],
+            senders: [362, array(publicKeySerializer(), { size: 8 })],
+            senderCount: [618, u8()],
+            lastPosition: [619, option(getPositionSnapshotSerializer())],
         })
         .deserializeUsing<Store>((account) => deserializeStore(account))
         .whereField('discriminator', new Uint8Array([130, 48, 247, 244, 182, 191, 30, 26]))

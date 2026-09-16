@@ -93,6 +93,7 @@
     "prettier": "^3.2.5",
     "solhint": "^4.1.1",
     "solidity-bytes-utils": "^0.8.2",
+    "ts-mocha": "^10.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.4"
   },

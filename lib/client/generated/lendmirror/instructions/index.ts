@@ -6,8 +6,10 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
-export * from './getPythPrice'
+export * from './getJupiterPosition'
 export * from './initStore'
 export * from './quoteSend'
 export * from './send'
 export * from './setPeerConfig'
+export * from './setSenders'
+export * from './setSnapshotters'

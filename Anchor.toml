@@ -6,7 +6,7 @@ resolution = false
 skip-lint = false
 
 [programs.localnet]
-lendmirror = "H84BoBhYfCsLofgrAwQWt9YmFZRPKLkNznzfmeJS1xj1"
+lendmirror = "GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,4 +16,14 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 sdk/tests/**/*.test.ts"
+test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 tests/**/*.test.ts"
+
+# Clone LayerZero Endpoint so init_store can register_oapp on the test validator.
+[test.validator]
+url = "https://api.devnet.solana.com"
+
+[[test.validator.clone]]
+address = "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6"
+
+[[test.validator.clone]]
+address = "2uk9pQh3tB5ErV7LGQJcbWjb4KeJ2UJki5qJZ8QG56G3"

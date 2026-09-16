@@ -2,6 +2,7 @@ mod errors;
 mod instructions;
 mod msg_codec;
 mod state;
+mod tick_math;
 
 use anchor_lang::prelude::*;
 use instructions::*;
@@ -15,16 +16,16 @@ use state::*;
 // LENDMIRROR_ID=$PROGRAM_ID anchor build
 declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_id_from_env!(
     "LENDMIRROR_ID",
-    "H84BoBhYfCsLofgrAwQWt9YmFZRPKLkNznzfmeJS1xj1" // It's not necessary to change the ID here if you are building using environment variable
+    "GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1"
 )));
 
 const STORE_SEED: &[u8] = b"LendMirrorStore";
 const PEER_SEED: &[u8] = b"LendMirrorPeer";
-const PYTH_PRICE_SEED: &[u8] = b"PythPrice";
+const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 
-/// LendMirror Piece 2 — Solana side of a LayerZero OApp.
+/// LendMirror — Solana side of a LayerZero OApp.
 ///
-/// This program is the SENDER for LendMirror (Solana → Ethereum).
+/// This program is the SENDER (Solana → Ethereum).
 /// The Ethereum contract in contracts/LendMirror.sol is the RECEIVER.
 ///
 /// Program id vs Store (easy to mix up):
@@ -32,15 +33,13 @@ const PYTH_PRICE_SEED: &[u8] = b"PythPrice";
 ///   Store PDA  — the OApp identity. LayerZero records Store as the sender.
 ///                Ethereum's setPeer must be this Store, not the program id.
 ///
-/// LendMirror uses: init_store, set_peer_config, quote_send, send.
-/// lz_receive* exists because the starter is two-way. We do not send the
-/// loan snapshot TO Solana.
+/// Flow: get_jupiter_position → send → LayerZero → Ethereum lastPosition.
 #[program]
 pub mod lendmirror {
     use super::*;
 
     // Create the Store PDA and register it with LayerZero's Endpoint.
-    // Call once. First caller sets admin. Anyone can call in this example.
+    // Call once. Payer must equal params.admin. Seeds admin onto both allowlists.
     pub fn init_store(mut ctx: Context<InitStore>, params: InitStoreParams) -> Result<()> {
         InitStore::apply(&mut ctx, &params)
     }
@@ -53,24 +52,36 @@ pub mod lendmirror {
         SetPeerConfig::apply(&mut ctx, &params)
     }
 
-    // How much SOL to attach to send(). Does not send.
+    // Admin only. Replace wallets allowed to call get_jupiter_position.
+    pub fn set_snapshotters(
+        mut ctx: Context<SetSnapshotters>,
+        params: SetAllowlistParams,
+    ) -> Result<()> {
+        SetSnapshotters::apply(&mut ctx, &params)
+    }
+
+    // Admin only. Replace wallets allowed to call send.
+    pub fn set_senders(mut ctx: Context<SetSenders>, params: SetAllowlistParams) -> Result<()> {
+        SetSenders::apply(&mut ctx, &params)
+    }
+
+    // How much SOL to attach to send(). Does not send. Quotes from store.last_position.
     pub fn quote_send(ctx: Context<QuoteSend>, params: QuoteSendParams) -> Result<MessagingFee> {
         QuoteSend::apply(&ctx, &params)
     }
 
-    // LendMirror path: pack bytes and CPI into the Solana Endpoint.
-    // After this returns, Ethereum has not updated yet. DVNs still have to verify.
+    // Encode store.last_position and CPI into the Solana Endpoint.
+    // Authority must be on the senders allowlist. DVNs still have to verify after.
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
     }
 
-    // Get the Pyth price for a given feed id and set it in the stores
-    pub fn get_pyth_price(
-        mut ctx: Context<GetPythPrice>,
-        params: GetPythPriceParams,
-    ) -> Result<PythPrice> {
-        let pyth_price = GetPythPrice::apply(&mut ctx, &params)?;
-
-        Ok(pyth_price)
+    // Read Jupiter Lend Position + Tick + VaultState/Config. Does not send.
+    // Authority must be on the snapshotters allowlist.
+    pub fn get_jupiter_position(
+        mut ctx: Context<GetJupiterPosition>,
+        params: GetJupiterPositionParams,
+    ) -> Result<PositionSnapshot> {
+        GetJupiterPosition::apply(&mut ctx, &params)
     }
 }

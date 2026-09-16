@@ -1,30 +1,19 @@
-import { Pda, PublicKey, publicKey, publicKeyBytes } from '@metaplex-foundation/umi'
+import { Pda, PublicKey, publicKeyBytes } from '@metaplex-foundation/umi'
 import { Endian, u32 } from '@metaplex-foundation/umi/serializers'
 import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 
 import { OmniAppPDA } from '@layerzerolabs/lz-solana-sdk-v2/umi'
 
+import { u16Le, u32Le } from './jupiter'
+
 const eddsa = createWeb3JsEddsa()
 
 export const LZ_RECEIVE_TYPES_SEED = 'LzReceiveTypes'
 
-/** Pyth push-oracle program. Shard-0 PDAs are the sponsored feed accounts. */
-export const PYTH_PUSH_ORACLE_PROGRAM_ID: PublicKey = publicKey('pythWSnswVUd12oZpeFP8e9CVaEqJg25g1Vtc2biRsT')
-
-/** PDA([shard_u16_le, feed_id], pyth push oracle). Shard 0 is the public push feed. */
-export function pythPushFeedAccount(feedId: Uint8Array, shardId = 0): Pda {
-    if (feedId.length !== 32) {
-        throw new Error('feedId must be 32 bytes')
-    }
-    const shard = Buffer.alloc(2)
-    shard.writeUInt16LE(shardId, 0)
-    return eddsa.findPda(PYTH_PUSH_ORACLE_PROGRAM_ID, [shard, feedId])
-}
-
 export class LendMirrorPDA extends OmniAppPDA {
     static STORE_SEED = 'LendMirrorStore'
     static PEER_SEED = 'LendMirrorPeer'
-    static PYTH_PRICE_SEED = 'PythPrice'
+    static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'
 
     constructor(public readonly programId: PublicKey) {
@@ -62,11 +51,12 @@ export class LendMirrorPDA extends OmniAppPDA {
         return eddsa.findPda(this.programId, [Buffer.from(LZ_RECEIVE_TYPES_SEED, 'utf8'), publicKeyBytes(store)])
     }
 
-    // seeds = [PYTH_PRICE_SEED, feed_id]
-    pythPrice(feedId: Uint8Array): Pda {
-        if (feedId.length !== 32) {
-            throw new Error('feedId must be 32 bytes')
-        }
-        return eddsa.findPda(this.programId, [Buffer.from(LendMirrorPDA.PYTH_PRICE_SEED, 'utf8'), feedId])
+    // seeds = [JUP_POSITION_SEED, vault_id le, nft_id le]
+    jupPosition(vaultId: number, nftId: number): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.JUP_POSITION_SEED, 'utf8'),
+            u16Le(vaultId),
+            u32Le(nftId),
+        ])
     }
 }

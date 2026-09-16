@@ -6,12 +6,14 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
-import { Context, Pda, PublicKey, TransactionBuilder, transactionBuilder } from '@metaplex-foundation/umi'
+import { Context, Pda, PublicKey, Signer, TransactionBuilder, transactionBuilder } from '@metaplex-foundation/umi'
 import { Serializer, bytes, mapSerializer, struct, u32, u64 } from '@metaplex-foundation/umi/serializers'
 import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners } from '../shared'
 
 // Accounts.
 export type SendInstructionAccounts = {
+    /** Must be on `store.senders`. Pays native fee via remaining accounts. */
+    authority?: Signer
     /** Who we send to on dst_eid (Ethereum contract, 32 bytes) plus gas options. */
     peer: PublicKey | Pda
     /**
@@ -27,8 +29,6 @@ export type SendInstructionAccounts = {
 export type SendInstructionData = {
     discriminator: Uint8Array
     dstEid: number
-    /** LayerZero payload bytes. Build with [`SendMessageParams::from_message`]. */
-    message: Uint8Array
     options: Uint8Array
     nativeFee: bigint
     lzTokenFee: bigint
@@ -36,8 +36,6 @@ export type SendInstructionData = {
 
 export type SendInstructionDataArgs = {
     dstEid: number
-    /** LayerZero payload bytes. Build with [`SendMessageParams::from_message`]. */
-    message: Uint8Array
     options: Uint8Array
     nativeFee: number | bigint
     lzTokenFee: number | bigint
@@ -49,7 +47,6 @@ export function getSendInstructionDataSerializer(): Serializer<SendInstructionDa
             [
                 ['discriminator', bytes({ size: 8 })],
                 ['dstEid', u32()],
-                ['message', bytes({ size: u32() })],
                 ['options', bytes({ size: u32() })],
                 ['nativeFee', u64()],
                 ['lzTokenFee', u64()],
@@ -65,7 +62,7 @@ export type SendInstructionArgs = SendInstructionDataArgs
 
 // Instruction.
 export function send(
-    context: Pick<Context, 'programs'>,
+    context: Pick<Context, 'identity' | 'programs'>,
     input: SendInstructionAccounts & SendInstructionArgs
 ): TransactionBuilder {
     // Program ID.
@@ -73,13 +70,19 @@ export function send(
 
     // Accounts.
     const resolvedAccounts = {
-        peer: { index: 0, isWritable: false as boolean, value: input.peer ?? null },
-        store: { index: 1, isWritable: false as boolean, value: input.store ?? null },
-        endpoint: { index: 2, isWritable: false as boolean, value: input.endpoint ?? null },
+        authority: { index: 0, isWritable: false as boolean, value: input.authority ?? null },
+        peer: { index: 1, isWritable: false as boolean, value: input.peer ?? null },
+        store: { index: 2, isWritable: false as boolean, value: input.store ?? null },
+        endpoint: { index: 3, isWritable: false as boolean, value: input.endpoint ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.
     const resolvedArgs: SendInstructionArgs = { ...input }
+
+    // Default values.
+    if (!resolvedAccounts.authority.value) {
+        resolvedAccounts.authority.value = context.identity
+    }
 
     // Accounts in order.
     const orderedAccounts: ResolvedAccount[] = Object.values(resolvedAccounts).sort((a, b) => a.index - b.index)

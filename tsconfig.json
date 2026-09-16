@@ -3,6 +3,7 @@
   "include": [
     "deploy",
     "test",
+    "tests",
     "tasks",
     "hardhat.config.ts",
     "lib/client",

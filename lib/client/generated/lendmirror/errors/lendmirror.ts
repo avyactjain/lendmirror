@@ -12,9 +12,9 @@ type ProgramErrorConstructor = new (program: Program, cause?: Error) => ProgramE
 const codeToErrorMap: Map<number, ProgramErrorConstructor> = new Map()
 const nameToErrorMap: Map<string, ProgramErrorConstructor> = new Map()
 
-/** InvalidLength:  */
-export class InvalidLengthError extends ProgramError {
-    override readonly name: string = 'InvalidLength'
+/** InvalidJupiterAccount:  */
+export class InvalidJupiterAccountError extends ProgramError {
+    override readonly name: string = 'InvalidJupiterAccount'
 
     readonly code: number = 0x1770 // 6000
 
@@ -22,12 +22,12 @@ export class InvalidLengthError extends ProgramError {
         super('', program, cause)
     }
 }
-codeToErrorMap.set(0x1770, InvalidLengthError)
-nameToErrorMap.set('InvalidLength', InvalidLengthError)
+codeToErrorMap.set(0x1770, InvalidJupiterAccountError)
+nameToErrorMap.set('InvalidJupiterAccount', InvalidJupiterAccountError)
 
-/** BodyTooShort:  */
-export class BodyTooShortError extends ProgramError {
-    override readonly name: string = 'BodyTooShort'
+/** PositionIdMismatch:  */
+export class PositionIdMismatchError extends ProgramError {
+    override readonly name: string = 'PositionIdMismatch'
 
     readonly code: number = 0x1771 // 6001
 
@@ -35,12 +35,12 @@ export class BodyTooShortError extends ProgramError {
         super('', program, cause)
     }
 }
-codeToErrorMap.set(0x1771, BodyTooShortError)
-nameToErrorMap.set('BodyTooShort', BodyTooShortError)
+codeToErrorMap.set(0x1771, PositionIdMismatchError)
+nameToErrorMap.set('PositionIdMismatch', PositionIdMismatchError)
 
-/** InvalidUtf8:  */
-export class InvalidUtf8Error extends ProgramError {
-    override readonly name: string = 'InvalidUtf8'
+/** TickPdaMismatch:  */
+export class TickPdaMismatchError extends ProgramError {
+    override readonly name: string = 'TickPdaMismatch'
 
     readonly code: number = 0x1772 // 6002
 
@@ -48,8 +48,60 @@ export class InvalidUtf8Error extends ProgramError {
         super('', program, cause)
     }
 }
-codeToErrorMap.set(0x1772, InvalidUtf8Error)
-nameToErrorMap.set('InvalidUtf8', InvalidUtf8Error)
+codeToErrorMap.set(0x1772, TickPdaMismatchError)
+nameToErrorMap.set('TickPdaMismatch', TickPdaMismatchError)
+
+/** TickOutOfRange:  */
+export class TickOutOfRangeError extends ProgramError {
+    override readonly name: string = 'TickOutOfRange'
+
+    readonly code: number = 0x1773 // 6003
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1773, TickOutOfRangeError)
+nameToErrorMap.set('TickOutOfRange', TickOutOfRangeError)
+
+/** Unauthorized:  */
+export class UnauthorizedError extends ProgramError {
+    override readonly name: string = 'Unauthorized'
+
+    readonly code: number = 0x1774 // 6004
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1774, UnauthorizedError)
+nameToErrorMap.set('Unauthorized', UnauthorizedError)
+
+/** AllowlistTooLong:  */
+export class AllowlistTooLongError extends ProgramError {
+    override readonly name: string = 'AllowlistTooLong'
+
+    readonly code: number = 0x1775 // 6005
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1775, AllowlistTooLongError)
+nameToErrorMap.set('AllowlistTooLong', AllowlistTooLongError)
+
+/** NoPositionSnapshot:  */
+export class NoPositionSnapshotError extends ProgramError {
+    override readonly name: string = 'NoPositionSnapshot'
+
+    readonly code: number = 0x1776 // 6006
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1776, NoPositionSnapshotError)
+nameToErrorMap.set('NoPositionSnapshot', NoPositionSnapshotError)
 
 /**
  * Attempts to resolve a custom program error from the provided error code.

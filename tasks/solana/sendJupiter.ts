@@ -1,4 +1,4 @@
-import { publicKey, publicKeyBytes, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
+import { publicKey, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
@@ -14,7 +14,7 @@ interface Args {
     computeUnitPriceScaleFactor: number
 }
 
-task('lz:oapp:solana:send-pyth', 'Sends the last Store Pyth snapshot to Ethereum. Do not use the old string contract.')
+task('lz:oapp:solana:send-jupiter', 'Sends the last Store Jupiter snapshot to Ethereum.')
     .addParam('fromEid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
     .addParam('dstEid', 'Destination endpoint ID (40161 = Sepolia)', undefined, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
@@ -24,34 +24,23 @@ task('lz:oapp:solana:send-pyth', 'Sends the last Store Pyth snapshot to Ethereum
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))
 
         const store = await instance.getStore(umi.rpc)
-        const snap = store ? unwrapOption(store.priceStore) : null
+        const snap = store ? unwrapOption(store.lastPosition) : null
         if (!store || !snap) {
-            throw new Error('Store has no Pyth snapshot. Run lz:oapp:solana:get-pyth-price first.')
+            throw new Error('Store has no Jupiter snapshot. Run lz:oapp:solana:get-jupiter-position first.')
         }
 
-        const message = lendmirror.encodePythPrice({
-            pythAccount: publicKeyBytes(snap.pythAccount),
-            feedId: Uint8Array.from(snap.feedId),
-            price: BigInt(snap.price),
-            conf: BigInt(snap.conf),
-            exponent: snap.exponent,
-            publishTime: BigInt(snap.publishTime),
-        })
-
-        const options = Options.newOptions().addExecutorLzReceiveOption(200000, 0).toBytes()
+        const options = Options.newOptions().addExecutorLzReceiveOption(400000, 0).toBytes()
 
         const { nativeFee } = await instance.quotePayload(umi.rpc, umiWalletSigner.publicKey, {
             dstEid,
-            message,
             options,
             payInLzToken: false,
         })
         console.log('Native fee quoted:', nativeFee.toString())
 
         let txBuilder = transactionBuilder().add(
-            await instance.sendPayload(umi.rpc, umiWalletSigner.publicKey, {
+            await instance.sendPayload(umi.rpc, umiWalletSigner, {
                 dstEid,
-                message,
                 options,
                 nativeFee,
             })

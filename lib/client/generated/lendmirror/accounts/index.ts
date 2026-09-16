@@ -8,6 +8,5 @@
 
 export * from './endpointSettings'
 export * from './peerConfig'
-export * from './priceUpdateV2'
-export * from './pythPriceAccount'
+export * from './positionSnapshotAccount'
 export * from './store'

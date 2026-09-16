@@ -11,6 +11,7 @@ import {
     Signer,
     WrappedInstruction,
     createNullRpc,
+    publicKey,
 } from '@metaplex-foundation/umi'
 import { createDefaultProgramRepository } from '@metaplex-foundation/umi-program-repository'
 import { toWeb3JsInstruction } from '@metaplex-foundation/umi-web3js-adapters'
@@ -31,62 +32,75 @@ import * as accounts from './generated/lendmirror/accounts'
 import * as errors from './generated/lendmirror/errors'
 import * as instructions from './generated/lendmirror/instructions'
 import * as types from './generated/lendmirror/types'
-import { LendMirrorPDA as LendMirrorPDA, pythPushFeedAccount } from './pda'
+import {
+    decodeJupiterPositionTick,
+    jupiterPositionPda,
+    jupiterTickPda,
+    jupiterVaultConfigPda,
+    jupiterVaultStatePda,
+} from './jupiter'
+import { LendMirrorPDA as LendMirrorPDA } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
 export { accounts, errors, instructions, types }
-export { LENDMIRROR_PROGRAM_ID } from './generated/lendmirror'
+export const JUPITER_VAULTS_MAINNET = publicKey('jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi')
+export const JUPITER_VAULTS_DEVNET = publicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 
-export const PYTH_PRICE_BODY_LEN = 92
+export const POSITION_SNAPSHOT_BODY_LEN = 200
 
-/** Same 32-byte length header as `msg_codec::encode` on Solana. */
-export function encodeLzString(message: string): Uint8Array {
-    const body = Buffer.from(message, 'utf8')
-    const out = Buffer.alloc(32 + body.length)
-    out.writeUInt32BE(body.length, 28)
-    body.copy(out, 32)
-    return Uint8Array.from(out)
+export type PositionSnapshotFields = {
+    position: Uint8Array
+    vaultId: number
+    nftId: number
+    positionMint: Uint8Array
+    supplyToken: Uint8Array
+    borrowToken: Uint8Array
+    colRaw: bigint
+    debtRaw: bigint
+    dustDebt: bigint
+    netDebt: bigint
+    tick: number
+    tickId: number
+    isSupplyOnly: boolean
+    isLiquidated: boolean
+    vaultSupplyExchangePrice: bigint
+    vaultBorrowExchangePrice: bigint
+    snapshotTime: bigint
 }
 
-export type PythPriceFields = {
-    pythAccount: Uint8Array
-    feedId: Uint8Array
-    price: bigint
-    conf: bigint
-    exponent: number
-    publishTime: bigint
+function require32(name: string, bytes: Uint8Array) {
+    if (bytes.length !== 32) {
+        throw new Error(`${name} must be 32 bytes`)
+    }
 }
 
-/** Same layout as `impl LzMessage for PythPrice` on Solana. Do not wrap this again with encodeLzString. */
-export function encodePythPrice(price: PythPriceFields): Uint8Array {
-    if (price.pythAccount.length !== 32) {
-        throw new Error('pythAccount must be 32 bytes')
-    }
-    if (price.feedId.length !== 32) {
-        throw new Error('feedId must be 32 bytes')
-    }
-    const out = new Uint8Array(32 + PYTH_PRICE_BODY_LEN)
+/** Same layout as `impl LzMessage for PositionSnapshot` on Solana. */
+export function encodePositionSnapshot(snap: PositionSnapshotFields): Uint8Array {
+    require32('position', snap.position)
+    require32('positionMint', snap.positionMint)
+    require32('supplyToken', snap.supplyToken)
+    require32('borrowToken', snap.borrowToken)
+    const out = new Uint8Array(32 + POSITION_SNAPSHOT_BODY_LEN)
     const view = new DataView(out.buffer)
-    view.setUint32(28, PYTH_PRICE_BODY_LEN)
-    out.set(price.pythAccount, 32)
-    out.set(price.feedId, 64)
-    view.setBigInt64(96, price.price)
-    view.setBigUint64(104, price.conf)
-    view.setInt32(112, price.exponent)
-    view.setBigInt64(116, price.publishTime)
+    view.setUint32(28, POSITION_SNAPSHOT_BODY_LEN)
+    out.set(snap.position, 32)
+    view.setUint16(64, snap.vaultId)
+    view.setUint32(66, snap.nftId)
+    out.set(snap.positionMint, 70)
+    out.set(snap.supplyToken, 102)
+    out.set(snap.borrowToken, 134)
+    view.setBigUint64(166, snap.colRaw)
+    view.setBigUint64(174, snap.debtRaw)
+    view.setBigUint64(182, snap.dustDebt)
+    view.setBigUint64(190, snap.netDebt)
+    view.setInt32(198, snap.tick)
+    view.setUint32(202, snap.tickId)
+    out[206] = snap.isSupplyOnly ? 1 : 0
+    out[207] = snap.isLiquidated ? 1 : 0
+    view.setBigUint64(208, snap.vaultSupplyExchangePrice)
+    view.setBigUint64(216, snap.vaultBorrowExchangePrice)
+    view.setBigInt64(224, snap.snapshotTime)
     return out
-}
-
-export function parseFeedId(hex: string): Uint8Array {
-    const stripped = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex
-    if (stripped.length !== 64) {
-        throw new Error('feedId must be 32 bytes hex (64 chars)')
-    }
-    const out = Buffer.from(stripped, 'hex')
-    if (out.length !== 32) {
-        throw new Error('feedId must be 32 bytes hex')
-    }
-    return Uint8Array.from(out)
 }
 
 const ENDPOINT_PROGRAM_ID: PublicKey = EndpointProgram.ENDPOINT_PROGRAM_ID
@@ -146,7 +160,7 @@ export class LendMirror {
         return accounts.safeFetchStore({ rpc }, count, { commitment })
     }
 
-    initStore(payer: Signer, admin: PublicKey): WrappedInstruction {
+    initStore(payer: Signer, admin: PublicKey, vaultsProgram: PublicKey): WrappedInstruction {
         const [oapp] = this.pda.oapp()
         const remainingAccounts = this.endpointSDK.getRegisterOappIxAccountMetaForCPI(payer.publicKey, oapp)
         return instructions
@@ -157,65 +171,62 @@ export class LendMirror {
                     store: oapp,
                     admin: admin,
                     endpoint: this.endpointSDK.programId,
+                    vaultsProgram,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
     }
 
-    getPythPrice(payer: Signer, feedId: Uint8Array, priceFeed?: PublicKey, shardId = 0): WrappedInstruction {
+    async getJupiterPosition(
+        rpc: RpcInterface,
+        authority: Signer,
+        vaultId: number,
+        nftId: number,
+        vaultsProgram: PublicKey,
+        payer?: Signer
+    ): Promise<WrappedInstruction> {
+        const feePayer = payer ?? authority
         const [store] = this.pda.oapp()
-        const [priceStore] = this.pda.pythPrice(feedId)
-        const [derivedFeed] = pythPushFeedAccount(feedId, shardId)
-        return instructions.getPythPrice(
-            { payer, programs: this.programRepo },
+        const [position] = jupiterPositionPda(vaultsProgram, vaultId, nftId)
+        const [vaultState] = jupiterVaultStatePda(vaultsProgram, vaultId)
+        const [vaultConfig] = jupiterVaultConfigPda(vaultsProgram, vaultId)
+        const [positionStore] = this.pda.jupPosition(vaultId, nftId)
+        const positionAccount = await rpc.getAccount(position)
+        if (!positionAccount.exists) {
+            throw new Error(`No Jupiter position for vault ${vaultId} nft ${nftId} (${position})`)
+        }
+        const tick = decodeJupiterPositionTick(positionAccount.data)
+        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, tick)
+        return instructions.getJupiterPosition(
+            { identity: authority, payer: feePayer, programs: this.programRepo },
             {
-                payer,
-                priceFeed: priceFeed ?? derivedFeed,
-                priceStore,
+                authority,
+                payer: feePayer,
                 store,
-                feedId,
+                vaultsProgram,
+                position,
+                vaultState,
+                vaultConfig,
+                tick: tickPda,
+                positionStore,
+                vaultId,
+                nftId,
             }
         ).items[0]
     }
 
-    async send(
-        rpc: RpcInterface,
-        payer: PublicKey,
-        params: EndpointProgram.types.MessagingFee & {
-            dstEid: number
-            message: string
-            options: Uint8Array
-        },
-        remainingAccounts?: AccountMeta[],
-        commitment: Commitment = 'confirmed'
-    ): Promise<WrappedInstruction> {
-        return this.sendPayload(
-            rpc,
-            payer,
-            {
-                dstEid: params.dstEid,
-                message: encodeLzString(params.message),
-                options: params.options,
-                nativeFee: params.nativeFee,
-                lzTokenFee: params.lzTokenFee,
-            },
-            remainingAccounts,
-            commitment
-        )
-    }
-
     async sendPayload(
         rpc: RpcInterface,
-        payer: PublicKey,
+        authority: Signer,
         params: EndpointProgram.types.MessagingFee & {
             dstEid: number
-            message: Uint8Array
             options: Uint8Array
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<WrappedInstruction> {
-        const { dstEid, nativeFee, lzTokenFee, message, options } = params
+        const { dstEid, nativeFee, lzTokenFee, options } = params
+        const payer = authority.publicKey
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
@@ -241,19 +252,41 @@ export class LendMirror {
         }
         return instructions
             .send(
-                { programs: this.programRepo },
+                { identity: authority, programs: this.programRepo },
                 {
+                    authority,
                     store: oapp,
                     peer: peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,
-                    message,
                     options,
                     nativeFee: nativeFee,
                     lzTokenFee: lzTokenFee ?? 0,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
+    }
+
+    setSnapshotters(admin: Signer, keys: PublicKey[]): WrappedInstruction {
+        return instructions.setSnapshotters(
+            { programs: this.programRepo },
+            {
+                admin,
+                store: this.pda.oapp()[0],
+                params: { keys },
+            }
+        ).items[0]
+    }
+
+    setSenders(admin: Signer, keys: PublicKey[]): WrappedInstruction {
+        return instructions.setSenders(
+            { programs: this.programRepo },
+            {
+                admin,
+                store: this.pda.oapp()[0],
+                params: { keys },
+            }
+        ).items[0]
     }
 
     setPeerConfig(
@@ -295,45 +328,18 @@ export class LendMirror {
         ).items[0]
     }
 
-    async quote(
-        rpc: RpcInterface,
-        payer: PublicKey,
-        params: {
-            dstEid: number
-            message: string
-            options: Uint8Array
-            payInLzToken: boolean
-        },
-        remainingAccounts?: AccountMeta[],
-        commitment: Commitment = 'confirmed'
-    ): Promise<EndpointProgram.types.MessagingFee> {
-        return this.quotePayload(
-            rpc,
-            payer,
-            {
-                dstEid: params.dstEid,
-                message: encodeLzString(params.message),
-                options: params.options,
-                payInLzToken: params.payInLzToken,
-            },
-            remainingAccounts,
-            commitment
-        )
-    }
-
     async quotePayload(
         rpc: RpcInterface,
         payer: PublicKey,
         params: {
             dstEid: number
-            message: Uint8Array
             options: Uint8Array
             payInLzToken: boolean
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<EndpointProgram.types.MessagingFee> {
-        const { dstEid, message, options, payInLzToken } = params
+        const { dstEid, options, payInLzToken } = params
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
@@ -362,7 +368,6 @@ export class LendMirror {
                     peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,
-                    message,
                     options,
                     payInLzToken,
                     receiver: packetPath.receiver,

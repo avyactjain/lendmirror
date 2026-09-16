@@ -1,3 +1,4 @@
+use crate::errors::LendMirrorError;
 use crate::*;
 use oapp::endpoint::{instructions::RegisterOAppParams, ID as ENDPOINT_ID};
 
@@ -9,11 +10,10 @@ use oapp::endpoint::{instructions::RegisterOAppParams, ID as ENDPOINT_ID};
 ///
 /// 'info = these account refs live only for this instruction.
 #[derive(Accounts)]
+#[instruction(params: InitStoreParams)]
 pub struct InitStore<'info> {
-    /// mut = writable (lamports leave this account to pay rent).
-    /// Signer = this pubkey signed the tx.
-    /// Anyone can call once. First caller wins. We will lock this later.
-    #[account(mut)]
+    /// Pays rent and must be the intended admin (stops front-run with a foreign admin).
+    #[account(mut, constraint = payer.key() == params.admin @ LendMirrorError::Unauthorized)]
     pub payer: Signer<'info>,
     /// init = create this account now. Fails if it already exists.
     /// payer = who pays rent. space = bytes allocated.
@@ -33,20 +33,22 @@ pub struct InitStore<'info> {
     pub system_program: Program<'info, System>,
 }
 
-// NOTE: This example init_store may be front-run. It can be called by anyone, and can only be called once.
-// The first caller will be able to set the admin and endpoint program for the store. If front-runned, the program will need to be redeployed and re-initialized with the correct parameters.
-// You should modify this instruction accordingly for your use case with the appropriate access control and checks.
 impl InitStore<'_> {
     pub fn apply(ctx: &mut Context<InitStore>, params: &InitStoreParams) -> Result<()> {
         ctx.accounts.store.admin = params.admin;
         ctx.accounts.store.bump = ctx.bumps.store;
         ctx.accounts.store.endpoint_program = params.endpoint;
-
-        // the line below is specific to this string-passing example
-        ctx.accounts.store.price_store = None;
+        ctx.accounts.store.vaults_program = params.vaults_program;
+        ctx.accounts.store.last_position = None;
+        // Seed both allowlists with admin so create → snapshot → send works
+        // without an extra set_* call. Admin can replace the lists later.
+        ctx.accounts.store.set_snapshotters(&[params.admin])?;
+        ctx.accounts.store.set_senders(&[params.admin])?;
 
         // Prepare the delegate address for the OApp registration.
-        let register_params = RegisterOAppParams { delegate: ctx.accounts.store.admin };
+        let register_params = RegisterOAppParams {
+            delegate: ctx.accounts.store.admin,
+        };
 
         // The Store PDA 'signs' CPI to the Endpoint program to register the OApp.
         let seeds: &[&[u8]] = &[STORE_SEED, &[ctx.accounts.store.bump]];
@@ -66,4 +68,5 @@ impl InitStore<'_> {
 pub struct InitStoreParams {
     pub admin: Pubkey,
     pub endpoint: Pubkey,
+    pub vaults_program: Pubkey,
 }

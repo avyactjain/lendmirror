@@ -18,12 +18,7 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type InitStoreInstructionAccounts = {
-    /**
-     * mut = writable (lamports leave this account to pay rent).
-     * Signer = this pubkey signed the tx.
-     * Anyone can call once. First caller wins. We will lock this later.
-     */
-
+    /** Pays rent and must be the intended admin (stops front-run with a foreign admin). */
     payer?: Signer
     /**
      * init = create this account now. Fails if it already exists.
@@ -39,9 +34,14 @@ export type InitStoreInstructionAccounts = {
 }
 
 // Data.
-export type InitStoreInstructionData = { discriminator: Uint8Array; admin: PublicKey; endpoint: PublicKey }
+export type InitStoreInstructionData = {
+    discriminator: Uint8Array
+    admin: PublicKey
+    endpoint: PublicKey
+    vaultsProgram: PublicKey
+}
 
-export type InitStoreInstructionDataArgs = { admin: PublicKey; endpoint: PublicKey }
+export type InitStoreInstructionDataArgs = { admin: PublicKey; endpoint: PublicKey; vaultsProgram: PublicKey }
 
 export function getInitStoreInstructionDataSerializer(): Serializer<
     InitStoreInstructionDataArgs,
@@ -53,6 +53,7 @@ export function getInitStoreInstructionDataSerializer(): Serializer<
                 ['discriminator', bytes({ size: 8 })],
                 ['admin', publicKeySerializer()],
                 ['endpoint', publicKeySerializer()],
+                ['vaultsProgram', publicKeySerializer()],
             ],
             { description: 'InitStoreInstructionData' }
         ),
