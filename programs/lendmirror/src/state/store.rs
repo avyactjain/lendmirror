@@ -67,3 +67,94 @@ impl Store {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_store() -> Store {
+        Store {
+            admin: Pubkey::new_unique(),
+            bump: 255,
+            endpoint_program: Pubkey::default(),
+            vaults_program: Pubkey::default(),
+            snapshotters: [Pubkey::default(); ALLOWLIST_LEN],
+            snapshotter_count: 0,
+            senders: [Pubkey::default(); ALLOWLIST_LEN],
+            sender_count: 0,
+            last_position: None,
+        }
+    }
+
+    #[test]
+    fn empty_lists_reject_everyone() {
+        let store = empty_store();
+        let stranger = Pubkey::new_unique();
+        assert!(!store.is_snapshotter(&stranger));
+        assert!(!store.is_sender(&stranger));
+    }
+
+    #[test]
+    fn snapshotters_membership_and_replace() {
+        let mut store = empty_store();
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+        let stranger = Pubkey::new_unique();
+
+        store.set_snapshotters(&[a]).unwrap();
+        assert!(store.is_snapshotter(&a));
+        assert!(!store.is_snapshotter(&b));
+        assert!(!store.is_snapshotter(&stranger));
+        assert_eq!(store.snapshotter_count, 1);
+
+        store.set_snapshotters(&[b, a]).unwrap();
+        assert!(store.is_snapshotter(&a));
+        assert!(store.is_snapshotter(&b));
+        assert_eq!(store.snapshotter_count, 2);
+        // Prior sole entry still present; list was replaced not appended.
+        assert!(!store.is_snapshotter(&stranger));
+    }
+
+    #[test]
+    fn senders_membership_and_replace() {
+        let mut store = empty_store();
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+
+        store.set_senders(&[a]).unwrap();
+        assert!(store.is_sender(&a));
+        assert!(!store.is_sender(&b));
+        assert_eq!(store.sender_count, 1);
+
+        store.set_senders(&[b]).unwrap();
+        assert!(!store.is_sender(&a));
+        assert!(store.is_sender(&b));
+        assert_eq!(store.sender_count, 1);
+    }
+
+    #[test]
+    fn allowlist_max_eight_then_too_long() {
+        let mut store = empty_store();
+        let eight: Vec<Pubkey> = (0..ALLOWLIST_LEN).map(|_| Pubkey::new_unique()).collect();
+        store.set_snapshotters(&eight).unwrap();
+        assert_eq!(store.snapshotter_count, 8);
+        assert!(store.is_snapshotter(&eight[7]));
+
+        let nine: Vec<Pubkey> = (0..ALLOWLIST_LEN + 1).map(|_| Pubkey::new_unique()).collect();
+        let err = store.set_snapshotters(&nine).unwrap_err();
+        assert_eq!(err, error!(LendMirrorError::AllowlistTooLong));
+
+        let err = store.set_senders(&nine).unwrap_err();
+        assert_eq!(err, error!(LendMirrorError::AllowlistTooLong));
+    }
+
+    #[test]
+    fn init_style_seed_puts_admin_on_both_lists() {
+        let mut store = empty_store();
+        let admin = store.admin;
+        store.set_snapshotters(&[admin]).unwrap();
+        store.set_senders(&[admin]).unwrap();
+        assert!(store.is_snapshotter(&admin));
+        assert!(store.is_sender(&admin));
+    }
+}
