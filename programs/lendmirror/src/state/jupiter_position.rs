@@ -4,11 +4,9 @@ use anchor_lang::prelude::*;
 
 /// Known Jupiter Lend Vaults ids. Pass one of these into `init_store`.
 #[allow(dead_code)]
-pub const JUPITER_VAULTS_MAINNET: Pubkey =
-    pubkey!("jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi");
+pub const JUPITER_VAULTS_MAINNET: Pubkey = pubkey!("jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi");
 #[allow(dead_code)]
-pub const JUPITER_VAULTS_DEVNET: Pubkey =
-    pubkey!("Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu");
+pub const JUPITER_VAULTS_DEVNET: Pubkey = pubkey!("Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu");
 
 const POSITION_DISC: [u8; 8] = [170, 188, 143, 228, 122, 64, 247, 208];
 const TICK_DISC: [u8; 8] = [176, 94, 67, 247, 133, 173, 7, 115];
@@ -121,9 +119,12 @@ impl LzMessage for PositionSnapshot {
             position: Pubkey::try_from(&body[0..32]).map_err(|_| MsgCodecError::InvalidLength)?,
             vault_id: u16::from_be_bytes(body[32..34].try_into().unwrap()),
             nft_id: u32::from_be_bytes(body[34..38].try_into().unwrap()),
-            position_mint: Pubkey::try_from(&body[38..70]).map_err(|_| MsgCodecError::InvalidLength)?,
-            supply_token: Pubkey::try_from(&body[70..102]).map_err(|_| MsgCodecError::InvalidLength)?,
-            borrow_token: Pubkey::try_from(&body[102..134]).map_err(|_| MsgCodecError::InvalidLength)?,
+            position_mint: Pubkey::try_from(&body[38..70])
+                .map_err(|_| MsgCodecError::InvalidLength)?,
+            supply_token: Pubkey::try_from(&body[70..102])
+                .map_err(|_| MsgCodecError::InvalidLength)?,
+            borrow_token: Pubkey::try_from(&body[102..134])
+                .map_err(|_| MsgCodecError::InvalidLength)?,
             col_raw: u64::from_be_bytes(body[134..142].try_into().unwrap()),
             debt_raw: u64::from_be_bytes(body[142..150].try_into().unwrap()),
             dust_debt: u64::from_be_bytes(body[150..158].try_into().unwrap()),
@@ -184,10 +185,7 @@ pub fn decode_vault_state_prices(data: &[u8]) -> Result<JupiterVaultStatePrices>
     r.u64()?; // liquidity_borrow_exchange_price
     let vault_supply_exchange_price = r.u64()?;
     let vault_borrow_exchange_price = r.u64()?;
-    Ok(JupiterVaultStatePrices {
-        vault_supply_exchange_price,
-        vault_borrow_exchange_price,
-    })
+    Ok(JupiterVaultStatePrices { vault_supply_exchange_price, vault_borrow_exchange_price })
 }
 
 pub fn decode_vault_tokens(data: &[u8]) -> Result<JupiterVaultTokens> {
@@ -208,10 +206,7 @@ pub fn decode_vault_tokens(data: &[u8]) -> Result<JupiterVaultTokens> {
     r.pubkey()?; // oracle_program
     let supply_token = r.pubkey()?;
     let borrow_token = r.pubkey()?;
-    Ok(JupiterVaultTokens {
-        supply_token,
-        borrow_token,
-    })
+    Ok(JupiterVaultTokens { supply_token, borrow_token })
 }
 
 struct ByteReader<'a> {
@@ -227,10 +222,7 @@ impl<'a> ByteReader<'a> {
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8]> {
-        require!(
-            self.i + n <= self.data.len(),
-            LendMirrorError::InvalidJupiterAccount
-        );
+        require!(self.i + n <= self.data.len(), LendMirrorError::InvalidJupiterAccount);
         let s = &self.data[self.i..self.i + n];
         self.i += n;
         Ok(s)
@@ -331,21 +323,12 @@ mod tests {
         assert_eq!(original.tick_id, decoded.tick_id);
         assert_eq!(original.is_supply_only, decoded.is_supply_only);
         assert_eq!(original.is_liquidated, decoded.is_liquidated);
-        assert_eq!(
-            original.vault_supply_exchange_price,
-            decoded.vault_supply_exchange_price
-        );
-        assert_eq!(
-            original.vault_borrow_exchange_price,
-            decoded.vault_borrow_exchange_price
-        );
+        assert_eq!(original.vault_supply_exchange_price, decoded.vault_supply_exchange_price);
+        assert_eq!(original.vault_borrow_exchange_price, decoded.vault_borrow_exchange_price);
         assert_eq!(original.snapshot_time, decoded.snapshot_time);
         assert_eq!(POSITION_SNAPSHOT_BODY_LEN, PositionSnapshot::INIT_SPACE);
         assert_eq!(encoded.len(), 32 + POSITION_SNAPSHOT_BODY_LEN);
-        assert_eq!(
-            &encoded[28..32],
-            &(POSITION_SNAPSHOT_BODY_LEN as u32).to_be_bytes()
-        );
+        assert_eq!(&encoded[28..32], &(POSITION_SNAPSHOT_BODY_LEN as u32).to_be_bytes());
         assert_eq!(&encoded[32..64], original.position.as_ref());
         assert_eq!(&encoded[64..66], &original.vault_id.to_be_bytes());
         assert_eq!(&encoded[198..202], &original.tick.to_be_bytes());

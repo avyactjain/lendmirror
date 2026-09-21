@@ -18,7 +18,11 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type InitStoreInstructionAccounts = {
-    /** Pays rent and must be the intended admin (stops front-run with a foreign admin). */
+    /**
+     * Pays rent. Must be this program's upgrade authority.
+     * `params.admin` is who becomes Store admin; it is not the gate.
+     */
+
     payer?: Signer
     /**
      * init = create this account now. Fails if it already exists.
@@ -29,6 +33,14 @@ export type InitStoreInstructionAccounts = {
      */
 
     store: PublicKey | Pda
+    /**
+     * This program's executable account. Binds `program_data` to us so a
+     * caller cannot pass another program's ProgramData.
+     */
+
+    program: PublicKey | Pda
+    /** BPF-loader ProgramData for `program`. Upgrade authority is set at deploy. */
+    programData: PublicKey | Pda
     /** System program creates accounts. Must be in the list or init fails. */
     systemProgram?: PublicKey | Pda
 }
@@ -76,7 +88,9 @@ export function initStore(
     const resolvedAccounts = {
         payer: { index: 0, isWritable: true as boolean, value: input.payer ?? null },
         store: { index: 1, isWritable: true as boolean, value: input.store ?? null },
-        systemProgram: { index: 2, isWritable: false as boolean, value: input.systemProgram ?? null },
+        program: { index: 2, isWritable: false as boolean, value: input.program ?? null },
+        programData: { index: 3, isWritable: false as boolean, value: input.programData ?? null },
+        systemProgram: { index: 4, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

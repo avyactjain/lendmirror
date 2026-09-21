@@ -8,6 +8,9 @@ pub const ALLOWLIST_LEN: usize = 8;
 /// LayerZero PacketSent.sender = this account's pubkey, not the program id.
 /// Ethereum setPeer must use this address.
 ///
+/// Created once by `init_store`. Only this program's upgrade authority can
+/// call that instruction. `admin` is then the operational key for allowlists.
+///
 /// #[account] is NOT the PDA seed. It only packs this struct into account bytes.
 /// The seed lives in init_store / send as `seeds = [STORE_SEED]`.
 /// The 8 bytes stop you passing a PeerConfig account where a Store is required.
@@ -30,22 +33,15 @@ pub struct Store {
 
 impl Store {
     pub fn is_snapshotter(&self, key: &Pubkey) -> bool {
-        self.snapshotters[..self.snapshotter_count as usize]
-            .iter()
-            .any(|k| k == key)
+        self.snapshotters[..self.snapshotter_count as usize].iter().any(|k| k == key)
     }
 
     pub fn is_sender(&self, key: &Pubkey) -> bool {
-        self.senders[..self.sender_count as usize]
-            .iter()
-            .any(|k| k == key)
+        self.senders[..self.sender_count as usize].iter().any(|k| k == key)
     }
 
     pub fn set_snapshotters(&mut self, keys: &[Pubkey]) -> Result<()> {
-        require!(
-            keys.len() <= ALLOWLIST_LEN,
-            LendMirrorError::AllowlistTooLong
-        );
+        require!(keys.len() <= ALLOWLIST_LEN, LendMirrorError::AllowlistTooLong);
         self.snapshotters = [Pubkey::default(); ALLOWLIST_LEN];
         for (i, key) in keys.iter().enumerate() {
             self.snapshotters[i] = *key;
@@ -55,10 +51,7 @@ impl Store {
     }
 
     pub fn set_senders(&mut self, keys: &[Pubkey]) -> Result<()> {
-        require!(
-            keys.len() <= ALLOWLIST_LEN,
-            LendMirrorError::AllowlistTooLong
-        );
+        require!(keys.len() <= ALLOWLIST_LEN, LendMirrorError::AllowlistTooLong);
         self.senders = [Pubkey::default(); ALLOWLIST_LEN];
         for (i, key) in keys.iter().enumerate() {
             self.senders[i] = *key;

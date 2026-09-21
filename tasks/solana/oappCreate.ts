@@ -20,6 +20,7 @@ interface Args {
 const action: ActionType<Args> = async ({ programId, eid }, hre: HardhatRuntimeEnvironment) => {
     const isTestnet = eid == EndpointId.SOLANA_V2_TESTNET
 
+    // Payer must be this program's upgrade authority. A random wallet cannot create the Store.
     const lendmirrorInstance: lendmirror.LendMirror = new lendmirror.LendMirror(publicKey(programId))
     const [oapp] = lendmirrorInstance.pda.oapp()
     const { umi, umiWalletSigner } = await deriveConnection(eid)

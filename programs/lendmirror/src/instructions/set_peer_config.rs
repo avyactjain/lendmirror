@@ -56,5 +56,8 @@ pub struct SetPeerConfigParams {
 pub enum PeerConfigParam {
     PeerAddress([u8; 32]),
     /// Optionally enforce specific send options for this peer
-    EnforcedOptions { send: Vec<u8>, send_and_call: Vec<u8> },
+    EnforcedOptions {
+        send: Vec<u8>,
+        send_and_call: Vec<u8>,
+    },
 }

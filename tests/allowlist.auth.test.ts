@@ -16,9 +16,15 @@ const PEER_SEED = Buffer.from('LendMirrorPeer')
 const PROGRAM_ID = new PublicKey('GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1')
 const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6')
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
+/** BPFLoaderUpgradeab1e11111111111111111111111 */
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 /** Sepolia V2 testnet eid */
 const DST_EID = 40161
 const PEER_BYTES = Buffer.alloc(32, 7)
+
+function programDataPda(programId: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync([programId.toBuffer()], BPF_LOADER_UPGRADEABLE_PROGRAM_ID)[0]
+}
 
 function assertLogsMatch(err: unknown, pattern: RegExp) {
     const e = err as { logs?: string[]; message?: string }
@@ -37,6 +43,17 @@ describe('allowlist auth', function () {
     const stranger = Keypair.generate()
 
     const [storePda] = PublicKey.findProgramAddressSync([STORE_SEED], PROGRAM_ID)
+    const programData = programDataPda(PROGRAM_ID)
+
+    function initStoreAccounts(payer: PublicKey) {
+        return {
+            payer,
+            store: storePda,
+            program: PROGRAM_ID,
+            programData,
+            systemProgram: SystemProgram.programId,
+        }
+    }
 
     /** Remaining accounts for Endpoint register_oapp CPI (same order as SDK). */
     function registerOappRemaining(payer: PublicKey): anchor.web3.AccountMeta[] {
@@ -65,7 +82,16 @@ describe('allowlist auth', function () {
         await provider.connection.confirmTransaction(sig, 'confirmed')
     })
 
-    it('init_store rejects payer != admin', async () => {
+    it('programData PDA is the BPF-loader PDA of this program', () => {
+        expect(programData.toBase58()).to.equal(
+            PublicKey.findProgramAddressSync(
+                [PROGRAM_ID.toBuffer()],
+                BPF_LOADER_UPGRADEABLE_PROGRAM_ID
+            )[0].toBase58()
+        )
+    })
+
+    it('init_store rejects a payer who is not the upgrade authority', async () => {
         try {
             await program.methods
                 .initStore({
@@ -73,11 +99,9 @@ describe('allowlist auth', function () {
                     endpoint: ENDPOINT_PROGRAM,
                     vaultsProgram: JUPITER_VAULTS_DEVNET,
                 })
-                .accounts({
-                    payer: admin.publicKey,
-                    store: storePda,
-                    systemProgram: SystemProgram.programId,
-                })
+                .accounts(initStoreAccounts(stranger.publicKey))
+                .remainingAccounts(registerOappRemaining(stranger.publicKey))
+                .signers([stranger])
                 .rpc()
             expect.fail('expected Unauthorized')
         } catch (err) {
@@ -85,18 +109,34 @@ describe('allowlist auth', function () {
         }
     })
 
-    it('init_store succeeds when payer == admin', async () => {
+    it('init_store rejects the wrong ProgramData account', async () => {
+        try {
+            await program.methods
+                .initStore({
+                    admin: admin.publicKey,
+                    endpoint: ENDPOINT_PROGRAM,
+                    vaultsProgram: JUPITER_VAULTS_DEVNET,
+                })
+                .accounts({
+                    ...initStoreAccounts(admin.publicKey),
+                    programData: SystemProgram.programId,
+                })
+                .remainingAccounts(registerOappRemaining(admin.publicKey))
+                .rpc()
+            expect.fail('expected ProgramData constraint failure')
+        } catch (err) {
+            assertLogsMatch(err, /Unauthorized|6004|AccountOwnedByWrongProgram|3007|AccountDiscriminatorMismatch|3002/)
+        }
+    })
+
+    it('init_store succeeds when payer is the upgrade authority', async () => {
         await program.methods
             .initStore({
                 admin: admin.publicKey,
                 endpoint: ENDPOINT_PROGRAM,
                 vaultsProgram: JUPITER_VAULTS_DEVNET,
             })
-            .accounts({
-                payer: admin.publicKey,
-                store: storePda,
-                systemProgram: SystemProgram.programId,
-            })
+            .accounts(initStoreAccounts(admin.publicKey))
             .remainingAccounts(registerOappRemaining(admin.publicKey))
             .rpc()
 
