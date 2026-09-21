@@ -39,7 +39,8 @@ pub mod lendmirror {
     use super::*;
 
     // Create the Store PDA and register it with LayerZero's Endpoint.
-    // Call once. Payer must equal params.admin. Seeds admin onto both allowlists.
+    // Call once. Payer must be this program's upgrade authority (not a
+    // caller-chosen admin). Seeds params.admin onto both allowlists.
     pub fn init_store(mut ctx: Context<InitStore>, params: InitStoreParams) -> Result<()> {
         InitStore::apply(&mut ctx, &params)
     }

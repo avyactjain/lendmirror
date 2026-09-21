@@ -169,6 +169,8 @@ export class LendMirror {
                 {
                     payer,
                     store: oapp,
+                    program: this.programId,
+                    programData: this.pda.programData()[0],
                     admin: admin,
                     endpoint: this.endpointSDK.programId,
                     vaultsProgram,

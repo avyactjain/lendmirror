@@ -1,7 +1,7 @@
-pub mod store;
-mod peer_config;
 mod jupiter_position;
+mod peer_config;
+pub mod store;
 
-pub use store::*;
-pub use peer_config::*;
 pub use jupiter_position::*;
+pub use peer_config::*;
+pub use store::*;

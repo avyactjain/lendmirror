@@ -41,10 +41,7 @@ pub fn tick_pda_seed(tick: i32) -> [u8; 4] {
 
 /// X48 ratio at `tick`. Tick 0 is 2^48.
 pub fn get_ratio_at_tick(tick: i32) -> Result<u128> {
-    require!(
-        tick >= MIN_TICK && tick <= MAX_TICK,
-        LendMirrorError::TickOutOfRange
-    );
+    require!(tick >= MIN_TICK && tick <= MAX_TICK, LendMirrorError::TickOutOfRange);
 
     let abs_tick = tick.unsigned_abs();
     let mut factor = if abs_tick & 1 != 0 { FACTOR01 } else { FACTOR00 };

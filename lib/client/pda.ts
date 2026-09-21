@@ -1,4 +1,4 @@
-import { Pda, PublicKey, publicKeyBytes } from '@metaplex-foundation/umi'
+import { Pda, PublicKey, publicKey, publicKeyBytes } from '@metaplex-foundation/umi'
 import { Endian, u32 } from '@metaplex-foundation/umi/serializers'
 import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 
@@ -7,6 +7,9 @@ import { OmniAppPDA } from '@layerzerolabs/lz-solana-sdk-v2/umi'
 import { u16Le, u32Le } from './jupiter'
 
 const eddsa = createWeb3JsEddsa()
+
+/** BPFLoaderUpgradeab1e11111111111111111111111 — owns ProgramData PDAs. */
+export const BPF_LOADER_UPGRADEABLE = publicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 
 export const LZ_RECEIVE_TYPES_SEED = 'LzReceiveTypes'
 
@@ -18,6 +21,11 @@ export class LendMirrorPDA extends OmniAppPDA {
 
     constructor(public readonly programId: PublicKey) {
         super(programId)
+    }
+
+    /** BPF-loader ProgramData PDA for this program. Used by `init_store`. */
+    programData(): Pda {
+        return eddsa.findPda(BPF_LOADER_UPGRADEABLE, [publicKeyBytes(this.programId)])
     }
 
     // seeds = [STORE_SEED],

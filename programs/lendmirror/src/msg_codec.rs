@@ -39,9 +39,7 @@ pub fn wrap_lz_payload(payload: &[u8]) -> Vec<u8> {
 pub fn unwrap_lz_payload(buf: &[u8]) -> Result<&[u8], MsgCodecError> {
     let payload_len = decode_payload_len(buf)?;
     let start = PAYLOAD_OFFSET;
-    let end = start
-        .checked_add(payload_len)
-        .ok_or(MsgCodecError::InvalidLength)?;
+    let end = start.checked_add(payload_len).ok_or(MsgCodecError::InvalidLength)?;
     if end > buf.len() {
         return Err(MsgCodecError::BodyTooShort);
     }

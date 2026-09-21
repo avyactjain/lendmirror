@@ -62,16 +62,18 @@ These are different keys. Do not mix them up.
 |------|------------|----------------|
 | **Program id** | The deployed Solana program | Holds the code. Not a wallet. Not the LayerZero sender. |
 | **Store** | PDA created by `init_store` (seed `LendMirrorStore`) | LayerZero **sender** identity. Ethereum `setPeer` must use this address, not the program id. |
-| **Admin** | Wallet set once at `init_store` (must sign create) | Create the Store. Update peers. Update the snapshot and send allowlists. Cannot transfer admin on-chain in v1. |
+| **Admin** | Wallet written once at `init_store` (`params.admin`) | Update peers. Update the snapshot and send allowlists. Cannot transfer admin on-chain in v1. Does **not** create the Store. |
 | **Snapshotter** | Wallet on the Store snapshot list (max 8) | Call `get_jupiter_position` to refresh `last_position`. |
 | **Sender** | Wallet on the Store send list (max 8) | Call `send` to push the stored snapshot to Ethereum. Cannot choose custom bytes — payload is always `last_position`. |
-| **Upgrade authority** | Key that deployed/upgraded the program (usually `lendmirror-keypair.json` until rotated) | Can upgrade program bytecode. Keep this key safe offline. |
+| **Upgrade authority** | Key that deployed/upgraded the program (usually `lendmirror-keypair.json` until rotated) | Only key that can call `init_store` (create the Store). Can upgrade bytecode. Keep this key safe offline. |
 | **Ethereum owner** | Wallet that called `initialize` on the proxy | Owns the EVM contract / LayerZero delegate. Sets peers. **Upgrades** the proxy (`upgradeToAndCall`). |
 | **Fee payer** | Any wallet paying SOL/ETH for a tx | Pays rent and fees. For snapshot/send it must also be (or accompany) an allowed authority. |
 
 **Rules in plain words**
 
-- Only the **admin** creates the Store and changes who is allowed to snapshot or send.
+- Only the **upgrade authority** can call `init_store`. A random wallet cannot front-run create and become admin. There is no `close_store`; a stolen Store would burn this program id.
+- `params.admin` is who the upgrade authority *names* as Store admin. It is not the gate. The create script uses the same wallet for both.
+- Only the **admin** changes who is allowed to snapshot or send.
 - Only **snapshotters** can refresh the on-chain snapshot.
 - Only **senders** can publish that snapshot to Ethereum.
 - After create, admin is automatically on both lists. Admin can replace those lists later (up to 8 wallets each).
@@ -178,8 +180,10 @@ solana program deploy \
   target/deploy/lendmirror.so \
   --use-rpc
 
-# 3. Create the Store once. Signer becomes admin and is put on both allowlists.
-#    eid 40168 selects Devnet Jupiter Vaults. Writes deployments/solana-testnet/OApp.json
+# 3. Create the Store once. Signer must be the program upgrade authority
+#    (the key that deployed the .so). That wallet is named admin and put on
+#    both allowlists. eid 40168 selects Devnet Jupiter Vaults.
+#    Writes deployments/solana-testnet/OApp.json
 nvm use 18
 npx hardhat lz:oapp:solana:create --eid 40168 --program-id $LENDMIRROR_ID
 

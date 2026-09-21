@@ -104,17 +104,10 @@ impl GetJupiterPosition<'_> {
         );
 
         let (expected_tick, _) = Pubkey::find_program_address(
-            &[
-                b"tick",
-                &params.vault_id.to_le_bytes(),
-                &tick_math::tick_pda_seed(position.tick),
-            ],
+            &[b"tick", &params.vault_id.to_le_bytes(), &tick_math::tick_pda_seed(position.tick)],
             &vaults_program,
         );
-        require!(
-            ctx.accounts.tick.key() == expected_tick,
-            LendMirrorError::TickPdaMismatch
-        );
+        require!(ctx.accounts.tick.key() == expected_tick, LendMirrorError::TickPdaMismatch);
 
         let tick = decode_tick(&ctx.accounts.tick.try_borrow_data()?)?;
         require!(
@@ -131,11 +124,7 @@ impl GetJupiterPosition<'_> {
 
         let col_raw = position.supply_amount;
         let dust_debt = position.dust_debt_amount;
-        let debt_raw = if is_supply_only {
-            0
-        } else {
-            debt_raw_at_tick(position.tick, col_raw)?
-        };
+        let debt_raw = if is_supply_only { 0 } else { debt_raw_at_tick(position.tick, col_raw)? };
         let net_debt = debt_raw.saturating_sub(dust_debt);
 
         let snapshot = PositionSnapshot {
