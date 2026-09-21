@@ -98,6 +98,32 @@ contract PositionSnapshotMsgCodecTest is Test {
         assertEq(payload.length, 257);
     }
 
+    function testPriceMatchesJupiterScaling() public pure {
+        PositionSnapshotMsgCodec.Snapshot memory s;
+        s.colRaw = 10_000_000;
+        s.debtRaw = 12_114_964;
+        s.dustDebt = 15_329;
+        s.vaultSupplyExchangePrice = 1_000_000_000;
+        s.vaultBorrowExchangePrice = 1_000_000_001;
+        PositionSnapshotMsgCodec.Priced memory p = PositionSnapshotMsgCodec.price(s);
+        assertEq(p.supply, 10_000);
+        assertEq(p.borrow, 12_099);
+        assertEq(p.dustBorrow, 15);
+    }
+
+    function testPriceZerosBorrowWhenDustCoversDebt() public pure {
+        PositionSnapshotMsgCodec.Snapshot memory s;
+        s.colRaw = 100;
+        s.debtRaw = 5;
+        s.dustDebt = 9;
+        s.vaultSupplyExchangePrice = 2e12;
+        s.vaultBorrowExchangePrice = 3e12;
+        PositionSnapshotMsgCodec.Priced memory p = PositionSnapshotMsgCodec.price(s);
+        assertEq(p.supply, 200);
+        assertEq(p.borrow, 0);
+        assertEq(p.dustBorrow, 0);
+    }
+
     function testRevertShortHeader() public {
         bytes memory payload = hex"00";
         vm.expectRevert(PositionMsgTooShort.selector);

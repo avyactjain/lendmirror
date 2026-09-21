@@ -64,6 +64,11 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
         return lastPosition_;
     }
 
+    /// `supply`, `borrow`, and `dustBorrow` after the exchange prices, matching Jupiter's read.
+    function pricedPosition() external view returns (PositionSnapshotMsgCodec.Priced memory) {
+        return PositionSnapshotMsgCodec.price(lastPosition_);
+    }
+
     function oAppVersion() public pure returns (uint64 senderVersion, uint64 receiverVersion) {
         return (0, RECEIVER_VERSION);
     }

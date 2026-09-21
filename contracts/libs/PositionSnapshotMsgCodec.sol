@@ -24,6 +24,8 @@ library PositionSnapshotMsgCodec {
     uint8 public constant VANILLA_TYPE = 1;
     uint256 internal constant HEADER_LEN = 32;
     uint256 public constant BODY_LEN = 225;
+    /// Jupiter divides by this after multiplying an amount by an exchange price.
+    uint256 public constant EXCHANGE_PRICE_SCALE = 1e12;
 
     struct Snapshot {
         bytes32 position;
@@ -48,6 +50,13 @@ library PositionSnapshotMsgCodec {
         uint64 vaultSupplyExchangePrice;
         uint64 vaultBorrowExchangePrice;
         int64 snapshotTime;
+    }
+
+    /// Same numbers `getPositionByVaultIdV2` returns as `supply`, `borrow`, and `dustBorrow`.
+    struct Priced {
+        uint256 supply;
+        uint256 borrow;
+        uint256 dustBorrow;
     }
 
     function decode(bytes calldata _msg) internal pure returns (Snapshot memory s) {
@@ -91,5 +100,25 @@ library PositionSnapshotMsgCodec {
         s.vaultSupplyExchangePrice = uint64(bytes8(body[201:209]));
         s.vaultBorrowExchangePrice = uint64(bytes8(body[209:217]));
         s.snapshotTime = int64(uint64(bytes8(body[217:225])));
+    }
+
+    /// Live collateral times the supply price. Live debt, after dust, times the borrow price.
+    /// When dust covers the debt, both borrow and dust are 0.
+    function price(Snapshot memory s) internal pure returns (Priced memory p) {
+        p.supply = _scale(s.colRaw, s.vaultSupplyExchangePrice);
+        uint256 debt = s.debtRaw;
+        uint256 dust = s.dustDebt;
+        if (debt > dust) {
+            debt -= dust;
+        } else {
+            debt = 0;
+            dust = 0;
+        }
+        p.borrow = _scale(debt, s.vaultBorrowExchangePrice);
+        p.dustBorrow = _scale(dust, s.vaultBorrowExchangePrice);
+    }
+
+    function _scale(uint256 amount, uint256 exchangePrice) private pure returns (uint256) {
+        return amount * exchangePrice / EXCHANGE_PRICE_SCALE;
     }
 }

@@ -41,6 +41,15 @@ const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatR
     }
 
     const pos = (await evm.lastPosition()) as LastPosition
+    const priced = (await (
+        contract as unknown as {
+            pricedPosition: () => Promise<{
+                supply: { toString(): string }
+                borrow: { toString(): string }
+                dustBorrow: { toString(): string }
+            }>
+        }
+    ).pricedPosition())
     const lastUpdatedTs = await evm.lastUpdatedTs()
     const lastUpdatedBlock = await evm.lastUpdatedBlock()
     DebugLogger.header('EVM OApp last Jupiter snapshot')
@@ -56,6 +65,9 @@ const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatR
     DebugLogger.keyValue('debtRaw', pos.debtRaw.toString())
     DebugLogger.keyValue('dustDebt', pos.dustDebt.toString())
     DebugLogger.keyValue('netDebt', pos.netDebt.toString())
+    DebugLogger.keyValue('supply', priced.supply.toString())
+    DebugLogger.keyValue('borrow', priced.borrow.toString())
+    DebugLogger.keyValue('dustBorrow', priced.dustBorrow.toString())
     DebugLogger.keyValue('tick', pos.tick.toString())
     DebugLogger.keyValue('tickId', pos.tickId.toString())
     DebugLogger.keyValue('storedColRaw', pos.storedColRaw.toString())
