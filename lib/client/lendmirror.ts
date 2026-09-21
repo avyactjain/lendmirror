@@ -33,11 +33,19 @@ import * as errors from './generated/lendmirror/errors'
 import * as instructions from './generated/lendmirror/instructions'
 import * as types from './generated/lendmirror/types'
 import {
-    decodeJupiterPositionTick,
+    BRANCH_MERGED,
+    decodeJupiterBranchFields,
+    decodeJupiterPositionFields,
+    decodeJupiterTickFields,
+    decodeJupiterTickIdLiquidation,
+    jupiterBranchPda,
     jupiterPositionPda,
+    jupiterTickIdLiquidationPda,
     jupiterTickPda,
     jupiterVaultConfigPda,
     jupiterVaultStatePda,
+    liquidationSlotIndex,
+    normalizeTick,
 } from './jupiter'
 import { LendMirrorPDA as LendMirrorPDA } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
@@ -46,7 +54,7 @@ export { accounts, errors, instructions, types }
 export const JUPITER_VAULTS_MAINNET = publicKey('jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi')
 export const JUPITER_VAULTS_DEVNET = publicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 
-export const POSITION_SNAPSHOT_BODY_LEN = 200
+export const POSITION_SNAPSHOT_BODY_LEN = 225
 
 export type PositionSnapshotFields = {
     position: Uint8Array
@@ -61,8 +69,13 @@ export type PositionSnapshotFields = {
     netDebt: bigint
     tick: number
     tickId: number
+    storedColRaw: bigint
+    storedDebtRaw: bigint
+    storedTick: number
     isSupplyOnly: boolean
     isLiquidated: boolean
+    isFullyLiquidated: boolean
+    branchId: number
     vaultSupplyExchangePrice: bigint
     vaultBorrowExchangePrice: bigint
     snapshotTime: bigint
@@ -95,12 +108,82 @@ export function encodePositionSnapshot(snap: PositionSnapshotFields): Uint8Array
     view.setBigUint64(190, snap.netDebt)
     view.setInt32(198, snap.tick)
     view.setUint32(202, snap.tickId)
-    out[206] = snap.isSupplyOnly ? 1 : 0
-    out[207] = snap.isLiquidated ? 1 : 0
-    view.setBigUint64(208, snap.vaultSupplyExchangePrice)
-    view.setBigUint64(216, snap.vaultBorrowExchangePrice)
-    view.setBigInt64(224, snap.snapshotTime)
+    view.setBigUint64(206, snap.storedColRaw)
+    view.setBigUint64(214, snap.storedDebtRaw)
+    view.setInt32(222, snap.storedTick)
+    out[226] = snap.isSupplyOnly ? 1 : 0
+    out[227] = snap.isLiquidated ? 1 : 0
+    out[228] = snap.isFullyLiquidated ? 1 : 0
+    view.setUint32(229, snap.branchId)
+    view.setBigUint64(233, snap.vaultSupplyExchangePrice)
+    view.setBigUint64(241, snap.vaultBorrowExchangePrice)
+    view.setBigInt64(249, snap.snapshotTime)
     return out
+}
+
+/** Work out TickIdLiquidation + the branch chain the program will walk. */
+async function collectLivePositionAccounts(
+    rpc: RpcInterface,
+    vaultsProgram: PublicKey,
+    vaultId: number,
+    position: { tick: number; tickId: number; isSupplyOnly: boolean }
+): Promise<{ tickIdLiquidation?: PublicKey; branches: PublicKey[] }> {
+    const branches: PublicKey[] = []
+    if (position.isSupplyOnly) {
+        return { branches }
+    }
+
+    const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, position.tick)
+    const tickAccount = await rpc.getAccount(tickPda)
+    if (!tickAccount.exists) {
+        return { branches }
+    }
+    const tick = decodeJupiterTickFields(tickAccount.data)
+    const isLiquidated = tick.isLiquidated || tick.totalIds > position.tickId
+    if (!isLiquidated) {
+        return { branches }
+    }
+
+    let tickIdLiquidation: PublicKey | undefined
+    let isFullyLiquidated = tick.isFullyLiquidated
+    let branchId = tick.liquidationBranchId
+    if (tick.totalIds !== position.tickId) {
+        const [liq] = jupiterTickIdLiquidationPda(
+            vaultsProgram,
+            vaultId,
+            normalizeTick(position.tick),
+            position.tickId
+        )
+        const liqAccount = await rpc.getAccount(liq)
+        if (liqAccount.exists) {
+            tickIdLiquidation = liq
+            const slot = decodeJupiterTickIdLiquidation(liqAccount.data)[liquidationSlotIndex(position.tickId)]
+            isFullyLiquidated = slot.isFullyLiquidated
+            branchId = slot.liquidationBranchId
+        }
+    }
+    if (isFullyLiquidated) {
+        return { tickIdLiquidation, branches }
+    }
+
+    let next = branchId
+    for (let hop = 0; hop < 32; hop++) {
+        const [branchPda] = jupiterBranchPda(vaultsProgram, vaultId, next)
+        if (branches.some((key) => key === branchPda)) {
+            break
+        }
+        const branchAccount = await rpc.getAccount(branchPda)
+        if (!branchAccount.exists) {
+            break
+        }
+        branches.push(branchPda)
+        const decoded = decodeJupiterBranchFields(branchAccount.data)
+        if (decoded.status !== BRANCH_MERGED) {
+            break
+        }
+        next = decoded.connectedBranchId
+    }
+    return { tickIdLiquidation, branches }
 }
 
 const ENDPOINT_PROGRAM_ID: PublicKey = EndpointProgram.ENDPOINT_PROGRAM_ID
@@ -197,24 +280,33 @@ export class LendMirror {
         if (!positionAccount.exists) {
             throw new Error(`No Jupiter position for vault ${vaultId} nft ${nftId} (${position})`)
         }
-        const tick = decodeJupiterPositionTick(positionAccount.data)
-        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, tick)
-        return instructions.getJupiterPosition(
-            { identity: authority, payer: feePayer, programs: this.programRepo },
-            {
-                authority,
-                payer: feePayer,
-                store,
-                vaultsProgram,
-                position,
-                vaultState,
-                vaultConfig,
-                tick: tickPda,
-                positionStore,
-                vaultId,
-                nftId,
-            }
-        ).items[0]
+        const positionFields = decodeJupiterPositionFields(positionAccount.data)
+        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, positionFields.tick)
+        const { tickIdLiquidation, branches } = await collectLivePositionAccounts(
+            rpc,
+            vaultsProgram,
+            vaultId,
+            positionFields
+        )
+        return instructions
+            .getJupiterPosition(
+                { identity: authority, payer: feePayer, programs: this.programRepo },
+                {
+                    authority,
+                    payer: feePayer,
+                    store,
+                    vaultsProgram,
+                    position,
+                    vaultState,
+                    vaultConfig,
+                    tick: tickPda,
+                    tickIdLiquidation,
+                    positionStore,
+                    vaultId,
+                    nftId,
+                }
+            )
+            .addRemainingAccounts(branches.map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))).items[0]
     }
 
     async sendPayload(

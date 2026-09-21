@@ -37,7 +37,7 @@ contract LendMirrorReceiveTest is Test {
         bytes32 supplyToken = hex"0303030303030303030303030303030303030303030303030303030303030303";
         bytes32 borrowToken = hex"0404040404040404040404040404040404040404040404040404040404040404";
         return abi.encodePacked(
-            bytes32(uint256(200)),
+            bytes32(uint256(225)),
             position,
             vaultId,
             nftId,
@@ -50,8 +50,13 @@ contract LendMirrorReceiveTest is Test {
             uint64(12_099_635),
             int32(-100),
             uint32(1),
+            uint64(11_000_000),
+            uint64(13_000_000),
+            int32(-90),
             false,
             true,
+            false,
+            uint32(4),
             uint64(1_000_000_000),
             uint64(1_000_000_001),
             int64(1_700_000_000)

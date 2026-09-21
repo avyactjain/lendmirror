@@ -33,8 +33,13 @@ export type PositionSnapshot = {
     netDebt: bigint
     tick: number
     tickId: number
+    storedColRaw: bigint
+    storedDebtRaw: bigint
+    storedTick: number
     isSupplyOnly: boolean
     isLiquidated: boolean
+    isFullyLiquidated: boolean
+    branchId: number
     vaultSupplyExchangePrice: bigint
     vaultBorrowExchangePrice: bigint
     snapshotTime: bigint
@@ -53,8 +58,13 @@ export type PositionSnapshotArgs = {
     netDebt: number | bigint
     tick: number
     tickId: number
+    storedColRaw: number | bigint
+    storedDebtRaw: number | bigint
+    storedTick: number
     isSupplyOnly: boolean
     isLiquidated: boolean
+    isFullyLiquidated: boolean
+    branchId: number
     vaultSupplyExchangePrice: number | bigint
     vaultBorrowExchangePrice: number | bigint
     snapshotTime: number | bigint
@@ -75,12 +85,19 @@ export function getPositionSnapshotSerializer(): Serializer<PositionSnapshotArgs
             ['netDebt', u64()],
             ['tick', i32()],
             ['tickId', u32()],
+            ['storedColRaw', u64()],
+            ['storedDebtRaw', u64()],
+            ['storedTick', i32()],
             ['isSupplyOnly', bool()],
             ['isLiquidated', bool()],
+            ['isFullyLiquidated', bool()],
+            ['branchId', u32()],
             ['vaultSupplyExchangePrice', u64()],
             ['vaultBorrowExchangePrice', u64()],
             ['snapshotTime', i64()],
         ],
-        { description: 'PositionSnapshot' }
+        {
+            description: 'PositionSnapshot'
+        }
     ) as Serializer<PositionSnapshotArgs, PositionSnapshot>
 }

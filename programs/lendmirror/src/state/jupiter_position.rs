@@ -12,6 +12,8 @@ const POSITION_DISC: [u8; 8] = [170, 188, 143, 228, 122, 64, 247, 208];
 const TICK_DISC: [u8; 8] = [176, 94, 67, 247, 133, 173, 7, 115];
 const VAULT_STATE_DISC: [u8; 8] = [228, 196, 82, 165, 98, 210, 235, 152];
 const VAULT_CONFIG_DISC: [u8; 8] = [99, 86, 43, 216, 184, 102, 119, 77];
+const BRANCH_DISC: [u8; 8] = [14, 63, 100, 50, 25, 8, 29, 5];
+const TICK_ID_LIQUIDATION_DISC: [u8; 8] = [41, 28, 190, 197, 68, 213, 31, 181];
 
 /// Packed Jupiter Position body (after 8-byte discriminator). From Vaults IDL.
 #[derive(Clone, Debug)]
@@ -40,6 +42,39 @@ pub struct JupiterTick {
     pub debt_factor: u64,
 }
 
+/// Packed Jupiter Branch body. One branch per liquidation event.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct JupiterBranch {
+    pub vault_id: u16,
+    pub branch_id: u32,
+    pub status: u8,
+    pub minima_tick: i32,
+    pub minima_tick_partials: u32,
+    pub debt_liquidity: u64,
+    pub debt_factor: u64,
+    pub connected_branch_id: u32,
+    pub connected_minima_tick: i32,
+}
+
+/// One position id's liquidation record, flushed out of the Tick account.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TickIdLiquidationSlot {
+    pub is_fully_liquidated: u8,
+    pub liquidation_branch_id: u32,
+    pub debt_factor: u64,
+}
+
+/// Packed Jupiter TickIdLiquidation body. Holds three position ids.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct JupiterTickIdLiquidation {
+    pub vault_id: u16,
+    pub tick: i32,
+    pub tick_map: u32,
+    pub slots: [TickIdLiquidationSlot; 3],
+}
+
 #[derive(Clone, Debug)]
 pub struct JupiterVaultStatePrices {
     pub vault_supply_exchange_price: u64,
@@ -55,10 +90,17 @@ pub struct JupiterVaultTokens {
 /// Packed LZ body (no 8-byte Anchor discriminator). Integers are big-endian.
 /// position 32 | vault_id u16 | nft_id u32 | mint 32 | supply 32 | borrow 32
 /// | col u64 | debt u64 | dust u64 | net u64 | tick i32 | tick_id u32
-/// | supply_only u8 | liquidated u8 | supply_px u64 | borrow_px u64 | time i64
-pub const POSITION_SNAPSHOT_BODY_LEN: usize = 200;
+/// | stored_col u64 | stored_debt u64 | stored_tick i32
+/// | supply_only u8 | liquidated u8 | fully_liquidated u8 | branch_id u32
+/// | supply_px u64 | borrow_px u64 | time i64
+pub const POSITION_SNAPSHOT_BODY_LEN: usize = 225;
 
 /// Snapshot we store. Not a Jupiter account.
+///
+/// `col_raw`, `debt_raw`, `net_debt` and `tick` are **live**: they already
+/// account for any liquidation that hit this position's tick. The `stored_*`
+/// fields are what the Jupiter Position account still says, so a consumer can
+/// see how far the two have drifted apart.
 #[derive(Clone, InitSpace, AnchorSerialize, AnchorDeserialize)]
 pub struct PositionSnapshot {
     pub position: Pubkey,
@@ -73,8 +115,14 @@ pub struct PositionSnapshot {
     pub net_debt: u64,
     pub tick: i32,
     pub tick_id: u32,
+    pub stored_col_raw: u64,
+    pub stored_debt_raw: u64,
+    pub stored_tick: i32,
     pub is_supply_only: bool,
     pub is_liquidated: bool,
+    pub is_fully_liquidated: bool,
+    /// Branch the liquidation walk ended on. 0 when never liquidated.
+    pub branch_id: u32,
     pub vault_supply_exchange_price: u64,
     pub vault_borrow_exchange_price: u64,
     pub snapshot_time: i64,
@@ -102,8 +150,13 @@ impl LzMessage for PositionSnapshot {
         body.extend_from_slice(&self.net_debt.to_be_bytes());
         body.extend_from_slice(&self.tick.to_be_bytes());
         body.extend_from_slice(&self.tick_id.to_be_bytes());
+        body.extend_from_slice(&self.stored_col_raw.to_be_bytes());
+        body.extend_from_slice(&self.stored_debt_raw.to_be_bytes());
+        body.extend_from_slice(&self.stored_tick.to_be_bytes());
         body.push(self.is_supply_only as u8);
         body.push(self.is_liquidated as u8);
+        body.push(self.is_fully_liquidated as u8);
+        body.extend_from_slice(&self.branch_id.to_be_bytes());
         body.extend_from_slice(&self.vault_supply_exchange_price.to_be_bytes());
         body.extend_from_slice(&self.vault_borrow_exchange_price.to_be_bytes());
         body.extend_from_slice(&self.snapshot_time.to_be_bytes());
@@ -131,11 +184,16 @@ impl LzMessage for PositionSnapshot {
             net_debt: u64::from_be_bytes(body[158..166].try_into().unwrap()),
             tick: i32::from_be_bytes(body[166..170].try_into().unwrap()),
             tick_id: u32::from_be_bytes(body[170..174].try_into().unwrap()),
-            is_supply_only: body[174] != 0,
-            is_liquidated: body[175] != 0,
-            vault_supply_exchange_price: u64::from_be_bytes(body[176..184].try_into().unwrap()),
-            vault_borrow_exchange_price: u64::from_be_bytes(body[184..192].try_into().unwrap()),
-            snapshot_time: i64::from_be_bytes(body[192..200].try_into().unwrap()),
+            stored_col_raw: u64::from_be_bytes(body[174..182].try_into().unwrap()),
+            stored_debt_raw: u64::from_be_bytes(body[182..190].try_into().unwrap()),
+            stored_tick: i32::from_be_bytes(body[190..194].try_into().unwrap()),
+            is_supply_only: body[194] != 0,
+            is_liquidated: body[195] != 0,
+            is_fully_liquidated: body[196] != 0,
+            branch_id: u32::from_be_bytes(body[197..201].try_into().unwrap()),
+            vault_supply_exchange_price: u64::from_be_bytes(body[201..209].try_into().unwrap()),
+            vault_borrow_exchange_price: u64::from_be_bytes(body[209..217].try_into().unwrap()),
+            snapshot_time: i64::from_be_bytes(body[217..225].try_into().unwrap()),
         })
     }
 }
@@ -166,6 +224,64 @@ pub fn decode_tick(data: &[u8]) -> Result<JupiterTick> {
         liquidation_branch_id: r.u32()?,
         debt_factor: r.u64()?,
     })
+}
+
+pub fn decode_branch(data: &[u8]) -> Result<JupiterBranch> {
+    let mut r = ByteReader::after_disc(data, BRANCH_DISC)?;
+    Ok(JupiterBranch {
+        vault_id: r.u16()?,
+        branch_id: r.u32()?,
+        status: r.u8()?,
+        minima_tick: r.i32()?,
+        minima_tick_partials: r.u32()?,
+        debt_liquidity: r.u64()?,
+        debt_factor: r.u64()?,
+        connected_branch_id: r.u32()?,
+        connected_minima_tick: r.i32()?,
+    })
+}
+
+pub fn decode_tick_id_liquidation(data: &[u8]) -> Result<JupiterTickIdLiquidation> {
+    let mut r = ByteReader::after_disc(data, TICK_ID_LIQUIDATION_DISC)?;
+    let vault_id = r.u16()?;
+    let tick = r.i32()?;
+    let tick_map = r.u32()?;
+    let mut slots = [TickIdLiquidationSlot::default(); 3];
+    for slot in slots.iter_mut() {
+        slot.is_fully_liquidated = r.u8()?;
+        slot.liquidation_branch_id = r.u32()?;
+        slot.debt_factor = r.u64()?;
+    }
+    Ok(JupiterTickIdLiquidation { vault_id, tick, tick_map, slots })
+}
+
+/// Jupiter Branch PDA: `["branch", vault_id le, branch_id le]`.
+pub fn branch_address(vaults_program: &Pubkey, vault_id: u16, branch_id: u32) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"branch", &vault_id.to_le_bytes(), &branch_id.to_le_bytes()],
+        vaults_program,
+    )
+    .0
+}
+
+/// Jupiter TickIdLiquidation PDA. One account holds three position ids, so the
+/// last seed is the group number, not the id itself.
+pub fn tick_id_liquidation_address(
+    vaults_program: &Pubkey,
+    vault_id: u16,
+    tick: i32,
+    tick_id: u32,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            b"tick_id_liquidation",
+            &vault_id.to_le_bytes(),
+            &crate::tick_math::tick_pda_seed(tick),
+            &((tick_id + 2) / 3).to_le_bytes(),
+        ],
+        vaults_program,
+    )
+    .0
 }
 
 pub fn decode_vault_state_prices(data: &[u8]) -> Result<JupiterVaultStatePrices> {
@@ -301,8 +417,13 @@ mod tests {
             net_debt: 12_099_635,
             tick: -100,
             tick_id: 1,
+            stored_col_raw: 11_000_000,
+            stored_debt_raw: 13_000_000,
+            stored_tick: -90,
             is_supply_only: false,
             is_liquidated: true,
+            is_fully_liquidated: false,
+            branch_id: 4,
             vault_supply_exchange_price: 1_000_000_000,
             vault_borrow_exchange_price: 1_000_000_001,
             snapshot_time: 1_700_000_000,
@@ -321,8 +442,13 @@ mod tests {
         assert_eq!(original.net_debt, decoded.net_debt);
         assert_eq!(original.tick, decoded.tick);
         assert_eq!(original.tick_id, decoded.tick_id);
+        assert_eq!(original.stored_col_raw, decoded.stored_col_raw);
+        assert_eq!(original.stored_debt_raw, decoded.stored_debt_raw);
+        assert_eq!(original.stored_tick, decoded.stored_tick);
         assert_eq!(original.is_supply_only, decoded.is_supply_only);
         assert_eq!(original.is_liquidated, decoded.is_liquidated);
+        assert_eq!(original.is_fully_liquidated, decoded.is_fully_liquidated);
+        assert_eq!(original.branch_id, decoded.branch_id);
         assert_eq!(original.vault_supply_exchange_price, decoded.vault_supply_exchange_price);
         assert_eq!(original.vault_borrow_exchange_price, decoded.vault_borrow_exchange_price);
         assert_eq!(original.snapshot_time, decoded.snapshot_time);
@@ -332,7 +458,46 @@ mod tests {
         assert_eq!(&encoded[32..64], original.position.as_ref());
         assert_eq!(&encoded[64..66], &original.vault_id.to_be_bytes());
         assert_eq!(&encoded[198..202], &original.tick.to_be_bytes());
-        assert_eq!(encoded[206], 0);
-        assert_eq!(encoded[207], 1);
+        // Solidity reads these same offsets; keep them pinned.
+        assert_eq!(&encoded[206..214], &original.stored_col_raw.to_be_bytes());
+        assert_eq!(encoded[226], 0); // is_supply_only
+        assert_eq!(encoded[227], 1); // is_liquidated
+        assert_eq!(encoded[228], 0); // is_fully_liquidated
+        assert_eq!(&encoded[229..233], &original.branch_id.to_be_bytes());
+    }
+
+    #[test]
+    fn decode_branch_bytes() {
+        let mut data = BRANCH_DISC.to_vec();
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&3u32.to_le_bytes());
+        data.push(2); // status = merged
+        data.extend_from_slice(&(-500i32).to_le_bytes());
+        data.extend_from_slice(&123u32.to_le_bytes());
+        data.extend_from_slice(&7_000u64.to_le_bytes());
+        data.extend_from_slice(&900u64.to_le_bytes());
+        data.extend_from_slice(&5u32.to_le_bytes());
+        data.extend_from_slice(&(-400i32).to_le_bytes());
+
+        let b = decode_branch(&data).unwrap();
+        assert_eq!(b.branch_id, 3);
+        assert_eq!(b.status, 2);
+        assert_eq!(b.minima_tick, -500);
+        assert_eq!(b.minima_tick_partials, 123);
+        assert_eq!(b.debt_factor, 900);
+        assert_eq!(b.connected_branch_id, 5);
+    }
+
+    #[test]
+    fn tick_id_liquidation_pda_groups_three_ids() {
+        let program = Pubkey::new_unique();
+        let a = tick_id_liquidation_address(&program, 1, -100, 1);
+        let b = tick_id_liquidation_address(&program, 1, -100, 2);
+        let c = tick_id_liquidation_address(&program, 1, -100, 3);
+        let d = tick_id_liquidation_address(&program, 1, -100, 4);
+        // (id + 2) / 3: 1 and 2 and 3 share group 1; 4 is group 2.
+        assert_eq!(a, b);
+        assert_eq!(a, c);
+        assert_ne!(a, d);
     }
 }

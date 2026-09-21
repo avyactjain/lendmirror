@@ -7,18 +7,23 @@ error PositionInvalidBodyLength();
 
 /// Same layout as `impl LzMessage for PositionSnapshot` on Solana.
 ///
-/// [32-byte length header][200-byte body]
+/// [32-byte length header][225-byte body]
 /// Body, big-endian:
 ///   bytes32 position | uint16 vaultId | uint32 nftId
 ///   | bytes32 positionMint | bytes32 supplyToken | bytes32 borrowToken
 ///   | uint64 colRaw | uint64 debtRaw | uint64 dustDebt | uint64 netDebt
-///   | int32 tick | uint32 tickId | bool isSupplyOnly | bool isLiquidated
+///   | int32 tick | uint32 tickId
+///   | uint64 storedColRaw | uint64 storedDebtRaw | int32 storedTick
+///   | bool isSupplyOnly | bool isLiquidated | bool isFullyLiquidated | uint32 branchId
 ///   | uint64 vaultSupplyExchangePrice | uint64 vaultBorrowExchangePrice
 ///   | int64 snapshotTime
+///
+/// `colRaw`, `debtRaw`, `netDebt`, and `tick` are live (after any liquidation
+/// branch walk). `stored*` is what the Jupiter Position account still says.
 library PositionSnapshotMsgCodec {
     uint8 public constant VANILLA_TYPE = 1;
     uint256 internal constant HEADER_LEN = 32;
-    uint256 public constant BODY_LEN = 200;
+    uint256 public constant BODY_LEN = 225;
 
     struct Snapshot {
         bytes32 position;
@@ -33,8 +38,13 @@ library PositionSnapshotMsgCodec {
         uint64 netDebt;
         int32 tick;
         uint32 tickId;
+        uint64 storedColRaw;
+        uint64 storedDebtRaw;
+        int32 storedTick;
         bool isSupplyOnly;
         bool isLiquidated;
+        bool isFullyLiquidated;
+        uint32 branchId;
         uint64 vaultSupplyExchangePrice;
         uint64 vaultBorrowExchangePrice;
         int64 snapshotTime;
@@ -71,10 +81,15 @@ library PositionSnapshotMsgCodec {
     function _meta(bytes calldata body, Snapshot memory s) private pure {
         s.tick = int32(uint32(bytes4(body[166:170])));
         s.tickId = uint32(bytes4(body[170:174]));
-        s.isSupplyOnly = uint8(body[174]) != 0;
-        s.isLiquidated = uint8(body[175]) != 0;
-        s.vaultSupplyExchangePrice = uint64(bytes8(body[176:184]));
-        s.vaultBorrowExchangePrice = uint64(bytes8(body[184:192]));
-        s.snapshotTime = int64(uint64(bytes8(body[192:200])));
+        s.storedColRaw = uint64(bytes8(body[174:182]));
+        s.storedDebtRaw = uint64(bytes8(body[182:190]));
+        s.storedTick = int32(uint32(bytes4(body[190:194])));
+        s.isSupplyOnly = uint8(body[194]) != 0;
+        s.isLiquidated = uint8(body[195]) != 0;
+        s.isFullyLiquidated = uint8(body[196]) != 0;
+        s.branchId = uint32(bytes4(body[197:201]));
+        s.vaultSupplyExchangePrice = uint64(bytes8(body[201:209]));
+        s.vaultBorrowExchangePrice = uint64(bytes8(body[209:217]));
+        s.snapshotTime = int64(uint64(bytes8(body[217:225])));
     }
 }

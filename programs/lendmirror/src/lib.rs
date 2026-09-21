@@ -1,14 +1,21 @@
 mod errors;
 mod instructions;
+mod live_position;
 mod msg_codec;
 mod state;
-mod tick_math;
+pub mod tick_math;
 
 use anchor_lang::prelude::*;
 use instructions::*;
 use oapp::endpoint::MessagingFee;
 use solana_helper::program_id_from_env;
 use state::*;
+
+pub use live_position::{liquidation_record, walk_branches, Branch};
+pub use state::{
+    branch_address, decode_branch, decode_position, decode_tick, decode_tick_id_liquidation,
+    tick_id_liquidation_address, JUPITER_VAULTS_MAINNET,
+};
 
 // to build in verifiable mode and using environment variable (what the README instructs), run:
 // anchor build -v -e LENDMIRROR_ID=<OAPP_PROGRAM_ID>
@@ -77,7 +84,9 @@ pub mod lendmirror {
         Send::apply(&mut ctx, &params)
     }
 
-    // Read Jupiter Lend Position + Tick + VaultState/Config. Does not send.
+    // Read Jupiter Lend Position + Tick + VaultState/Config. If the tick was
+    // liquidated, walk Branch accounts (remaining_accounts) and write the live
+    // amounts, not the stale stored ones. Does not send.
     // Authority must be on the snapshotters allowlist.
     pub fn get_jupiter_position(
         mut ctx: Context<GetJupiterPosition>,

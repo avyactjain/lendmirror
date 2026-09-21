@@ -27,6 +27,12 @@ export type GetJupiterPositionInstructionAccounts = {
     vaultConfig: PublicKey | Pda
     /** Jupiter Tick PDA. Address is checked in apply from Position.tick. */
     tick: PublicKey | Pda
+    /**
+     * Jupiter TickIdLiquidation PDA, when the tick flushed this position's id
+     * out of the Tick account. Address is checked in apply. Leave it out when
+     * the Tick still holds the record, or when the account was never created.
+     */
+    tickIdLiquidation?: PublicKey | Pda
     positionStore: PublicKey | Pda
     systemProgram?: PublicKey | Pda
 }
@@ -74,8 +80,9 @@ export function getJupiterPosition(
         vaultState: { index: 5, isWritable: false as boolean, value: input.vaultState ?? null },
         vaultConfig: { index: 6, isWritable: false as boolean, value: input.vaultConfig ?? null },
         tick: { index: 7, isWritable: false as boolean, value: input.tick ?? null },
-        positionStore: { index: 8, isWritable: true as boolean, value: input.positionStore ?? null },
-        systemProgram: { index: 9, isWritable: false as boolean, value: input.systemProgram ?? null },
+        tickIdLiquidation: { index: 8, isWritable: false as boolean, value: input.tickIdLiquidation ?? null },
+        positionStore: { index: 9, isWritable: true as boolean, value: input.positionStore ?? null },
+        systemProgram: { index: 10, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.
