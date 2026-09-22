@@ -54,11 +54,17 @@ fn main() {
     let mut col_raw = position.supply_amount;
     let mut debt_raw = stored_debt;
     let mut fully = false;
+    let mut start_branch_id = 0u32;
+    let mut connection_factor = 0u64;
+    let mut record_on_tick = false;
+    let mut branches_json = "[]".to_string();
 
     if is_liquidated {
         let flushed = if tick.total_ids == position.tick_id {
+            record_on_tick = true;
             None
         } else {
+            record_on_tick = false;
             let key = tick_id_liquidation_address(
                 &JUPITER_VAULTS_MAINNET,
                 vault_id,
@@ -71,6 +77,8 @@ fn main() {
             Some(decode_tick_id_liquidation(&account.data).expect("decode TickIdLiquidation"))
         };
         let record = liquidation_record(position.tick_id, &tick, flushed.as_ref());
+        start_branch_id = record.branch_id;
+        connection_factor = record.connection_factor;
         if record.is_fully_liquidated {
             live_tick = MIN_TICK;
             col_raw = 0;
@@ -78,6 +86,7 @@ fn main() {
             dust_debt = 0;
             fully = true;
         } else {
+            let mut seen = Vec::new();
             let start_debt =
                 liquidation_debt_raw_at_tick(position.tick, position.supply_amount).expect("debt");
             let live = walk_branches(
@@ -90,6 +99,15 @@ fn main() {
                         .get_account(&sdk_key(key))
                         .unwrap_or_else(|e| panic!("no Branch {branch_id} at {key}: {e}"));
                     let decoded = decode_branch(&account.data).expect("decode Branch");
+                    seen.push(format!(
+                        "{{\"branchId\":{},\"status\":{},\"minimaTick\":{},\"minimaTickPartials\":{},\"debtFactor\":\"{}\",\"connectedBranchId\":{}}}",
+                        decoded.branch_id,
+                        decoded.status,
+                        decoded.minima_tick,
+                        decoded.minima_tick_partials,
+                        decoded.debt_factor,
+                        decoded.connected_branch_id,
+                    ));
                     Ok(Branch {
                         status: decoded.status,
                         minima_tick: decoded.minima_tick,
@@ -100,6 +118,7 @@ fn main() {
                 },
             )
             .expect("branch walk");
+            branches_json = format!("[{}]", seen.join(","));
             live_tick = live.tick;
             col_raw = live.col_raw;
             debt_raw = live.debt_raw;
@@ -111,7 +130,29 @@ fn main() {
     }
 
     println!(
-        "{{\"tick\":{live_tick},\"colRaw\":\"{col_raw}\",\"debtRaw\":\"{debt_raw}\",\"dustDebt\":\"{dust_debt}\",\"isSupplyOnly\":{is_supply_only},\"isLiquidated\":{is_liquidated},\"isFullyLiquidated\":{fully}}}"
+        "{{\
+\"storedTick\":{stored_tick},\
+\"storedColRaw\":\"{}\",\
+\"storedDebtRaw\":\"{stored_debt}\",\
+\"tickId\":{},\
+\"tickTotalIds\":{},\
+\"tickIsLiquidated\":{},\
+\"recordOnTick\":{record_on_tick},\
+\"startBranchId\":{start_branch_id},\
+\"connectionFactor\":\"{connection_factor}\",\
+\"branches\":{branches_json},\
+\"tick\":{live_tick},\
+\"colRaw\":\"{col_raw}\",\
+\"debtRaw\":\"{debt_raw}\",\
+\"dustDebt\":\"{dust_debt}\",\
+\"isSupplyOnly\":{is_supply_only},\
+\"isLiquidated\":{is_liquidated},\
+\"isFullyLiquidated\":{fully}\
+}}",
+        position.supply_amount,
+        position.tick_id,
+        tick.total_ids,
+        tick.is_liquidated != 0,
     );
 }
 
