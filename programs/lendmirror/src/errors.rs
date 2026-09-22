@@ -9,4 +9,9 @@ pub enum LendMirrorError {
     Unauthorized,
     AllowlistTooLong,
     NoPositionSnapshot,
+    DebtFactorUnderflow,
+    DebtFactorOverflow,
+    BranchChainTooLong,
+    MissingBranchAccount,
+    MissingLiquidationRecord,
 }

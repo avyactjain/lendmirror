@@ -20,8 +20,13 @@ type LastPosition = {
     netDebt: { toString(): string }
     tick: { toString(): string }
     tickId: { toString(): string }
+    storedColRaw: { toString(): string }
+    storedDebtRaw: { toString(): string }
+    storedTick: { toString(): string }
     isSupplyOnly: boolean
     isLiquidated: boolean
+    isFullyLiquidated: boolean
+    branchId: { toString(): string }
     vaultSupplyExchangePrice: { toString(): string }
     vaultBorrowExchangePrice: { toString(): string }
     snapshotTime: { toString(): string }
@@ -36,6 +41,15 @@ const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatR
     }
 
     const pos = (await evm.lastPosition()) as LastPosition
+    const priced = (await (
+        contract as unknown as {
+            pricedPosition: () => Promise<{
+                supply: { toString(): string }
+                borrow: { toString(): string }
+                dustBorrow: { toString(): string }
+            }>
+        }
+    ).pricedPosition())
     const lastUpdatedTs = await evm.lastUpdatedTs()
     const lastUpdatedBlock = await evm.lastUpdatedBlock()
     DebugLogger.header('EVM OApp last Jupiter snapshot')
@@ -51,10 +65,18 @@ const action: ActionType<DebugTaskArgs> = async ({ contractName }, hre: HardhatR
     DebugLogger.keyValue('debtRaw', pos.debtRaw.toString())
     DebugLogger.keyValue('dustDebt', pos.dustDebt.toString())
     DebugLogger.keyValue('netDebt', pos.netDebt.toString())
+    DebugLogger.keyValue('supply', priced.supply.toString())
+    DebugLogger.keyValue('borrow', priced.borrow.toString())
+    DebugLogger.keyValue('dustBorrow', priced.dustBorrow.toString())
     DebugLogger.keyValue('tick', pos.tick.toString())
     DebugLogger.keyValue('tickId', pos.tickId.toString())
+    DebugLogger.keyValue('storedColRaw', pos.storedColRaw.toString())
+    DebugLogger.keyValue('storedDebtRaw', pos.storedDebtRaw.toString())
+    DebugLogger.keyValue('storedTick', pos.storedTick.toString())
     DebugLogger.keyValue('isSupplyOnly', String(pos.isSupplyOnly))
     DebugLogger.keyValue('isLiquidated', String(pos.isLiquidated))
+    DebugLogger.keyValue('isFullyLiquidated', String(pos.isFullyLiquidated))
+    DebugLogger.keyValue('branchId', pos.branchId.toString())
     DebugLogger.keyValue('supplyToken', pos.supplyToken)
     DebugLogger.keyValue('borrowToken', pos.borrowToken)
     DebugLogger.keyValue('vaultSupplyExchangePrice', pos.vaultSupplyExchangePrice.toString())

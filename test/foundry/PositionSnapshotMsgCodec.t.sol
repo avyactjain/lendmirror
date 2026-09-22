@@ -35,14 +35,19 @@ contract PositionSnapshotMsgCodecTest is Test {
         uint64 netDebt = 12_099_635;
         int32 tick = -100;
         uint32 tickId = 1;
+        uint64 storedColRaw = 11_000_000;
+        uint64 storedDebtRaw = 13_000_000;
+        int32 storedTick = -90;
         bool isSupplyOnly = false;
         bool isLiquidated = true;
+        bool isFullyLiquidated = false;
+        uint32 branchId = 4;
         uint64 vaultSupplyExchangePrice = 1_000_000_000;
         uint64 vaultBorrowExchangePrice = 1_000_000_001;
         int64 snapshotTime = 1_700_000_000;
 
         bytes memory payload = abi.encodePacked(
-            bytes32(uint256(200)),
+            bytes32(uint256(225)),
             position,
             vaultId,
             nftId,
@@ -55,8 +60,13 @@ contract PositionSnapshotMsgCodecTest is Test {
             netDebt,
             tick,
             tickId,
+            storedColRaw,
+            storedDebtRaw,
+            storedTick,
             isSupplyOnly,
             isLiquidated,
+            isFullyLiquidated,
+            branchId,
             vaultSupplyExchangePrice,
             vaultBorrowExchangePrice,
             snapshotTime
@@ -75,12 +85,43 @@ contract PositionSnapshotMsgCodecTest is Test {
         assertEq(s.netDebt, netDebt);
         assertEq(s.tick, tick);
         assertEq(s.tickId, tickId);
+        assertEq(s.storedColRaw, storedColRaw);
+        assertEq(s.storedDebtRaw, storedDebtRaw);
+        assertEq(s.storedTick, storedTick);
         assertEq(s.isSupplyOnly, isSupplyOnly);
         assertEq(s.isLiquidated, isLiquidated);
+        assertEq(s.isFullyLiquidated, isFullyLiquidated);
+        assertEq(s.branchId, branchId);
         assertEq(s.vaultSupplyExchangePrice, vaultSupplyExchangePrice);
         assertEq(s.vaultBorrowExchangePrice, vaultBorrowExchangePrice);
         assertEq(s.snapshotTime, snapshotTime);
-        assertEq(payload.length, 232);
+        assertEq(payload.length, 257);
+    }
+
+    function testPriceMatchesJupiterScaling() public pure {
+        PositionSnapshotMsgCodec.Snapshot memory s;
+        s.colRaw = 10_000_000;
+        s.debtRaw = 12_114_964;
+        s.dustDebt = 15_329;
+        s.vaultSupplyExchangePrice = 1_000_000_000;
+        s.vaultBorrowExchangePrice = 1_000_000_001;
+        PositionSnapshotMsgCodec.Priced memory p = PositionSnapshotMsgCodec.price(s);
+        assertEq(p.supply, 10_000);
+        assertEq(p.borrow, 12_099);
+        assertEq(p.dustBorrow, 15);
+    }
+
+    function testPriceZerosBorrowWhenDustCoversDebt() public pure {
+        PositionSnapshotMsgCodec.Snapshot memory s;
+        s.colRaw = 100;
+        s.debtRaw = 5;
+        s.dustDebt = 9;
+        s.vaultSupplyExchangePrice = 2e12;
+        s.vaultBorrowExchangePrice = 3e12;
+        PositionSnapshotMsgCodec.Priced memory p = PositionSnapshotMsgCodec.price(s);
+        assertEq(p.supply, 200);
+        assertEq(p.borrow, 0);
+        assertEq(p.dustBorrow, 0);
     }
 
     function testRevertShortHeader() public {

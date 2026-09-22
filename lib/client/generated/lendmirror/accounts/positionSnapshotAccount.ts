@@ -108,5 +108,5 @@ export function getPositionSnapshotAccountGpaBuilder(context: Pick<Context, 'rpc
 }
 
 export function getPositionSnapshotAccountSize(): number {
-    return 208
+    return 233
 }

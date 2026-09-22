@@ -10,8 +10,9 @@ Copy a Jupiter Lend borrow snapshot from Solana onto Ethereum. It does not move 
 Publish a Jupiter Lend borrow position to Ethereum so EVM apps can read:
 
 - position id (vault + nft)
-- collateral and debt amounts
-- whether it is liquidated
+- collateral and debt amounts (live, after any liquidation)
+- the stored amounts the Position account still has, so you can see the gap
+- whether it is liquidated, and whether anything is left
 - when the snapshot was taken
 - related token mints and exchange prices
 
@@ -36,9 +37,9 @@ sequenceDiagram
     participant Eth as LendMirror_Ethereum
 
     Script->>SolanaProgram: get_jupiter_position(vaultId, nftId)
-    SolanaProgram->>Jupiter: read Position Tick VaultState VaultConfig
-    Jupiter-->>SolanaProgram: collateral debt flags
-    SolanaProgram->>SolanaProgram: write Store.last_position
+    SolanaProgram->>Jupiter: read Position Tick Branch VaultState VaultConfig
+    Jupiter-->>SolanaProgram: stored amounts plus live tick state
+    SolanaProgram->>SolanaProgram: walk liquidation branches, write live snapshot
     Script->>SolanaProgram: send
     SolanaProgram->>SolanaProgram: encode last_position
     SolanaProgram->>LZ: send(payload)
@@ -50,8 +51,8 @@ sequenceDiagram
 ```
 
 1. An allowed wallet calls `get_jupiter_position` with `vault_id` and `nft_id`.
-2. The Solana program reads Jupiter Vaults accounts and writes `Store.last_position`.
-3. An allowed wallet calls `send`. The program packs `last_position` itself (32-byte length header + 200-byte body). Callers cannot invent the payload.
+2. The Solana program reads the Jupiter Position, Tick, VaultState, and VaultConfig. If that tick was liquidated, it also reads TickIdLiquidation and Branch accounts and recomputes what is left (same as Jupiter `getCurrentPositionState`). `col_raw` / `debt_raw` / `tick` on the snapshot are those live numbers. `stored_*` is what the Position account still says.
+3. An allowed wallet calls `send`. The program packs `last_position` itself (32-byte length header + 225-byte body). Callers cannot invent the payload.
 4. LayerZero records the packet on Solana. DVNs verify, then Ethereum `lzReceive` writes `lastPosition()`.
 
 ## Who can do what
@@ -210,7 +211,7 @@ On Etherscan/Arbiscan, `lastPosition` is on **Read as Proxy** after you verify i
 
 A **new** Store also needs LayerZero send-library accounts for the destination eid. `npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts` creates them. That command uses `layerzero.config.ts` as-is (mainnet today). For a new Devnet Store, point that file at Devnet `40168` + Sepolia `40161`, run `init-config` once, then restore the file. The Store in the address table already has this.
 
-If you change the Store account layout, the old Store cannot be reused. Deploy a new program id.
+If you change the Store account layout, the old Store cannot be loaded. The program id can stay. Change `STORE_SEED` (`LendMirrorStore` in the program and in `lib/client/pda.ts`). `init_store` then creates a new address and registers that address with LayerZero. Point Ethereum `setPeer` at the new Store and run `init-config` for it. The old Store can stay. The EVM receiver also needs an upgrade: the payload body is 225 bytes, not 200.
 
 ## Optional: IDL
 
@@ -253,7 +254,16 @@ Devnet program: swap the id for `GQDxk…` and `-u "$RPC_URL_SOLANA_TESTNET"`.
 ```bash
 cargo test -p lendmirror
 LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor test
+
+cd crates/jup-tick-parity
+cargo test
+
+npm run test:jup-live
 ```
+
+`jup-tick-parity` is host-only. It checks our tick math against the Jupiter Rust SDK.
+
+`test:jup-live` fetches a real NFT (default vault `1`, nft `1`). Jupiter's number comes from `getPositionByVaultIdV2`. Ours comes from the Rust program (`liquidation_record`, `debt_raw_at_tick`, `walk_branches`). Override with `JUP_VAULT_ID` / `JUP_NFT_ID`. Skips if `RPC_URL_SOLANA` is unset.
 
 ## Mainnet
 

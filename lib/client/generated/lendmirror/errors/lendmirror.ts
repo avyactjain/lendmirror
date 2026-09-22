@@ -103,6 +103,71 @@ export class NoPositionSnapshotError extends ProgramError {
 codeToErrorMap.set(0x1776, NoPositionSnapshotError)
 nameToErrorMap.set('NoPositionSnapshot', NoPositionSnapshotError)
 
+/** DebtFactorUnderflow:  */
+export class DebtFactorUnderflowError extends ProgramError {
+    override readonly name: string = 'DebtFactorUnderflow'
+
+    readonly code: number = 0x1777 // 6007
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1777, DebtFactorUnderflowError)
+nameToErrorMap.set('DebtFactorUnderflow', DebtFactorUnderflowError)
+
+/** DebtFactorOverflow:  */
+export class DebtFactorOverflowError extends ProgramError {
+    override readonly name: string = 'DebtFactorOverflow'
+
+    readonly code: number = 0x1778 // 6008
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1778, DebtFactorOverflowError)
+nameToErrorMap.set('DebtFactorOverflow', DebtFactorOverflowError)
+
+/** BranchChainTooLong:  */
+export class BranchChainTooLongError extends ProgramError {
+    override readonly name: string = 'BranchChainTooLong'
+
+    readonly code: number = 0x1779 // 6009
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1779, BranchChainTooLongError)
+nameToErrorMap.set('BranchChainTooLong', BranchChainTooLongError)
+
+/** MissingBranchAccount:  */
+export class MissingBranchAccountError extends ProgramError {
+    override readonly name: string = 'MissingBranchAccount'
+
+    readonly code: number = 0x177a // 6010
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177a, MissingBranchAccountError)
+nameToErrorMap.set('MissingBranchAccount', MissingBranchAccountError)
+
+/** MissingLiquidationRecord:  */
+export class MissingLiquidationRecordError extends ProgramError {
+    override readonly name: string = 'MissingLiquidationRecord'
+
+    readonly code: number = 0x177b // 6011
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177b, MissingLiquidationRecordError)
+nameToErrorMap.set('MissingLiquidationRecord', MissingLiquidationRecordError)
+
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

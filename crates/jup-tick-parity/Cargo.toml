@@ -1,0 +1,23 @@
+[package]
+name = "jup-tick-parity"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Host-only tests: our tick math vs jup-lend-sdk"
+
+# Own workspace so the program crate stays on rustc 1.84. This crate needs a
+# newer rustc because jup-lend-sdk pulls crates that use edition 2024.
+[workspace]
+
+[dependencies]
+anchor-lang = { version = "0.31.1" }
+lendmirror = { path = "../../programs/lendmirror", features = ["no-entrypoint"] }
+solana-client = "=2.2.20"
+solana-pubkey = "=2.4.0"
+
+[dev-dependencies]
+jup-lend-sdk = "=0.2.20"
+
+[[bin]]
+name = "live-position"
+path = "src/bin/live_position.rs"

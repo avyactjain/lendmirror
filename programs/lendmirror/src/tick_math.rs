@@ -9,6 +9,14 @@ pub const INIT_TICK: i32 = i32::MIN;
 /// Added to `tick` when deriving the Tick PDA (u32 LE).
 pub const TICK_PDA_OFFSET: i32 = MAX_TICK;
 
+/// Ratio at tick 0, i.e. one unit of debt per unit of collateral.
+pub const ZERO_TICK_SCALED_RATIO: u128 = 1 << 48;
+/// Neighbouring ticks are 0.15% apart: 10015 / 10000.
+pub const TICK_SPACING: u128 = 10_015;
+pub const FOUR_DECIMALS: u128 = 10_000;
+/// `Branch.minima_tick_partials` is a fraction of one tick, scaled to this.
+pub const X30: u128 = (1 << 30) - 1;
+
 const FACTOR00: u128 = 18446744073709551616;
 const FACTOR01: u128 = 18419115400608638658;
 const FACTOR02: u128 = 18391528108445969703;
@@ -99,15 +107,28 @@ pub fn get_ratio_at_tick(tick: i32) -> Result<u128> {
     Ok((factor >> 16) + precision)
 }
 
-/// Healthy-position debt: `ratio * (col + 1) >> 48 + 1`.
+/// Debt `getPositionByVaultIdV2` shows for a position that has not been liquidated.
+/// `ratio * col >> 48`.
 pub fn debt_raw_at_tick(tick: i32, col_raw: u64) -> Result<u64> {
     let t = normalize_tick(tick);
     if t <= MIN_TICK {
         return Ok(0);
     }
     let ratio = get_ratio_at_tick(t)?;
-    let product_shr = mul_shr(ratio, (col_raw as u128) + 1, 48);
-    let debt = product_shr.saturating_add(1);
+    let debt = mul_shr(ratio, col_raw as u128, 48);
+    u64::try_from(debt).map_err(|_| error!(LendMirrorError::TickOutOfRange))
+}
+
+/// Debt a liquidation walk starts from. This is what `getCurrentPositionState`
+/// passes in, and what `getPositionByVaultIdV2` copies into `borrow` after the walk.
+/// `ratio * (col + 1) >> 48 + 1`.
+pub fn liquidation_debt_raw_at_tick(tick: i32, col_raw: u64) -> Result<u64> {
+    let t = normalize_tick(tick);
+    if t <= MIN_TICK {
+        return Ok(0);
+    }
+    let ratio = get_ratio_at_tick(t)?;
+    let debt = mul_shr(ratio, (col_raw as u128) + 1, 48).saturating_add(1);
     u64::try_from(debt).map_err(|_| error!(LendMirrorError::TickOutOfRange))
 }
 
@@ -158,14 +179,18 @@ mod tests {
 
     #[test]
     fn debt_at_tick_zero() {
-        // (2^48 * 101) >> 48 + 1 = 102
-        assert_eq!(debt_raw_at_tick(0, 100).unwrap(), 102);
+        // Shown debt is ratio * col >> 48. Tick 0 ratio is 2^48, so debt is the collateral.
+        assert_eq!(debt_raw_at_tick(0, 100).unwrap(), 100);
+        // A liquidation walk starts one unit of collateral higher, then adds 1.
+        assert_eq!(liquidation_debt_raw_at_tick(0, 100).unwrap(), 102);
     }
 
     #[test]
     fn min_tick_has_no_debt() {
         assert_eq!(debt_raw_at_tick(MIN_TICK, 1_000).unwrap(), 0);
         assert_eq!(debt_raw_at_tick(INIT_TICK, 1_000).unwrap(), 0);
+        assert_eq!(liquidation_debt_raw_at_tick(MIN_TICK, 1_000).unwrap(), 0);
+        assert_eq!(liquidation_debt_raw_at_tick(INIT_TICK, 1_000).unwrap(), 0);
     }
 
     #[test]
