@@ -17,7 +17,29 @@ import { PositionSnapshotMsgCodec } from "./libs/PositionSnapshotMsgCodec.sol";
 error LzPayloadTooShort();
 error InvalidPositionPayload();
 
-/// Ethereum receiver for LendMirror. Solana `send` is the sender.
+/// One copy of a snapshot, as delivered by one router.
+struct Delivery {
+    PositionSnapshotMsgCodec.Snapshot snapshot;
+    bytes32 bodyHash;
+    bool received;
+}
+
+/// CCIP `ccipReceive` argument. Field types match Chainlink `Client.Any2EVMMessage`.
+struct EVMTokenAmount {
+    address token;
+    uint256 amount;
+}
+
+struct Any2EVMMessage {
+    bytes32 messageId;
+    uint64 sourceChainSelector;
+    bytes sender;
+    bytes data;
+    EVMTokenAmount[] destTokenAmounts;
+}
+
+/// Ethereum receiver for LendMirror. Solana `send` is the LayerZero sender.
+/// Solana `send_ccip` is the Chainlink sender. Both carry the same 225-byte body.
 /// Deployed behind a UUPS proxy. Address stays the same when you upgrade logic.
 /// Owner upgrades (`upgradeToAndCall`) and sets peers.
 contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOAppCore, IOAppReceiver, IOAppOptionsType3 {
@@ -34,17 +56,36 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
         uint64 updatedBlock
     );
 
+    event ChainlinkPositionReceived(bytes32 indexed messageId, bytes32 indexed position, uint16 vaultId, uint32 nftId);
+
+    /// Emitted when both routers have delivered the same body for this position.
+    event PositionsMatched(bytes32 indexed position, bytes32 bodyHash);
+
     /// LayerZero Endpoint on this chain. Fixed per implementation; set in constructor.
     ILayerZeroEndpointV2 public immutable endpoint;
 
     mapping(uint32 eid => bytes32 peer) public peers;
     mapping(uint32 eid => mapping(uint16 msgType => bytes enforcedOption)) public enforcedOptions;
 
+    /// Latest LayerZero delivery. Kept so existing readers still see the LZ snapshot.
     PositionSnapshotMsgCodec.Snapshot internal lastPosition_;
     uint64 public lastUpdatedTs;
     uint64 public lastUpdatedBlock;
 
+    /// CCIP router allowed to call `ccipReceive`. Set by the owner.
+    address public ccipRouter;
+    /// Solana chain selector CCIP puts on messages from our Store.
+    uint64 public ccipSourceChainSelector;
+    /// Solana Store pubkey, the account that signs `ccip_send`.
+    bytes public ccipSender;
+
+    mapping(bytes32 position => Delivery) private layerZeroDelivery;
+    mapping(bytes32 position => Delivery) private chainlinkDelivery;
+
     error OnlyEndpoint(address addr);
+    error OnlyCcipRouter(address addr);
+    error UnexpectedCcipSource(uint64 selector);
+    error UnexpectedCcipSender();
 
     /// @param _endpoint LayerZero EndpointV2. Baked into this implementation.
     constructor(address _endpoint) {
@@ -67,6 +108,29 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
     /// `supply`, `borrow`, and `dustBorrow` after the exchange prices, matching Jupiter's read.
     function pricedPosition() external view returns (PositionSnapshotMsgCodec.Priced memory) {
         return PositionSnapshotMsgCodec.price(lastPosition_);
+    }
+
+    /// Owner tells this contract which CCIP router and Solana Store may deliver snapshots.
+    function setCcipRoute(address router, uint64 sourceChainSelector, bytes calldata sender) external onlyOwner {
+        if (router == address(0) || sourceChainSelector == 0 || sender.length == 0) revert UnexpectedCcipSender();
+        ccipRouter = router;
+        ccipSourceChainSelector = sourceChainSelector;
+        ccipSender = sender;
+    }
+
+    function fromLayerZero(bytes32 position) external view returns (Delivery memory) {
+        return layerZeroDelivery[position];
+    }
+
+    function fromChainlink(bytes32 position) external view returns (Delivery memory) {
+        return chainlinkDelivery[position];
+    }
+
+    /// True only when both routers have delivered this position and the bodies are equal.
+    function matched(bytes32 position) public view returns (bool) {
+        Delivery storage lz = layerZeroDelivery[position];
+        Delivery storage ccip = chainlinkDelivery[position];
+        return lz.received && ccip.received && lz.bodyHash == ccip.bodyHash;
     }
 
     function oAppVersion() public pure returns (uint64 senderVersion, uint64 receiverVersion) {
@@ -143,9 +207,7 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
         bytes calldata /*_extraData*/
     ) internal virtual {
         if (payload.length < 32) revert LzPayloadTooShort();
-        uint256 declared = uint256(bytes32(payload[0:32]));
-        if (declared != PositionSnapshotMsgCodec.BODY_LEN) revert InvalidPositionPayload();
-        lastPosition_ = PositionSnapshotMsgCodec.decode(payload);
+        lastPosition_ = _writeDelivery(layerZeroDelivery, payload);
         lastUpdatedTs = uint64(block.timestamp);
         lastUpdatedBlock = uint64(block.number);
         emit PositionReceived(
@@ -157,6 +219,28 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
             lastUpdatedTs,
             lastUpdatedBlock
         );
+    }
+
+    /// Chainlink router entry. `message.data` is the same 225-byte body LayerZero frames.
+    function ccipReceive(Any2EVMMessage calldata message) external {
+        if (msg.sender != ccipRouter) revert OnlyCcipRouter(msg.sender);
+        if (message.sourceChainSelector != ccipSourceChainSelector) {
+            revert UnexpectedCcipSource(message.sourceChainSelector);
+        }
+        if (keccak256(message.sender) != keccak256(ccipSender)) revert UnexpectedCcipSender();
+        PositionSnapshotMsgCodec.Snapshot memory snapshot = _writeDelivery(chainlinkDelivery, message.data);
+        emit ChainlinkPositionReceived(message.messageId, snapshot.position, snapshot.vaultId, snapshot.nftId);
+    }
+
+    function _writeDelivery(
+        mapping(bytes32 => Delivery) storage slot,
+        bytes calldata payload
+    ) internal returns (PositionSnapshotMsgCodec.Snapshot memory snapshot) {
+        bytes calldata body = PositionSnapshotMsgCodec.snapshotBody(payload);
+        snapshot = PositionSnapshotMsgCodec.decodeBody(body);
+        bytes32 bodyHash = keccak256(body);
+        slot[snapshot.position] = Delivery({ snapshot: snapshot, bodyHash: bodyHash, received: true });
+        if (matched(snapshot.position)) emit PositionsMatched(snapshot.position, bodyHash);
     }
 
     function _assertOptionsType3(bytes memory _options) internal pure {

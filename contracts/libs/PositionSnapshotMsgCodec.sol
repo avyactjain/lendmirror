@@ -60,12 +60,21 @@ library PositionSnapshotMsgCodec {
     }
 
     function decode(bytes calldata _msg) internal pure returns (Snapshot memory s) {
-        if (_msg.length < HEADER_LEN) revert PositionMsgTooShort();
+        return decodeBody(snapshotBody(_msg));
+    }
 
-        uint256 declared = uint256(bytes32(_msg[0:HEADER_LEN]));
-        if (declared != BODY_LEN || _msg.length < HEADER_LEN + BODY_LEN) revert PositionInvalidBodyLength();
+    /// The 225-byte snapshot. Accepts that body alone, or the LayerZero frame
+    /// (32-byte length header plus the body). Both routers hash this body.
+    function snapshotBody(bytes calldata payload) internal pure returns (bytes calldata body) {
+        if (payload.length == BODY_LEN) return payload;
+        if (payload.length < HEADER_LEN) revert PositionMsgTooShort();
+        uint256 declared = uint256(bytes32(payload[0:HEADER_LEN]));
+        if (declared != BODY_LEN || payload.length < HEADER_LEN + BODY_LEN) revert PositionInvalidBodyLength();
+        return payload[HEADER_LEN:HEADER_LEN + BODY_LEN];
+    }
 
-        bytes calldata body = _msg[HEADER_LEN:HEADER_LEN + BODY_LEN];
+    function decodeBody(bytes calldata body) internal pure returns (Snapshot memory s) {
+        if (body.length != BODY_LEN) revert PositionInvalidBodyLength();
         _ids(body, s);
         _amounts(body, s);
         _meta(body, s);
