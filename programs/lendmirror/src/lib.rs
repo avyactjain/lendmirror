@@ -29,6 +29,7 @@ declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_
 const STORE_SEED: &[u8] = b"LendMirrorStore";
 const PEER_SEED: &[u8] = b"LendMirrorPeer";
 const JUP_POSITION_SEED: &[u8] = b"JupPosition";
+const CCIP_SEED: &[u8] = b"LendMirrorCcip";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///
@@ -40,7 +41,8 @@ const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 ///   Store PDA  — the OApp identity. LayerZero records Store as the sender.
 ///                Ethereum's setPeer must be this Store, not the program id.
 ///
-/// Flow: get_jupiter_position → send → LayerZero → Ethereum lastPosition.
+/// Flow: get_jupiter_position → send (LayerZero) and send_ccip (Chainlink).
+/// Ethereum stores both and marks the position matched when the bodies are equal.
 #[program]
 pub mod lendmirror {
     use super::*;
@@ -82,6 +84,17 @@ pub mod lendmirror {
     // Authority must be on the senders allowlist. DVNs still have to verify after.
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
+    }
+
+    // Admin only. Router, destination chain, and Ethereum receiver for send_ccip.
+    pub fn set_ccip_route(mut ctx: Context<SetCcipRoute>, params: SetCcipRouteParams) -> Result<()> {
+        SetCcipRoute::apply(&mut ctx, &params)
+    }
+
+    // Encode the same snapshot body and CPI into the Chainlink CCIP router.
+    // Authority must be on the senders allowlist. The Store pays the SOL fee.
+    pub fn send_ccip(mut ctx: Context<SendCcip>) -> Result<()> {
+        SendCcip::apply(&mut ctx)
     }
 
     // Read Jupiter Lend Position + Tick + VaultState/Config. If the tick was

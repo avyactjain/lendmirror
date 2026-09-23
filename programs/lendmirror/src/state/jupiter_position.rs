@@ -135,8 +135,10 @@ pub struct PositionSnapshotAccount {
     pub snapshot: PositionSnapshot,
 }
 
-impl LzMessage for PositionSnapshot {
-    fn encode(&self) -> Vec<u8> {
+impl PositionSnapshot {
+    /// The 225 bytes both routers carry. LayerZero frames this with a length header.
+    /// CCIP sends these bytes as the message data. CCIP's data limit is 256 bytes.
+    pub fn encode_body(&self) -> Vec<u8> {
         let mut body = Vec::with_capacity(POSITION_SNAPSHOT_BODY_LEN);
         body.extend_from_slice(self.position.as_ref());
         body.extend_from_slice(&self.vault_id.to_be_bytes());
@@ -160,7 +162,13 @@ impl LzMessage for PositionSnapshot {
         body.extend_from_slice(&self.vault_supply_exchange_price.to_be_bytes());
         body.extend_from_slice(&self.vault_borrow_exchange_price.to_be_bytes());
         body.extend_from_slice(&self.snapshot_time.to_be_bytes());
-        wrap_lz_payload(&body)
+        body
+    }
+}
+
+impl LzMessage for PositionSnapshot {
+    fn encode(&self) -> Vec<u8> {
+        wrap_lz_payload(&self.encode_body())
     }
 
     fn decode(buf: &[u8]) -> std::result::Result<Self, MsgCodecError> {
@@ -464,6 +472,7 @@ mod tests {
         assert_eq!(encoded[227], 1); // is_liquidated
         assert_eq!(encoded[228], 0); // is_fully_liquidated
         assert_eq!(&encoded[229..233], &original.branch_id.to_be_bytes());
+        assert_eq!(original.encode_body(), encoded[32..]);
     }
 
     #[test]
