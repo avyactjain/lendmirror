@@ -81,13 +81,13 @@ pub mod lendmirror {
         SetSenders::apply(&mut ctx, &params)
     }
 
-    // How much SOL to attach to send(). Does not send. Quotes from store.last_position.
+    // How much SOL to attach to send(). Does not send. Quotes from wrapper.snapshot.
     pub fn quote_send(ctx: Context<QuoteSend>, params: QuoteSendParams) -> Result<MessagingFee> {
         QuoteSend::apply(&ctx, &params)
     }
 
-    // Encode store.last_position and CPI into the Solana Endpoint.
-    // Authority must be on the senders allowlist. DVNs still have to verify after.
+    // Encode wrapper.snapshot and CPI into the Solana Endpoint.
+    // Authority on senders allowlist; wrapper.lz_send_allowed must be true (then cleared).
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
     }
@@ -100,8 +100,8 @@ pub mod lendmirror {
         SetCcipRoute::apply(&mut ctx, &params)
     }
 
-    // Encode the same snapshot body and CPI into the Chainlink CCIP router.
-    // Authority must be on the senders allowlist. The Store pays the SOL fee.
+    // Encode wrapper.snapshot body and CPI into the Chainlink CCIP router.
+    // Authority on senders allowlist; wrapper.ccip_send_allowed must be true (then cleared).
     pub fn send_ccip(mut ctx: Context<SendCcip>) -> Result<()> {
         SendCcip::apply(&mut ctx)
     }
