@@ -3,19 +3,15 @@ import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
 import { lendmirror } from '../../lib/client'
+import { resolveSolanaEid } from '../common/deployment'
 import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
 
-interface Args {
-    eid: number
-    keys: string
-    computeUnitPriceScaleFactor: number
-}
-
 task('lz:oapp:solana:set-snapshotters', 'Admin: replace wallets allowed to call get_jupiter_position')
-    .addParam('eid', 'Solana endpoint ID', undefined, types.int)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addParam('keys', 'Comma-separated pubkeys (max 8)', undefined, types.string)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid, keys, computeUnitPriceScaleFactor }: Args) => {
+    .setAction(async ({ eid: eidArg, keys, computeUnitPriceScaleFactor }) => {
+        const eid = resolveSolanaEid(eidArg)
         const solanaDeployment = getSolanaDeployment(eid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))
@@ -47,10 +43,11 @@ task('lz:oapp:solana:set-snapshotters', 'Admin: replace wallets allowed to call 
     })
 
 task('lz:oapp:solana:set-senders', 'Admin: replace wallets allowed to call send')
-    .addParam('eid', 'Solana endpoint ID', undefined, types.int)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addParam('keys', 'Comma-separated pubkeys (max 8)', undefined, types.string)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid, keys, computeUnitPriceScaleFactor }: Args) => {
+    .setAction(async ({ eid: eidArg, keys, computeUnitPriceScaleFactor }) => {
+        const eid = resolveSolanaEid(eidArg)
         const solanaDeployment = getSolanaDeployment(eid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))

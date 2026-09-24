@@ -5,20 +5,17 @@ import { task, types } from 'hardhat/config'
 import { Options } from '@layerzerolabs/lz-v2-utilities'
 
 import { lendmirror } from '../../lib/client'
+import { resolveEvmEid, resolveSolanaEid } from '../common/deployment'
 import { TransactionType, addComputeUnitInstructions, deriveConnection, getSolanaDeployment } from '.'
 import { getLayerZeroScanLink, isV2Testnet } from '../utils'
 
-interface Args {
-    fromEid: number
-    dstEid: number
-    computeUnitPriceScaleFactor: number
-}
-
 task('lz:oapp:solana:send-jupiter', 'Sends the last Store Jupiter snapshot to Ethereum.')
-    .addParam('fromEid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
-    .addParam('dstEid', 'Destination endpoint ID (40161 = Sepolia)', undefined, types.int)
+    .addOptionalParam('fromEid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('dstEid', 'Destination endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ fromEid, dstEid, computeUnitPriceScaleFactor }: Args) => {
+    .setAction(async ({ fromEid: fromArg, dstEid: dstArg, computeUnitPriceScaleFactor }) => {
+        const fromEid = resolveSolanaEid(fromArg)
+        const dstEid = resolveEvmEid(dstArg)
         const solanaDeployment = getSolanaDeployment(fromEid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(fromEid)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))

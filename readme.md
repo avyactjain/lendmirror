@@ -62,7 +62,7 @@ These are different keys. Do not mix them up.
 | Role | What it is | What it can do |
 |------|------------|----------------|
 | **Program id** | The deployed Solana program | Holds the code. Not a wallet. Not the LayerZero sender. |
-| **Store** | PDA created by `init_store` (seed `LendMirrorStore`) | LayerZero **sender** identity. Ethereum `setPeer` must use this address, not the program id. |
+| **Store** | PDA created by `init_store` (seed `LendMirrorStoreV0`) | LayerZero **sender** identity. Ethereum `setPeer` must use this address, not the program id. |
 | **Admin** | Wallet written once at `init_store` (`params.admin`) | Update peers. Update the snapshot and send allowlists. Cannot transfer admin on-chain in v1. Does **not** create the Store. |
 | **Snapshotter** | Wallet on the Store snapshot list (max 8) | Call `get_jupiter_position` to refresh `last_position`. |
 | **Sender** | Wallet on the Store send list (max 8) | Call `send` to push the stored snapshot to Ethereum. Cannot choose custom bytes — payload is always `last_position`. |
@@ -80,61 +80,82 @@ These are different keys. Do not mix them up.
 - After create, admin is automatically on both lists. Admin can replace those lists later (up to 8 wallets each).
 - Anyone can call `quote_send` to ask for a fee estimate. That does not send.
 
-Admin tasks:
+Admin tasks (eid comes from `DEPLOYMENT_TYPE`):
 
 ```bash
-npx hardhat lz:oapp:solana:set-snapshotters --eid <EID> --keys <pubkey1>,<pubkey2>
-npx hardhat lz:oapp:solana:set-senders --eid <EID> --keys <pubkey1>,<pubkey2>
+npx hardhat lz:oapp:solana:set-snapshotters --keys <pubkey1>,<pubkey2>
+npx hardhat lz:oapp:solana:set-senders --keys <pubkey1>,<pubkey2>
+```
+
+## One switch: `DEPLOYMENT_TYPE`
+
+Set `DEPLOYMENT_TYPE=devnet` or `DEPLOYMENT_TYPE=mainnet` in `.env`. That picks one profile:
+
+| File | Path |
+|------|------|
+| [`config/devnet.ts`](config/devnet.ts) | Solana Devnet `40168` → Sepolia `40161` |
+| [`config/mainnet.ts`](config/mainnet.ts) | Solana `30168` → Arbitrum `30110` |
+
+[`lib/deployment.ts`](lib/deployment.ts) loads the profile and the matching keys and RPCs from `.env`. Hardhat, `npx lm`, and the LayerZero config all use that same profile. If you pass `--eid` or `--network` and it disagrees with the profile, the command stops.
+
+**Use `npx lm` for Solana CLI, Forge, Cast, and Anchor build.** Those tools do not read `DEPLOYMENT_TYPE` on their own. Bare `solana`, `forge`, and `cast` can use a different wallet or RPC and will write to the wrong chain.
+
+```bash
+npx lm build
+npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json target/deploy/lendmirror.so --use-rpc
+npx lm forge create contracts/LendMirror.sol:LendMirror --broadcast --constructor-args <ENDPOINT>
+npx lm cast send <PROXY> "upgradeToAndCall(address,bytes)" <IMPL> 0x
 ```
 
 ## Addresses
 
-### Devnet / Sepolia
+Committed in the profile files. Live values:
+
+### Devnet / Sepolia (`DEPLOYMENT_TYPE=devnet`)
 
 | Item | Value |
 |------|-------|
 | Solana program id | `GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1` |
-| Solana Store (OApp) | `6KJuMfT3qpD8AFWegQvWRtE41qT6BJsSJmkSmqXqPn7a` |
+| Solana Store (OApp) | `BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM` |
+| Solana CCIP payer | `53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m` |
 | Solana admin | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
-| Snapshotters | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
-| Senders | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
+| Snapshotters / Senders | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
 | Sepolia LendMirror (proxy) | `0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514` |
-| Sepolia implementation | `0xE7A7E4A8555Ca2428421626AE1720d570949D59c` |
+| Sepolia implementation | `0xC722956634AC775A05F78B50BC840d27614916fd` |
 | Sepolia owner | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` |
 | LayerZero pathway | Devnet `40168` → Sepolia `40161` |
+| Chainlink | Wired (payer is the Sepolia `ccipSender`) |
 
 Local files: `deployments/solana-testnet/OApp.json`, `deployments/sepolia/LendMirror.json`. Etherscan: https://sepolia.etherscan.io/address/0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514
 
-### Mainnet
+### Mainnet (`DEPLOYMENT_TYPE=mainnet`)
 
 | Item | Value |
 |------|-------|
 | Solana program id | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` |
 | Solana Store (OApp) | `BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4` |
 | Solana admin | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
-| Snapshotters | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
-| Senders | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
+| Snapshotters / Senders | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
 | Arbitrum LendMirror (proxy) | `0xb42E98c712B5CAf1e55dB8106262077515879EA2` |
 | Arbitrum implementation | `0xdAAE65Df8B96e9eE45eb756441B7942e5E128924` |
 | Arbitrum owner | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` |
 | LayerZero pathway | Solana `30168` → Arbitrum `30110` |
-| Solana verified build | |
-| Arbiscan | https://arbiscan.io/address/0xb42E98c712B5CAf1e55dB8106262077515879EA2 |
+| Chainlink | Not wired |
 
-Local files: `deployments/solana-mainnet/OApp.json`, `deployments/arbitrum/LendMirror.json`. The proxy is the LayerZero peer, not the implementation.
+Local files: `deployments/solana-mainnet/OApp.json`, `deployments/arbitrum/LendMirror.json`. The proxy is the LayerZero peer, not the implementation. Arbiscan: https://arbiscan.io/address/0xb42E98c712B5CAf1e55dB8106262077515879EA2
 
 ## What we build vs what we use
 
 **We build**
 
-1. **Solana program** — `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `get_jupiter_position`, `send`
-2. **Ethereum contract** — UUPS proxy + OApp receiver; `_lzReceive` decodes into `lastPosition()`. Peer = **proxy** address.
+1. **Solana program** — `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `get_jupiter_position`, `send`, `send_ccip`
+2. **Ethereum contract** — UUPS proxy + OApp receiver + `ccipReceive`; `_lzReceive` decodes into `lastPosition()`. Peer = **proxy** address.
 3. **Shared codec** — `PositionSnapshot` on Solana, `PositionSnapshotMsgCodec.sol` on Ethereum
-4. **Scripts** — create Store, allowlists, set-peer, snapshot, send, evm debug
+4. **Scripts** — create Store, allowlists, set-peer, snapshot, send, CCIP, evm debug
 
 **We do not build**
 
-LayerZero, DVNs, Jupiter Lend.
+LayerZero, DVNs, Chainlink CCIP programs, Jupiter Lend.
 
 ## Tools
 
@@ -146,88 +167,90 @@ Also: Rust, Solana CLI, Anchor **0.31.1**, `npm install`. If Hardhat prints `HH1
 
 | Variable | Used for |
 |----------|----------|
-| `PRIVATE_KEY` | EVM deploy / `set-peer` / owner txs. One key for every Hardhat network. |
-| `SOLANA_KEYPAIR_PATH` | Solana fee payer, admin at create, upgrade authority if that wallet deployed the program. |
-| `RPC_URL_SOLANA_TESTNET` | Devnet (eid `40168`). Use a paid RPC. Public `api.devnet.solana.com` often drops writes. |
-| `RPC_URL_SOLANA` | Mainnet (eid `30168`). |
-| `RPC_URL_SEPOLIA` / `RPC_URL_ARBITRUM` | EVM RPCs. |
+| `DEPLOYMENT_TYPE` | `devnet` or `mainnet`. Required. |
+| `SOLANA_KEYPAIR_PATH_DEVNET` / `_MAINNET` | Solana wallet for that path. Hardhat and `npx lm` use only the active one. |
+| `EVM_PRIVATE_KEY_DEVNET` / `_MAINNET` | EVM owner key for that path. |
+| `RPC_URL_SOLANA_DEVNET` / `_MAINNET` | Solana RPC for that path. Use a paid RPC on Devnet. |
+| `RPC_URL_EVM_DEVNET` / `_MAINNET` | Sepolia or Arbitrum RPC. |
 
-Two Solana files: **`lendmirror-keypair.json`** is the **program id**. **`SOLANA_KEYPAIR_PATH`** is the **wallet**. Do not mix them.
+Two Solana files: **`lendmirror-keypair.json`** is the **program id**. **`SOLANA_KEYPAIR_PATH_*`** is the **wallet**. Do not mix them.
 
-`layerzero.config.ts` in this repo is the **mainnet** path (Solana `30168` → Arbitrum `30110`). `lz:oapp:wire` crashes (DVN `PublicKey` bug). Do not use it. Peers are set with `set-peer`. `init-config` follows that same config file — only run it when the file matches the path you mean.
+`layerzero.config.ts` follows `DEPLOYMENT_TYPE`. `lz:oapp:wire` crashes (DVN `PublicKey` bug). Do not use it. Peers are set with `set-peer`. `init-config` uses the same config file.
 
 ## Already deployed?
 
 Addresses are in the table above. To send again you only need snapshot + send + debug. Do not create a second Store on the same program id (`init_store` fails if it exists).
 
-## Testnet: first deploy (Devnet → Sepolia)
+## First deploy
 
-Default `declare_id!` is the **mainnet** program id. For Devnet you must set `LENDMIRROR_ID`.
+Set `DEPLOYMENT_TYPE` and fill the matching `*_DEVNET` or `*_MAINNET` keys in `.env`. Then:
 
 ```bash
-# 0. CLI on Devnet
-solana config set --url "$RPC_URL_SOLANA_TESTNET"
-solana address
-solana balance
+nvm use 18
 
-# 1. Build. Pubkey must match the keypair you will pass to --program-id.
-export LENDMIRROR_ID=$(solana-keygen pubkey target/deploy/lendmirror-keypair.json)
-LENDMIRROR_ID=$LENDMIRROR_ID anchor build -- --features no-log-ix-name
+# 1. Build with the profile program id (avoids DeclaredProgramIdMismatch).
+npx lm build -- --features no-log-ix-name
 
-# 2. Upload the .so. --use-rpc uses whatever solana config --url is.
-#    --with-compute-unit-price is optional (helps when txs stall).
-solana program deploy \
+# 2. Upload the .so with the profile RPC and wallet.
+npx lm solana program deploy \
   --program-id target/deploy/lendmirror-keypair.json \
   target/deploy/lendmirror.so \
   --use-rpc
 
-# 3. Create the Store once. Signer must be the program upgrade authority
-#    (the key that deployed the .so). That wallet is named admin and put on
-#    both allowlists. eid 40168 selects Devnet Jupiter Vaults.
-#    Writes deployments/solana-testnet/OApp.json
-nvm use 18
-npx hardhat lz:oapp:solana:create --eid 40168 --program-id $LENDMIRROR_ID
+# 3. Create the Store once. Signer must be the program upgrade authority.
+npx hardhat lz:oapp:solana:create
 
-# 4. EVM receiver (UUPS). Printed address is the proxy. That is the Solana peer.
-#    Do not re-run this unless you want a new proxy (then you must set-peer again).
-npx hardhat lz:deploy --networks sepolia --ci
+# 4. EVM receiver (UUPS). Printed address is the proxy.
+npx hardhat lz:deploy --ci
 
 # 5. Tell each side who the other is. Do not run wire.
-npx hardhat lz:oapp:solana:set-peer --eid 40168 --dst-eid 40161 --evm-network sepolia
-npx hardhat lz:oapp:evm:set-peer --network sepolia --src-eid 40168
-npx hardhat lz:oapp:solana:get-peer --eid 40168 --dst-eid 40161
-# get-peer should print the Sepolia proxy.
+npx hardhat lz:oapp:solana:set-peer
+npx hardhat lz:oapp:evm:set-peer
+npx hardhat lz:oapp:solana:get-peer
 
-# 6. Snapshot then send. vault-id / nft-id must exist on Devnet Jupiter.
-#    Wallet must be on the allowlists (admin is, after create).
-npx hardhat lz:oapp:solana:get-jupiter-position --eid 40168 --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:send-jupiter --from-eid 40168 --dst-eid 40161
+# 6. Snapshot then send (LayerZero).
+npx hardhat lz:oapp:solana:get-jupiter-position --vault-id 1 --nft-id 29
+npx hardhat lz:oapp:solana:send-jupiter
 
 # 7. Wait a few minutes, then read.
-npx hardhat lz:oapp:evm:debug --network sepolia
+npx hardhat lz:oapp:evm:debug
 ```
 
-On Etherscan/Arbiscan, `lastPosition` is on **Read as Proxy** after you verify implementation + proxy source. There is no Custom ABI on the new UI. Until then, use step 7.
+Devnet also has Chainlink. After peers are set:
 
-A **new** Store also needs LayerZero send-library accounts for the destination eid. `npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts` creates them. That command uses `layerzero.config.ts` as-is (mainnet today). For a new Devnet Store, point that file at Devnet `40168` + Sepolia `40161`, run `init-config` once, then restore the file. The Store in the address table already has this.
+```bash
+npx hardhat lz:oapp:solana:set-ccip-route
+npx hardhat lz:oapp:evm:set-ccip-route
+npx hardhat lz:oapp:solana:send-ccip
+```
 
-If you change the Store account layout, the old Store cannot be loaded. The program id can stay. Change `STORE_SEED` (`LendMirrorStore` in the program and in `lib/client/pda.ts`). `init_store` then creates a new address and registers that address with LayerZero. Point Ethereum `setPeer` at the new Store and run `init-config` for it. The old Store can stay. The EVM receiver also needs an upgrade: the payload body is 225 bytes, not 200.
+A **new** Store also needs LayerZero send-library accounts for the destination eid:
+
+```bash
+npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts
+```
+
+That follows `DEPLOYMENT_TYPE`. The Store in the address table already has this.
+
+If you change the Store account layout, the old Store cannot be loaded. The program id can stay. Change `STORE_SEED` (`LendMirrorStoreV0` in the program and in `lib/client/pda.ts`). `init_store` then creates a new address and registers that address with LayerZero. Point Ethereum `setPeer` at the new Store and run `init-config` for it. The old Store can stay. The EVM receiver also needs an upgrade: the payload body is 225 bytes.
 
 ## Optional: IDL
 
 Not needed to send. Only so Solscan can name instructions.
 
-After `anchor build`, `target/idl/lendmirror.json` often has a junk `address`. Fix it, then upload:
+After `npx lm build`, `target/idl/lendmirror.json` often has a junk `address`. Fix it, then upload:
 
 ```bash
-python3 -c 'import json,os; p="target/idl/lendmirror.json"; d=json.load(open(p)); d["address"]=os.environ["LENDMIRROR_ID"]; json.dump(d, open(p,"w"), indent=2)'
+python3 -c 'import json,os; from pathlib import Path; p=Path("target/idl/lendmirror.json"); d=json.load(open(p)); d["address"]=os.environ["LENDMIRROR_ID"]; json.dump(d, open(p,"w"), indent=2)'
 
-anchor idl init $LENDMIRROR_ID -f target/idl/lendmirror.json \
-  --provider.cluster "$RPC_URL_SOLANA_TESTNET" \
-  --provider.wallet "$SOLANA_KEYPAIR_PATH"
+npx lm solana --help >/dev/null
+# Or with Anchor provider flags from the profile:
+anchor idl init "$LENDMIRROR_ID" -f target/idl/lendmirror.json \
+  --provider.cluster "$RPC_URL_SOLANA_DEVNET" \
+  --provider.wallet "$SOLANA_KEYPAIR_PATH_DEVNET"
 ```
 
-Later rebuilds: `anchor idl upgrade` with the same flags. Mainnet: use `$RPC_URL_SOLANA` instead.
+Use the `_MAINNET` vars when `DEPLOYMENT_TYPE=mainnet`. Later rebuilds: `anchor idl upgrade` with the same flags.
 
 ## Optional: Solana verified badge
 
@@ -238,7 +261,8 @@ A Mac `anchor build` hash will **not** match Docker. To get a badge you must eit
 `cargo install solana-verify --locked` may fail on older Cargo. `0.4.11` works. That version has no `--env`; the program id in `declare_id!` (or `LENDMIRROR_ID` in the repo) must be the one on-chain. Pass `-- --features no-log-ix-name`.
 
 ```bash
-solana-verify -u "$RPC_URL_SOLANA" verify-from-repo --remote \
+# With DEPLOYMENT_TYPE=mainnet and RPC_URL_SOLANA_MAINNET set:
+solana-verify -u "$RPC_URL_SOLANA_MAINNET" verify-from-repo --remote \
   --program-id 9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ \
   --library-name lendmirror \
   --commit-hash <SHA on GitHub> \
@@ -247,12 +271,13 @@ solana-verify -u "$RPC_URL_SOLANA" verify-from-repo --remote \
 ```
 
 Status: https://verify.osec.io/status/9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ  
-Devnet program: swap the id for `GQDxk…` and `-u "$RPC_URL_SOLANA_TESTNET"`.
+Devnet program: swap the id for `GQDxk…` and `-u "$RPC_URL_SOLANA_DEVNET"`.
 
 ## Local tests
 
 ```bash
 cargo test -p lendmirror
+npx lm build
 LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor test
 
 cd crates/jup-tick-parity
@@ -263,32 +288,18 @@ npm run test:jup-live
 
 `jup-tick-parity` is host-only. It checks our tick math against the Jupiter Rust SDK.
 
-`test:jup-live` fetches a real NFT (default vault `1`, nft `1`). Jupiter's number comes from `getPositionByVaultIdV2`. Ours comes from the Rust program (`liquidation_record`, `debt_raw_at_tick`, `walk_branches`). Override with `JUP_VAULT_ID` / `JUP_NFT_ID`. Skips if `RPC_URL_SOLANA` is unset.
+`test:jup-live` fetches a real NFT (default vault `1`, nft `1`). Jupiter's number comes from `getPositionByVaultIdV2`. Ours comes from the Rust program (`liquidation_record`, `debt_raw_at_tick`, `walk_branches`). Override with `JUP_VAULT_ID` / `JUP_NFT_ID`. Skips if `RPC_URL_SOLANA_MAINNET` is unset.
 
-## Mainnet
-
-Live path is Solana `30168` → Arbitrum `30110`. Addresses are in the table above. Jupiter Vaults is selected automatically when eid is `30168`. Use a **mainnet** program keypair, not the Devnet one.
-
-`declare_id!` already defaults to the live mainnet program id. Do not export the Devnet `LENDMIRROR_ID` when building for mainnet.
-
-To send again (Store and peers already exist):
+## Send again (already deployed)
 
 ```bash
+# .env: DEPLOYMENT_TYPE=devnet  (or mainnet)
 nvm use 18
-npx hardhat lz:oapp:solana:get-jupiter-position --eid 30168 --vault-id <id> --nft-id <id>
-npx hardhat lz:oapp:solana:send-jupiter --from-eid 30168 --dst-eid 30110
-npx hardhat lz:oapp:evm:debug --network arbitrum
+npx hardhat lz:oapp:solana:get-jupiter-position --vault-id <id> --nft-id <id>
+npx hardhat lz:oapp:solana:send-jupiter
+npx hardhat lz:oapp:evm:debug
+# Devnet Chainlink copy:
+npx hardhat lz:oapp:solana:send-ccip
 ```
 
-First-time deploy is the same as testnet, with:
-
-```bash
-solana config set --url "$RPC_URL_SOLANA"
-npx hardhat lz:oapp:solana:create --eid 30168 --program-id $LENDMIRROR_ID
-npx hardhat lz:deploy --networks arbitrum --ci
-npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts
-npx hardhat lz:oapp:solana:set-peer --eid 30168 --dst-eid 30110 --evm-network arbitrum
-npx hardhat lz:oapp:evm:set-peer --network arbitrum --src-eid 30168
-```
-
-`init-config` is safe here because `layerzero.config.ts` is already the mainnet path. Still do not run `wire`. On Arbiscan use **Read as Proxy**.
+On Etherscan/Arbiscan use **Read as Proxy**.

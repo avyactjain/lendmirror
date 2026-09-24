@@ -3,25 +3,28 @@ import { task, types } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 
 import { getSolanaDeployment } from '../solana'
+import { assertMatchesProfile, resolveSolanaEid } from '../common/deployment'
 
 task('lz:oapp:evm:set-peer', 'Owner: set Solana Store as peer on the EVM LendMirror proxy')
-    .addParam('srcEid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
+    .addOptionalParam('srcEid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('contractName', 'Deployed EVM contract name', 'LendMirror', types.string)
     .addOptionalParam('solanaEid', 'Solana eid used to load deployments/solana-*/OApp.json', undefined, types.int)
     .setAction(
         async (
             {
-                srcEid,
+                srcEid: srcArg,
                 contractName,
                 solanaEid,
             }: {
-                srcEid: number
+                srcEid?: number
                 contractName: string
                 solanaEid?: number
             },
             hre: HardhatRuntimeEnvironment
         ) => {
-            const storeEid = solanaEid ?? srcEid
+            assertMatchesProfile({ evmNetwork: hre.network.name === 'hardhat' ? undefined : hre.network.name })
+            const srcEid = resolveSolanaEid(srcArg ?? solanaEid)
+            const storeEid = resolveSolanaEid(solanaEid ?? srcEid)
             const { oapp } = getSolanaDeployment(storeEid)
             const storeBytes = Buffer.from(new PublicKey(oapp).toBytes())
             const peer = '0x' + storeBytes.toString('hex')
@@ -51,7 +54,7 @@ task('lz:oapp:evm:set-peer', 'Owner: set Solana Store as peer on the EVM LendMir
                 await initTx.wait()
                 console.log('initialized')
             } else if (owner.toLowerCase() !== signer.address.toLowerCase()) {
-                throw new Error(`Signer is not owner. Use the owner key in PRIVATE_KEY. owner=${owner}`)
+                throw new Error(`Signer is not owner. Use EVM_PRIVATE_KEY for the active DEPLOYMENT_TYPE. owner=${owner}`)
             }
 
             const tx = await oappContract.setPeer(srcEid, peer)

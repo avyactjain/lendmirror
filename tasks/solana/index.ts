@@ -25,7 +25,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 import { toWeb3JsInstruction, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import { AddressLookupTableAccount, Connection, Keypair } from '@solana/web3.js'
-import { getKeypairFromEnvironment, getKeypairFromFile, getSimulationComputeUnits } from '@solana-developers/helpers'
+import { getSimulationComputeUnits } from '@solana-developers/helpers'
 import { backOff } from 'exponential-backoff'
 
 import { formatEid } from '@layerzerolabs/devtools'
@@ -41,19 +41,6 @@ const LOOKUP_TABLE_ADDRESS: Partial<Record<EndpointId, PublicKey>> = {
     [EndpointId.SOLANA_V2_TESTNET]: publicKey('9thqPdbR27A1yLWw2spwJLySemiGMXxPnEvfmXVk4KuK'),
 }
 
-// create a safe version of getKeypairFromFile that returns undefined if the file does not exist, for checking the default keypair
-async function safeGetKeypairDefaultPath(filePath?: string) {
-    try {
-        return await getKeypairFromFile(filePath)
-    } catch (error) {
-        // If the error is due to the file not existing, return undefined
-        if (error instanceof Error && error.message.includes('Could not read keypair')) {
-            return undefined
-        }
-        throw error // Rethrow if it's a different error
-    }
-}
-
 // TODO in another PR: consider moving keypair related functions to tasks/solana/utils.ts
 async function getSolanaKeypair(readOnly = false): Promise<Keypair> {
     const logger = createLogger()
@@ -64,60 +51,13 @@ async function getSolanaKeypair(readOnly = false): Promise<Keypair> {
         return Keypair.generate()
     }
 
-    // Attempt to load from each source
-    const keypairEnvPrivate = process.env.SOLANA_PRIVATE_KEY
-        ? getKeypairFromEnvironment('SOLANA_PRIVATE_KEY')
-        : undefined // #1 SOLANA_PRIVATE_KEY
-    const keypairEnvPath = process.env.SOLANA_KEYPAIR_PATH
-        ? await getKeypairFromFile(process.env.SOLANA_KEYPAIR_PATH)
-        : undefined // #2 SOLANA_KEYPAIR_PATH
-    const keypairDefaultPath = await safeGetKeypairDefaultPath() // #3 ~/.config/solana/id.json
-
-    // Throw if no keypair is found via all 3 methods
-    if (!keypairEnvPrivate && !keypairEnvPath && !keypairDefaultPath) {
-        throw new Error(
-            'No Solana keypair found. Provide SOLANA_PRIVATE_KEY, ' +
-                'SOLANA_KEYPAIR_PATH, or place a valid keypair at ~/.config/solana/id.json.'
-        )
-    }
-
-    // If both environment-based keys exist, ensure they match
-    if (keypairEnvPrivate && keypairEnvPath) {
-        if (keypairEnvPrivate.publicKey.equals(keypairEnvPath.publicKey)) {
-            logger.info('Both SOLANA_PRIVATE_KEY and SOLANA_KEYPAIR_PATH match. Using environment-based keypair.')
-            return keypairEnvPrivate
-        } else {
-            throw new Error(
-                `Conflict: SOLANA_PRIVATE_KEY and SOLANA_KEYPAIR_PATH are different keypairs.\n` +
-                    `Path: ${process.env.SOLANA_KEYPAIR_PATH} => ${keypairEnvPath.publicKey.toBase58()}\n` +
-                    `Env : ${keypairEnvPrivate.publicKey.toBase58()}`
-            )
-        }
-    }
-
-    // If exactly one environment-based keypair is found, use it immediately
-    if (keypairEnvPrivate) {
-        logger.info(`Using Solana keypair from SOLANA_PRIVATE_KEY => ${keypairEnvPrivate.publicKey.toBase58()}`)
-        return keypairEnvPrivate
-    }
-
-    if (keypairEnvPath) {
-        logger.info(
-            `Using Solana keypair from SOLANA_KEYPAIR_PATH (${process.env.SOLANA_KEYPAIR_PATH}) => ${keypairEnvPath.publicKey.toBase58()}`
-        )
-        return keypairEnvPath
-    }
-
-    // Otherwise, default path is the last fallback
+    const { resolveDeployment, printDeploymentBanner } = await import('../../lib/deployment')
+    const resolved = resolveDeployment()
+    printDeploymentBanner(resolved)
     logger.info(
-        `No environment-based keypair found. Found keypair at default path => ${keypairDefaultPath.publicKey.toBase58()}`
+        `Using Solana keypair from ${resolved.profile.env.solanaKeypairPath} => ${resolved.solanaKeypair.publicKey.toBase58()}`
     )
-    const doContinue = await promptToContinue(
-        `Defaulting to ~/.config/solana/id.json with address ${keypairDefaultPath.publicKey.toBase58()}. Use this keypair?`
-    )
-    if (!doContinue) process.exit(1)
-
-    return keypairDefaultPath
+    return resolved.solanaKeypair
 }
 
 /**

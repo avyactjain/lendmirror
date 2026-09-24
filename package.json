@@ -4,7 +4,11 @@
   "private": true,
   "license": "MIT",
   "type": "commonjs",
+  "bin": {
+    "lm": "./bin/lm.js"
+  },
   "scripts": {
+    "lm": "node ./bin/lm.js",
     "clean": "rm -rf artifacts cache out",
     "compile": "concurrently -c auto --names forge,hardhat '$npm_execpath run compile:forge' '$npm_execpath run compile:hardhat' '$npm_execpath run compile:anchor'",
     "compile:anchor": "anchor build",

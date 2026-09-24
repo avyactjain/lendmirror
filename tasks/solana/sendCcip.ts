@@ -12,13 +12,16 @@ import {
     fundStoreInstruction,
     sendCcipInstruction,
 } from '../../lib/client/ccip'
+import { requireCcip, resolveSolanaEid } from '../common/deployment'
 import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
 
 task('lz:oapp:solana:send-ccip', 'Sends the last Store snapshot body through Chainlink CCIP')
-    .addParam('eid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
-    .addOptionalParam('fundLamports', 'SOL lamports to move onto the Store for the CCIP fee', 50_000_000, types.int)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('fundLamports', 'SOL lamports to move onto the CCIP payer for the fee', 50_000_000, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid, fundLamports, computeUnitPriceScaleFactor }) => {
+    .setAction(async ({ eid: eidArg, fundLamports, computeUnitPriceScaleFactor }) => {
+        requireCcip()
+        const eid = resolveSolanaEid(eidArg)
         const { programId, oapp } = getSolanaDeployment(eid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(programId))

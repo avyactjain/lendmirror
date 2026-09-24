@@ -2,45 +2,46 @@ import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 
-import {
-    CCIP_FEE_QUOTER_DEVNET,
-    CCIP_RMN_REMOTE_DEVNET,
-    CCIP_ROUTER_DEVNET,
-    CCIP_SEPOLIA_SELECTOR,
-    ccipTransaction,
-    setCcipRouteInstruction,
-} from '../../lib/client/ccip'
+import { ccipTransaction, setCcipRouteInstruction } from '../../lib/client/ccip'
+import { getProfile, requireCcip, resolveEvmNetwork, resolveSolanaEid } from '../common/deployment'
 import { deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
 
 task('lz:oapp:solana:set-ccip-route', 'Admin: set the Chainlink router, destination, and Ethereum receiver')
-    .addParam('eid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
-    .addParam('linkMint', 'LINK mint on this Solana cluster', undefined, types.string)
-    .addOptionalParam('router', 'CCIP router program', CCIP_ROUTER_DEVNET, types.string)
-    .addOptionalParam('feeQuoter', 'CCIP fee quoter program', CCIP_FEE_QUOTER_DEVNET, types.string)
-    .addOptionalParam('rmnRemote', 'CCIP RMN remote program', CCIP_RMN_REMOTE_DEVNET, types.string)
-    .addOptionalParam('destSelector', 'Destination CCIP chain selector', CCIP_SEPOLIA_SELECTOR.toString(), types.string)
-    .addOptionalParam('receiver', 'Ethereum LendMirror address', '', types.string)
-    .addOptionalParam('gasLimit', 'Gas for ccipReceive', '400000', types.string)
-    .setAction(async ({ eid, linkMint, router, feeQuoter, rmnRemote, destSelector, receiver, gasLimit }, hre: HardhatRuntimeEnvironment) => {
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('linkMint', 'LINK mint. Default: DEPLOYMENT_TYPE profile.', '', types.string)
+    .addOptionalParam('router', 'CCIP router program. Default: profile.', '', types.string)
+    .addOptionalParam('feeQuoter', 'CCIP fee quoter program. Default: profile.', '', types.string)
+    .addOptionalParam('rmnRemote', 'CCIP RMN remote program. Default: profile.', '', types.string)
+    .addOptionalParam('destSelector', 'Destination CCIP chain selector. Default: profile.', '', types.string)
+    .addOptionalParam('receiver', 'Ethereum LendMirror address. Default: deployments or profile.', '', types.string)
+    .addOptionalParam('gasLimit', 'Gas for ccipReceive. Default: profile.', '', types.string)
+    .setAction(async (args, hre: HardhatRuntimeEnvironment) => {
+        const ccip = requireCcip()
+        const eid = resolveSolanaEid(args.eid)
+        const profile = getProfile()
         const { programId, oapp } = getSolanaDeployment(eid)
         const { umi, umiWalletSigner } = await deriveConnection(eid)
-        const evm = receiver || (await hre.deployments.get('LendMirror')).address
+        const evm =
+            args.receiver ||
+            (await hre.deployments.get('LendMirror').catch(() => null))?.address ||
+            profile.evmProxy
         const ix = setCcipRouteInstruction({
             programId,
             admin: umiWalletSigner.publicKey,
             store: oapp,
-            router,
-            feeQuoter,
-            rmnRemote,
-            linkMint,
-            destChainSelector: BigInt(destSelector),
+            router: args.router || ccip.router,
+            feeQuoter: args.feeQuoter || ccip.feeQuoter,
+            rmnRemote: args.rmnRemote || ccip.rmnRemote,
+            linkMint: args.linkMint || ccip.linkMint,
+            destChainSelector: BigInt(args.destSelector || ccip.destChainSelector.toString()),
             receiver: hexTo20(evm),
-            gasLimit: BigInt(gasLimit),
+            gasLimit: BigInt(args.gasLimit || ccip.gasLimit),
         })
         const tx = await ccipTransaction(ix, umiWalletSigner).sendAndConfirm(umi)
         console.log(`setCcipRoute: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
         console.log('receiver', evm)
-        console.log('store pays CCIP fees', oapp)
+        console.log('ccip payer (Sepolia sender)', ccip.payer)
+        console.log('evm network', resolveEvmNetwork())
     })
 
 function hexTo20(hex: string): Uint8Array {
