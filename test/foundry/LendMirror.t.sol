@@ -4,9 +4,10 @@ pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 
-import { LendMirror } from "../../contracts/LendMirror.sol";
+import { Any2EVMMessage, EVMTokenAmount, IAny2EVMMessageReceiver, LendMirror } from "../../contracts/LendMirror.sol";
 import { PositionSnapshotMsgCodec } from "../../contracts/libs/PositionSnapshotMsgCodec.sol";
 
 /// Accepts `initialize`'s `setDelegate` call. An empty address reverts.
@@ -110,5 +111,80 @@ contract LendMirrorReceiveTest is Test {
         LendMirrorHarness next = new LendMirrorHarness(address(new EndpointStub()));
         vm.expectRevert();
         app.upgradeToAndCall(address(next), "");
+    }
+
+    function testMatchedWhenBothRoutersDeliverTheSameBody() public {
+        bytes memory frame = _payload();
+        bytes memory body = _body(frame);
+        bytes32 position = hex"0101010101010101010101010101010101010101010101010101010101010101";
+
+        app.exposeLzReceive(Origin({ srcEid: 40168, sender: bytes32(uint256(1)), nonce: 1 }), bytes32(0), frame);
+        assertFalse(app.matched(position));
+
+        _allowCcip();
+        app.ccipReceive(_ccip(body));
+
+        assertTrue(app.matched(position));
+        assertEq(app.fromLayerZero(position).bodyHash, keccak256(body));
+        assertEq(app.fromChainlink(position).bodyHash, keccak256(body));
+        assertEq(app.fromLayerZero(position).snapshot.vaultId, 1);
+        assertEq(app.fromChainlink(position).snapshot.nftId, 29);
+    }
+
+    function testNotMatchedWhenBodiesDiffer() public {
+        bytes memory frame = _payload();
+        bytes memory body = _body(frame);
+        body[142] = hex"ff";
+        bytes32 position = hex"0101010101010101010101010101010101010101010101010101010101010101";
+
+        app.exposeLzReceive(Origin({ srcEid: 40168, sender: bytes32(uint256(1)), nonce: 1 }), bytes32(0), frame);
+        _allowCcip();
+        app.ccipReceive(_ccip(body));
+
+        assertFalse(app.matched(position));
+        assertTrue(app.fromLayerZero(position).received);
+        assertTrue(app.fromChainlink(position).received);
+    }
+
+    function testChainlinkCanSeeTheReceiver() public view {
+        assertTrue(app.supportsInterface(type(IAny2EVMMessageReceiver).interfaceId));
+        assertTrue(app.supportsInterface(type(IERC165).interfaceId));
+        assertFalse(app.supportsInterface(0xffffffff));
+    }
+
+    function testCcipRejectsStrangerAndWrongSource() public {
+        bytes memory body = _body(_payload());
+        _allowCcip();
+
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(abi.encodeWithSelector(LendMirror.OnlyCcipRouter.selector, address(0xBEEF)));
+        app.ccipReceive(_ccip(body));
+
+        Any2EVMMessage memory wrongChain = _ccip(body);
+        wrongChain.sourceChainSelector = 1;
+        vm.expectRevert(abi.encodeWithSelector(LendMirror.UnexpectedCcipSource.selector, uint64(1)));
+        app.ccipReceive(wrongChain);
+    }
+
+    function _body(bytes memory frame) internal pure returns (bytes memory body) {
+        body = new bytes(225);
+        for (uint256 i = 0; i < 225; i++) {
+            body[i] = frame[32 + i];
+        }
+    }
+
+    function _allowCcip() internal {
+        vm.prank(DELEGATE);
+        app.setCcipRoute(address(this), 16_423_721_717_087_811_551, abi.encodePacked(bytes32(uint256(0xA11CE))));
+    }
+
+    function _ccip(bytes memory body) internal pure returns (Any2EVMMessage memory) {
+        return Any2EVMMessage({
+            messageId: keccak256("ccip"),
+            sourceChainSelector: 16_423_721_717_087_811_551,
+            sender: abi.encodePacked(bytes32(uint256(0xA11CE))),
+            data: body,
+            destTokenAmounts: new EVMTokenAmount[](0)
+        });
     }
 }

@@ -14,4 +14,5 @@ pub enum LendMirrorError {
     BranchChainTooLong,
     MissingBranchAccount,
     MissingLiquidationRecord,
+    InvalidCcipAccount,
 }
