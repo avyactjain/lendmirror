@@ -137,4 +137,14 @@ pub mod lendmirror {
     ) -> Result<()> {
         SetOndemandCallers::apply(&mut ctx, &params)
     }
+
+    // Owner or Store snapshotter: read Jupiter into wrapper.snapshot; clear send flags.
+    pub fn refresh_wrapper(mut ctx: Context<RefreshWrapper>) -> Result<()> {
+        RefreshWrapper::apply(&mut ctx)
+    }
+
+    // OnDemand caller: require snapshot present; set both *_send_allowed true.
+    pub fn request_bridge_ondemand(mut ctx: Context<RequestBridgeOndemand>) -> Result<()> {
+        RequestBridgeOndemand::apply(&mut ctx)
+    }
 }
