@@ -7,7 +7,8 @@ use anchor_lang::solana_program::{instruction::Instruction, program::invoke_sign
 pub const CCIP_SEND_DISCRIMINATOR: [u8; 8] = [108, 216, 134, 191, 249, 234, 33, 84];
 /// CCIP router rejects message data above this.
 pub const CCIP_DATA_LIMIT: usize = 256;
-/// Chainlink `GenericExtraArgsV2` tag. The fee program reads Borsh after it: `u128` gas, then one bool.
+/// Chainlink `GenericExtraArgsV2` tag. The fee program reads Borsh after it: `u128` gas, then one
+/// bool.
 const EXTRA_ARGS_V2_TAG: [u8; 4] = [0x18, 0x1d, 0xcf, 0x10];
 const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -83,14 +84,26 @@ impl SendCcip<'_> {
             route.router,
             LendMirrorError::InvalidCcipAccount
         );
-        require_keys_eq!(ctx.accounts.fee_token_mint.key(), NATIVE_MINT, LendMirrorError::InvalidCcipAccount);
+        require_keys_eq!(
+            ctx.accounts.fee_token_mint.key(),
+            NATIVE_MINT,
+            LendMirrorError::InvalidCcipAccount
+        );
         require_keys_eq!(
             ctx.accounts.fee_token_user.key(),
             Pubkey::default(),
             LendMirrorError::InvalidCcipAccount
         );
-        require_keys_eq!(ctx.accounts.fee_quoter.key(), route.fee_quoter, LendMirrorError::InvalidCcipAccount);
-        require_keys_eq!(ctx.accounts.rmn_remote.key(), route.rmn_remote, LendMirrorError::InvalidCcipAccount);
+        require_keys_eq!(
+            ctx.accounts.fee_quoter.key(),
+            route.fee_quoter,
+            LendMirrorError::InvalidCcipAccount
+        );
+        require_keys_eq!(
+            ctx.accounts.rmn_remote.key(),
+            route.rmn_remote,
+            LendMirrorError::InvalidCcipAccount
+        );
         require!(ctx.accounts.ccip_payer.data_is_empty(), LendMirrorError::InvalidCcipAccount);
 
         let snapshot = ctx
@@ -102,7 +115,12 @@ impl SendCcip<'_> {
         let body = snapshot.encode_body();
         require!(body.len() <= CCIP_DATA_LIMIT, LendMirrorError::InvalidCcipAccount);
 
-        let data = ccip_send_instruction_data(route.dest_chain_selector, &route.receiver, &body, route.gas_limit);
+        let data = ccip_send_instruction_data(
+            route.dest_chain_selector,
+            &route.receiver,
+            &body,
+            route.gas_limit,
+        );
         let payer_key = ctx.accounts.ccip_payer.key();
         let metas = vec![
             AccountMeta::new_readonly(ctx.accounts.config.key(), false),

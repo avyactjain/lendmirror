@@ -32,6 +32,10 @@ const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 const CCIP_SEED: &[u8] = b"LendMirrorCcip";
 /// Empty account that signs `ccip_send` and pays the SOL fee. It must hold no data.
 const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
+/// One PDA per Jupiter position. Seeds: this + vault_id le + nft_id le.
+const WRAPPER_SEED: &[u8] = b"LendMirrorWrapper";
+/// OnDemand strategy for one wrapper. Seeds: this + wrapper pubkey.
+const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///
@@ -89,7 +93,10 @@ pub mod lendmirror {
     }
 
     // Admin only. Router, destination chain, and Ethereum receiver for send_ccip.
-    pub fn set_ccip_route(mut ctx: Context<SetCcipRoute>, params: SetCcipRouteParams) -> Result<()> {
+    pub fn set_ccip_route(
+        mut ctx: Context<SetCcipRoute>,
+        params: SetCcipRouteParams,
+    ) -> Result<()> {
         SetCcipRoute::apply(&mut ctx, &params)
     }
 
