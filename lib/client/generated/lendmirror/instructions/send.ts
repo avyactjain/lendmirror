@@ -22,6 +22,7 @@ export type SendInstructionAccounts = {
      */
 
     store: PublicKey | Pda
+    wrapper: PublicKey | Pda
     endpoint: PublicKey | Pda
 }
 
@@ -73,7 +74,8 @@ export function send(
         authority: { index: 0, isWritable: false as boolean, value: input.authority ?? null },
         peer: { index: 1, isWritable: false as boolean, value: input.peer ?? null },
         store: { index: 2, isWritable: false as boolean, value: input.store ?? null },
-        endpoint: { index: 3, isWritable: false as boolean, value: input.endpoint ?? null },
+        wrapper: { index: 3, isWritable: true as boolean, value: input.wrapper ?? null },
+        endpoint: { index: 4, isWritable: false as boolean, value: input.endpoint ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

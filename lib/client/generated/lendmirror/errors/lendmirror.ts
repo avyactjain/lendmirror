@@ -168,6 +168,19 @@ export class MissingLiquidationRecordError extends ProgramError {
 codeToErrorMap.set(0x177b, MissingLiquidationRecordError)
 nameToErrorMap.set('MissingLiquidationRecord', MissingLiquidationRecordError)
 
+/** InvalidCcipAccount:  */
+export class InvalidCcipAccountError extends ProgramError {
+    override readonly name: string = 'InvalidCcipAccount'
+
+    readonly code: number = 0x177c // 6012
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177c, InvalidCcipAccountError)
+nameToErrorMap.set('InvalidCcipAccount', InvalidCcipAccountError)
+
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

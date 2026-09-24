@@ -18,6 +18,8 @@ export class LendMirrorPDA extends OmniAppPDA {
     static PEER_SEED = 'LendMirrorPeer'
     static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'
+    static WRAPPER_SEED = 'LendMirrorWrapper'
+    static ONDEMAND_SEED = 'LendMirrorOnDemand'
 
     constructor(public readonly programId: PublicKey) {
         super(programId)
@@ -65,6 +67,23 @@ export class LendMirrorPDA extends OmniAppPDA {
             Buffer.from(LendMirrorPDA.JUP_POSITION_SEED, 'utf8'),
             u16Le(vaultId),
             u32Le(nftId),
+        ])
+    }
+
+    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]
+    wrapper(vaultId: number, nftId: number): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.WRAPPER_SEED, 'utf8'),
+            u16Le(vaultId),
+            u32Le(nftId),
+        ])
+    }
+
+    // seeds = [ONDEMAND_SEED, wrapper.key()]
+    ondemand(wrapper: PublicKey): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.ONDEMAND_SEED, 'utf8'),
+            publicKeyBytes(wrapper),
         ])
     }
 }

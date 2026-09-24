@@ -19,7 +19,15 @@ import {
     u64,
 } from '@metaplex-foundation/umi/serializers'
 
-/** Snapshot we store. Not a Jupiter account. */
+/**
+ * Snapshot we store. Not a Jupiter account.
+ *
+ * `col_raw`, `debt_raw`, `net_debt` and `tick` are **live**: they already
+ * account for any liquidation that hit this position's tick. The `stored_*`
+ * fields are what the Jupiter Position account still says, so a consumer can
+ * see how far the two have drifted apart.
+ */
+
 export type PositionSnapshot = {
     position: PublicKey
     vaultId: number
@@ -39,6 +47,7 @@ export type PositionSnapshot = {
     isSupplyOnly: boolean
     isLiquidated: boolean
     isFullyLiquidated: boolean
+    /** Branch the liquidation walk ended on. 0 when never liquidated. */
     branchId: number
     vaultSupplyExchangePrice: bigint
     vaultBorrowExchangePrice: bigint
@@ -64,6 +73,7 @@ export type PositionSnapshotArgs = {
     isSupplyOnly: boolean
     isLiquidated: boolean
     isFullyLiquidated: boolean
+    /** Branch the liquidation walk ended on. 0 when never liquidated. */
     branchId: number
     vaultSupplyExchangePrice: number | bigint
     vaultBorrowExchangePrice: number | bigint
@@ -96,8 +106,6 @@ export function getPositionSnapshotSerializer(): Serializer<PositionSnapshotArgs
             ['vaultBorrowExchangePrice', u64()],
             ['snapshotTime', i64()],
         ],
-        {
-            description: 'PositionSnapshot'
-        }
+        { description: 'PositionSnapshot' }
     ) as Serializer<PositionSnapshotArgs, PositionSnapshot>
 }

@@ -32,6 +32,7 @@ export type GetJupiterPositionInstructionAccounts = {
      * out of the Tick account. Address is checked in apply. Leave it out when
      * the Tick still holds the record, or when the account was never created.
      */
+
     tickIdLiquidation?: PublicKey | Pda
     positionStore: PublicKey | Pda
     systemProgram?: PublicKey | Pda

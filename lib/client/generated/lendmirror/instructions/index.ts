@@ -6,10 +6,17 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
+export * from './attachOndemand'
 export * from './getJupiterPosition'
 export * from './initStore'
 export * from './quoteSend'
+export * from './refreshWrapper'
+export * from './requestBridgeOndemand'
 export * from './send'
+export * from './sendCcip'
+export * from './setCcipRoute'
+export * from './setOndemandCallers'
 export * from './setPeerConfig'
 export * from './setSenders'
 export * from './setSnapshotters'
+export * from './wrapPosition'
