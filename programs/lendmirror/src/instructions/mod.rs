@@ -6,6 +6,7 @@ pub mod send_ccip;
 pub mod set_allowlists;
 pub mod set_ccip_route;
 pub mod set_peer_config;
+pub mod wrap_position;
 
 pub use get_jupiter_position::*;
 pub use init_store::*;
@@ -15,3 +16,4 @@ pub use send_ccip::*;
 pub use set_allowlists::*;
 pub use set_ccip_route::*;
 pub use set_peer_config::*;
+pub use wrap_position::*;

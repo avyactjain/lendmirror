@@ -116,4 +116,25 @@ pub mod lendmirror {
     ) -> Result<PositionSnapshot> {
         GetJupiterPosition::apply(&mut ctx, &params)
     }
+
+    // Create a PositionWrapper PDA for (vault_id, nft_id). Signer becomes owner.
+    pub fn wrap_position(
+        mut ctx: Context<WrapPosition>,
+        params: WrapPositionParams,
+    ) -> Result<()> {
+        WrapPosition::apply(&mut ctx, &params)
+    }
+
+    // Wrapper owner creates the OnDemand strategy PDA; callers starts as [owner].
+    pub fn attach_ondemand(mut ctx: Context<AttachOndemand>) -> Result<()> {
+        AttachOndemand::apply(&mut ctx)
+    }
+
+    // Wrapper owner replaces the OnDemand caller allowlist (max 8).
+    pub fn set_ondemand_callers(
+        mut ctx: Context<SetOndemandCallers>,
+        params: SetAllowlistParams,
+    ) -> Result<()> {
+        SetOndemandCallers::apply(&mut ctx, &params)
+    }
 }
