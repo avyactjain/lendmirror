@@ -7,24 +7,26 @@ use anchor_lang::solana_program::{instruction::Instruction, program::invoke_sign
 pub const CCIP_SEND_DISCRIMINATOR: [u8; 8] = [108, 216, 134, 191, 249, 234, 33, 84];
 /// CCIP router rejects message data above this.
 pub const CCIP_DATA_LIMIT: usize = 256;
-/// Chainlink `GenericExtraArgsV2` tag, then ABI-encoded `(uint256 gasLimit, bool allowOutOfOrder)`.
+/// Chainlink `GenericExtraArgsV2` tag. The fee program reads Borsh after it: `u128` gas, then one bool.
 const EXTRA_ARGS_V2_TAG: [u8; 4] = [0x18, 0x1d, 0xcf, 0x10];
 const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 /// Accounts the CCIP router names on `ccip_send`, plus our Store and route.
-/// No tokens move. Fees are native SOL, paid from the Store.
+/// No tokens move. Fees are native SOL, paid from the empty CCIP payer account.
 #[derive(Accounts)]
 pub struct SendCcip<'info> {
     /// Must be on `store.senders`.
     pub authority: Signer<'info>,
-    /// Signs the router CPI. Must hold SOL for the CCIP fee.
     #[account(
-        mut,
         seeds = [STORE_SEED],
         bump = store.bump,
         constraint = store.is_sender(&authority.key()) @ LendMirrorError::Unauthorized
     )]
     pub store: Account<'info, Store>,
+    /// CHECK: empty account. Signs the router call and pays the SOL fee. Must hold no data.
+    #[account(mut, seeds = [CCIP_PAYER_SEED], bump)]
+    pub ccip_payer: UncheckedAccount<'info>,
     #[account(seeds = [CCIP_SEED], bump = ccip_route.bump)]
     pub ccip_route: Account<'info, CcipRoute>,
 
@@ -37,6 +39,9 @@ pub struct SendCcip<'info> {
     #[account(mut)]
     pub nonce: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: SPL token program. The router requires this because the fee mint is wrapped SOL.
+    #[account(address = TOKEN_PROGRAM)]
+    pub fee_token_program: UncheckedAccount<'info>,
     /// CHECK: wrapped SOL mint. Native fees still name this mint.
     pub fee_token_mint: UncheckedAccount<'info>,
     /// CHECK: zero pubkey. Native SOL does not use a fee-token account.
@@ -65,6 +70,9 @@ pub struct SendCcip<'info> {
     /// CHECK: router token-pool signer. Unused when no tokens move. Router still requires it.
     #[account(mut)]
     pub token_pools_signer: UncheckedAccount<'info>,
+    /// CHECK: the CCIP router program. Solana rejects the call if this account is absent.
+    #[account(address = ccip_route.router)]
+    pub ccip_router: UncheckedAccount<'info>,
 }
 
 impl SendCcip<'_> {
@@ -83,6 +91,7 @@ impl SendCcip<'_> {
         );
         require_keys_eq!(ctx.accounts.fee_quoter.key(), route.fee_quoter, LendMirrorError::InvalidCcipAccount);
         require_keys_eq!(ctx.accounts.rmn_remote.key(), route.rmn_remote, LendMirrorError::InvalidCcipAccount);
+        require!(ctx.accounts.ccip_payer.data_is_empty(), LendMirrorError::InvalidCcipAccount);
 
         let snapshot = ctx
             .accounts
@@ -94,14 +103,14 @@ impl SendCcip<'_> {
         require!(body.len() <= CCIP_DATA_LIMIT, LendMirrorError::InvalidCcipAccount);
 
         let data = ccip_send_instruction_data(route.dest_chain_selector, &route.receiver, &body, route.gas_limit);
-        let store_key = ctx.accounts.store.key();
+        let payer_key = ctx.accounts.ccip_payer.key();
         let metas = vec![
             AccountMeta::new_readonly(ctx.accounts.config.key(), false),
             AccountMeta::new(ctx.accounts.dest_chain_state.key(), false),
             AccountMeta::new(ctx.accounts.nonce.key(), false),
-            AccountMeta::new(store_key, true),
+            AccountMeta::new(payer_key, true),
             AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.fee_token_program.key(), false),
             AccountMeta::new_readonly(ctx.accounts.fee_token_mint.key(), false),
             AccountMeta::new_readonly(ctx.accounts.fee_token_user.key(), false),
             AccountMeta::new(ctx.accounts.fee_token_receiver.key(), false),
@@ -120,8 +129,9 @@ impl SendCcip<'_> {
             ctx.accounts.config.to_account_info(),
             ctx.accounts.dest_chain_state.to_account_info(),
             ctx.accounts.nonce.to_account_info(),
-            ctx.accounts.store.to_account_info(),
+            ctx.accounts.ccip_payer.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
+            ctx.accounts.fee_token_program.to_account_info(),
             ctx.accounts.fee_token_mint.to_account_info(),
             ctx.accounts.fee_token_user.to_account_info(),
             ctx.accounts.fee_token_receiver.to_account_info(),
@@ -135,9 +145,10 @@ impl SendCcip<'_> {
             ctx.accounts.rmn_remote_curses.to_account_info(),
             ctx.accounts.rmn_remote_config.to_account_info(),
             ctx.accounts.token_pools_signer.to_account_info(),
+            ctx.accounts.ccip_router.to_account_info(),
         ];
-        let bump = ctx.accounts.store.bump;
-        let seeds: &[&[u8]] = &[STORE_SEED, &[bump]];
+        let bump = ctx.bumps.ccip_payer;
+        let seeds: &[&[u8]] = &[CCIP_PAYER_SEED, &[bump]];
         invoke_signed(
             &Instruction { program_id: route.router, accounts: metas, data },
             &infos,
@@ -155,10 +166,11 @@ pub fn ccip_send_instruction_data(
     gas_limit: u64,
 ) -> Vec<u8> {
     let extra = evm_extra_args_v2(gas_limit);
+    let receiver32 = evm_receiver_32(receiver);
     let mut data = Vec::with_capacity(256);
     data.extend_from_slice(&CCIP_SEND_DISCRIMINATOR);
     data.extend_from_slice(&dest_chain_selector.to_le_bytes());
-    push_borsh_bytes(&mut data, receiver);
+    push_borsh_bytes(&mut data, &receiver32);
     push_borsh_bytes(&mut data, body);
     data.extend_from_slice(&0u32.to_le_bytes());
     data.extend_from_slice(&[0u8; 32]);
@@ -168,10 +180,18 @@ pub fn ccip_send_instruction_data(
 }
 
 pub fn evm_extra_args_v2(gas_limit: u64) -> Vec<u8> {
-    let mut out = vec![0u8; 68];
-    out[..4].copy_from_slice(&EXTRA_ARGS_V2_TAG);
-    out[28..36].copy_from_slice(&gas_limit.to_be_bytes());
-    out[67] = 1;
+    let mut out = Vec::with_capacity(21);
+    out.extend_from_slice(&EXTRA_ARGS_V2_TAG);
+    out.extend_from_slice(&(gas_limit as u128).to_le_bytes());
+    out.push(1);
+    out
+}
+
+/// Fee program wants a 32-byte receiver: 12 zero bytes, then the 20-byte Ethereum address.
+fn evm_receiver_32(receiver: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let start = out.len() - receiver.len();
+    out[start..].copy_from_slice(receiver);
     out
 }
 
@@ -187,10 +207,10 @@ mod tests {
     #[test]
     fn extra_args_match_chainlink_v2() {
         let args = evm_extra_args_v2(400_000);
-        assert_eq!(args.len(), 68);
+        assert_eq!(args.len(), 21);
         assert_eq!(&args[..4], &[0x18, 0x1d, 0xcf, 0x10]);
-        assert_eq!(&args[28..36], &400_000u64.to_be_bytes());
-        assert_eq!(args[67], 1);
+        assert_eq!(&args[4..20], &400_000u128.to_le_bytes());
+        assert_eq!(args[20], 1);
     }
 
     #[test]
@@ -200,7 +220,10 @@ mod tests {
         let data = ccip_send_instruction_data(42, &receiver, &body, 400_000);
         assert_eq!(&data[..8], &CCIP_SEND_DISCRIMINATOR);
         assert_eq!(&data[8..16], &42u64.to_le_bytes());
-        let body_at = 8 + 8 + 4 + 20 + 4;
+        assert_eq!(&data[16..20], &32u32.to_le_bytes());
+        assert_eq!(&data[20..32], &[0u8; 12]);
+        assert_eq!(&data[32..52], &receiver);
+        let body_at = 8 + 8 + 4 + 32 + 4;
         assert_eq!(&data[body_at..body_at + 225], body.as_slice());
         assert!(body.len() <= CCIP_DATA_LIMIT);
     }

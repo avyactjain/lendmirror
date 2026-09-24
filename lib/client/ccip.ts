@@ -14,6 +14,7 @@ export const CCIP_SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
 const NATIVE_MINT = new PublicKey('So11111111111111111111111111111111111111112')
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const TOKEN_PROGRAM_ID = publicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 const SYSTEM_PROGRAM = publicKey('11111111111111111111111111111111')
 const ZERO = publicKey('11111111111111111111111111111111')
@@ -34,6 +35,10 @@ export type CcipRouteAccount = {
 
 export function ccipRouteAddress(programId: string): string {
     return findPda(programId, [Buffer.from('LendMirrorCcip')])
+}
+
+export function ccipPayerAddress(programId: string): string {
+    return findPda(programId, [Buffer.from('LendMirrorCcipPayer')])
 }
 
 export function decodeCcipRoute(data: Uint8Array): CcipRouteAccount {
@@ -61,7 +66,7 @@ export function decodeCcipRoute(data: Uint8Array): CcipRouteAccount {
     return { router, feeQuoter, rmnRemote, linkMint, destChainSelector, receiver, gasLimit }
 }
 
-export function ccipSendAccounts(route: CcipRouteAccount, store: string) {
+export function ccipSendAccounts(route: CcipRouteAccount, payer: string) {
     const selector = u64le(route.destChainSelector)
     const feeBillingSigner = findPda(route.router, [Buffer.from('fee_billing_signer')])
     const feeTokenReceiver = findPda(ASSOCIATED_TOKEN_PROGRAM.toBase58(), [
@@ -72,7 +77,7 @@ export function ccipSendAccounts(route: CcipRouteAccount, store: string) {
     return {
         config: findPda(route.router, [Buffer.from('config')]),
         destChainState: findPda(route.router, [Buffer.from('dest_chain_state'), selector]),
-        nonce: findPda(route.router, [Buffer.from('nonce'), selector, new PublicKey(store).toBuffer()]),
+        nonce: findPda(route.router, [Buffer.from('nonce'), selector, new PublicKey(payer).toBuffer()]),
         feeTokenMint: NATIVE_MINT.toBase58(),
         feeTokenUser: ZERO,
         feeTokenReceiver,
@@ -135,18 +140,21 @@ export function sendCcipInstruction(args: {
     store: string
     route: CcipRouteAccount
 }): Instruction {
-    const accounts = ccipSendAccounts(args.route, args.store)
+    const payer = ccipPayerAddress(args.programId)
+    const accounts = ccipSendAccounts(args.route, payer)
     return {
         programId: publicKey(args.programId),
         data: SEND_CCIP_DISCRIMINATOR,
         keys: [
             { pubkey: args.authority, isSigner: true, isWritable: false },
-            { pubkey: publicKey(args.store), isSigner: false, isWritable: true },
+            { pubkey: publicKey(args.store), isSigner: false, isWritable: false },
+            { pubkey: publicKey(payer), isSigner: false, isWritable: true },
             { pubkey: publicKey(ccipRouteAddress(args.programId)), isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.config), isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.destChainState), isSigner: false, isWritable: true },
             { pubkey: publicKey(accounts.nonce), isSigner: false, isWritable: true },
             { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.feeTokenMint), isSigner: false, isWritable: false },
             { pubkey: accounts.feeTokenUser, isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.feeTokenReceiver), isSigner: false, isWritable: true },
@@ -160,6 +168,7 @@ export function sendCcipInstruction(args: {
             { pubkey: publicKey(accounts.rmnRemoteCurses), isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.rmnRemoteConfig), isSigner: false, isWritable: false },
             { pubkey: publicKey(accounts.tokenPoolsSigner), isSigner: false, isWritable: true },
+            { pubkey: publicKey(args.route.router), isSigner: false, isWritable: false },
         ],
     }
 }

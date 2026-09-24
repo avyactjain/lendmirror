@@ -14,7 +14,7 @@ export const BPF_LOADER_UPGRADEABLE = publicKey('BPFLoaderUpgradeab1e11111111111
 export const LZ_RECEIVE_TYPES_SEED = 'LzReceiveTypes'
 
 export class LendMirrorPDA extends OmniAppPDA {
-    static STORE_SEED = 'LendMirrorStore'
+    static STORE_SEED = 'LendMirrorStoreV0'
     static PEER_SEED = 'LendMirrorPeer'
     static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'

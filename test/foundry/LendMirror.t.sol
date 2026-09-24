@@ -4,9 +4,10 @@ pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 
-import { Any2EVMMessage, EVMTokenAmount, LendMirror } from "../../contracts/LendMirror.sol";
+import { Any2EVMMessage, EVMTokenAmount, IAny2EVMMessageReceiver, LendMirror } from "../../contracts/LendMirror.sol";
 import { PositionSnapshotMsgCodec } from "../../contracts/libs/PositionSnapshotMsgCodec.sol";
 
 /// Accepts `initialize`'s `setDelegate` call. An empty address reverts.
@@ -143,6 +144,12 @@ contract LendMirrorReceiveTest is Test {
         assertFalse(app.matched(position));
         assertTrue(app.fromLayerZero(position).received);
         assertTrue(app.fromChainlink(position).received);
+    }
+
+    function testChainlinkCanSeeTheReceiver() public view {
+        assertTrue(app.supportsInterface(type(IAny2EVMMessageReceiver).interfaceId));
+        assertTrue(app.supportsInterface(type(IERC165).interfaceId));
+        assertFalse(app.supportsInterface(0xffffffff));
     }
 
     function testCcipRejectsStrangerAndWrongSource() public {

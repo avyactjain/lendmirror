@@ -26,10 +26,12 @@ declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_
     "9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ"
 )));
 
-const STORE_SEED: &[u8] = b"LendMirrorStore";
+const STORE_SEED: &[u8] = b"LendMirrorStoreV0";
 const PEER_SEED: &[u8] = b"LendMirrorPeer";
 const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 const CCIP_SEED: &[u8] = b"LendMirrorCcip";
+/// Empty account that signs `ccip_send` and pays the SOL fee. It must hold no data.
+const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///

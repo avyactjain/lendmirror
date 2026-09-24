@@ -5,6 +5,7 @@ pragma solidity ^0.8.22;
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import { Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { IOAppCore, ILayerZeroEndpointV2 } from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import { IOAppReceiver } from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppReceiver.sol";
@@ -36,6 +37,11 @@ struct Any2EVMMessage {
     bytes sender;
     bytes data;
     EVMTokenAmount[] destTokenAmounts;
+}
+
+/// Same function Chainlink uses to decide whether to call `ccipReceive`.
+interface IAny2EVMMessageReceiver {
+    function ccipReceive(Any2EVMMessage calldata message) external;
 }
 
 /// Ethereum receiver for LendMirror. Solana `send` is the LayerZero sender.
@@ -76,7 +82,7 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
     address public ccipRouter;
     /// Solana chain selector CCIP puts on messages from our Store.
     uint64 public ccipSourceChainSelector;
-    /// Solana Store pubkey, the account that signs `ccip_send`.
+    /// Solana account that signs `ccip_send`. It is the empty CCIP payer, not the Store.
     bytes public ccipSender;
 
     mapping(bytes32 position => Delivery) private layerZeroDelivery;
@@ -110,7 +116,7 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
         return PositionSnapshotMsgCodec.price(lastPosition_);
     }
 
-    /// Owner tells this contract which CCIP router and Solana Store may deliver snapshots.
+    /// Owner tells this contract which CCIP router and Solana payer may deliver snapshots.
     function setCcipRoute(address router, uint64 sourceChainSelector, bytes calldata sender) external onlyOwner {
         if (router == address(0) || sourceChainSelector == 0 || sender.length == 0) revert UnexpectedCcipSender();
         ccipRouter = router;
@@ -219,6 +225,11 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
             lastUpdatedTs,
             lastUpdatedBlock
         );
+    }
+
+    /// Chainlink asks this before it will call `ccipReceive`. A missing answer makes it skip the call.
+    function supportsInterface(bytes4 interfaceId) public pure returns (bool) {
+        return interfaceId == type(IAny2EVMMessageReceiver).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     /// Chainlink router entry. `message.data` is the same 225-byte body LayerZero frames.

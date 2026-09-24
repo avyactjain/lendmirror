@@ -8,6 +8,7 @@ import { lendmirror } from '../../lib/client'
 import {
     ccipRouteAddress,
     decodeCcipRoute,
+    ccipPayerAddress,
     fundStoreInstruction,
     sendCcipInstruction,
 } from '../../lib/client/ccip'
@@ -15,7 +16,7 @@ import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplo
 
 task('lz:oapp:solana:send-ccip', 'Sends the last Store snapshot body through Chainlink CCIP')
     .addParam('eid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
-    .addOptionalParam('fundLamports', 'SOL lamports to move onto the Store for the CCIP fee', 20_000_000, types.int)
+    .addOptionalParam('fundLamports', 'SOL lamports to move onto the Store for the CCIP fee', 50_000_000, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(async ({ eid, fundLamports, computeUnitPriceScaleFactor }) => {
         const { programId, oapp } = getSolanaDeployment(eid)
@@ -33,7 +34,7 @@ task('lz:oapp:solana:send-ccip', 'Sends the last Store snapshot body through Cha
 
         let txBuilder = transactionBuilder()
             .add({
-                instruction: fundStoreInstruction(umiWalletSigner.publicKey, oapp, BigInt(fundLamports)),
+                instruction: fundStoreInstruction(umiWalletSigner.publicKey, ccipPayerAddress(programId), BigInt(fundLamports)),
                 signers: [umiWalletSigner],
                 bytesCreatedOnChain: 0,
             })
