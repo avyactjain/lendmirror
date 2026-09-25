@@ -212,6 +212,60 @@ describe('allowlist auth', function () {
             .rpc()
     })
 
+    it('wrap_position rejects non-snapshotter', async () => {
+        await program.methods
+            .setSnapshotters({ keys: [admin.publicKey] })
+            .accounts({ admin: admin.publicKey, store: storePda })
+            .rpc()
+        const vaultId = 1
+        const nftId = 8001
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        try {
+            await program.methods
+                .wrapPosition({ vaultId, nftId })
+                .accounts({
+                    authority: stranger.publicKey,
+                    store: storePda,
+                    wrapper: wrapperPda,
+                    systemProgram: SystemProgram.programId,
+                })
+                .signers([stranger])
+                .rpc()
+            expect.fail('expected Unauthorized')
+        } catch (err) {
+            assertLogsMatch(err, /Unauthorized|6004/)
+        }
+    })
+
+    it('wrap_position succeeds for snapshotter', async () => {
+        const vaultId = 1
+        const nftId = 8002
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        await program.methods
+            .wrapPosition({ vaultId, nftId })
+            .accounts({
+                authority: admin.publicKey,
+                store: storePda,
+                wrapper: wrapperPda,
+                systemProgram: SystemProgram.programId,
+            })
+            .rpc()
+    })
+
     it('send rejects non-sender', async () => {
         const eidBuf = Buffer.alloc(4)
         eidBuf.writeUInt32BE(DST_EID)
@@ -237,6 +291,7 @@ describe('allowlist auth', function () {
             .wrapPosition({ vaultId, nftId })
             .accounts({
                 authority: admin.publicKey,
+                store: storePda,
                 wrapper: wrapperPda,
                 systemProgram: SystemProgram.programId,
             })
@@ -289,6 +344,7 @@ describe('allowlist auth', function () {
             .wrapPosition({ vaultId, nftId })
             .accounts({
                 authority: admin.publicKey,
+                store: storePda,
                 wrapper: wrapperPda,
                 systemProgram: SystemProgram.programId,
             })

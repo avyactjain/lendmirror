@@ -117,11 +117,9 @@ pub mod lendmirror {
         GetJupiterPosition::apply(&mut ctx, &params)
     }
 
-    // Create a PositionWrapper PDA for (vault_id, nft_id). Signer becomes owner.
-    pub fn wrap_position(
-        mut ctx: Context<WrapPosition>,
-        params: WrapPositionParams,
-    ) -> Result<()> {
+    // Create a PositionWrapper PDA for (vault_id, nft_id).
+    // Authority must be on Store snapshotters; becomes wrapper.owner.
+    pub fn wrap_position(mut ctx: Context<WrapPosition>, params: WrapPositionParams) -> Result<()> {
         WrapPosition::apply(&mut ctx, &params)
     }
 

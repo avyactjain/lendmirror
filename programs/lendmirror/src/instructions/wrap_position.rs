@@ -2,12 +2,20 @@ use crate::errors::LendMirrorError;
 use crate::*;
 use anchor_lang::prelude::*;
 
-/// Create a wrapper PDA for one Jupiter position. Signer becomes `wrapper.owner`.
+/// Create a wrapper PDA for one Jupiter position. Signer must be a Store
+/// snapshotter; they become `wrapper.owner`.
 #[derive(Accounts)]
 #[instruction(params: WrapPositionParams)]
 pub struct WrapPosition<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [STORE_SEED],
+        bump = store.bump,
+        constraint = store.is_snapshotter(&authority.key()) @ LendMirrorError::Unauthorized
+    )]
+    pub store: Account<'info, Store>,
 
     #[account(
         init,
