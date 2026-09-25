@@ -3,8 +3,8 @@ use crate::instructions::get_jupiter_position::compute_position_snapshot;
 use crate::*;
 use anchor_lang::prelude::*;
 
-/// Fill `wrapper.snapshot` from Jupiter. Clears both send flags.
-/// Signer must be `wrapper.owner` or on `store.snapshotters`.
+/// Fill `wrapper.snapshot` from Jupiter.
+/// Signer is `wrapper.owner`, a Store snapshotter, or an OnDemand caller.
 #[derive(Accounts)]
 pub struct RefreshWrapper<'info> {
     pub authority: Signer<'info>,
@@ -23,9 +23,17 @@ pub struct RefreshWrapper<'info> {
         constraint = (
             wrapper.is_owner(&authority.key())
             || store.is_snapshotter(&authority.key())
+            || ondemand.is_caller(&authority.key())
         ) @ LendMirrorError::Unauthorized
     )]
     pub wrapper: Account<'info, PositionWrapper>,
+
+    #[account(
+        seeds = [ONDEMAND_SEED, wrapper.key().as_ref()],
+        bump = ondemand.bump,
+        constraint = ondemand.wrapper == wrapper.key() @ LendMirrorError::Unauthorized
+    )]
+    pub ondemand: Account<'info, OnDemandStrategy>,
 
     /// CHECK: compared to Store.
     #[account(constraint = vaults_program.key() == store.vaults_program @ LendMirrorError::InvalidJupiterAccount)]
@@ -93,45 +101,7 @@ impl RefreshWrapper<'_> {
             ctx.remaining_accounts,
         )?;
 
-        let wrapper = &mut ctx.accounts.wrapper;
-        wrapper.snapshot = Some(snapshot);
-        wrapper.lz_send_allowed = false;
-        wrapper.ccip_send_allowed = false;
-        Ok(())
-    }
-}
-
-/// OnDemand caller unlocks both routers for the next send / send_ccip.
-#[derive(Accounts)]
-pub struct RequestBridgeOndemand<'info> {
-    pub authority: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [
-            WRAPPER_SEED,
-            &wrapper.vault_id.to_le_bytes(),
-            &wrapper.nft_id.to_le_bytes()
-        ],
-        bump = wrapper.bump
-    )]
-    pub wrapper: Account<'info, PositionWrapper>,
-
-    #[account(
-        seeds = [ONDEMAND_SEED, wrapper.key().as_ref()],
-        bump = ondemand.bump,
-        constraint = ondemand.wrapper == wrapper.key() @ LendMirrorError::Unauthorized,
-        constraint = ondemand.is_caller(&authority.key()) @ LendMirrorError::Unauthorized
-    )]
-    pub ondemand: Account<'info, OnDemandStrategy>,
-}
-
-impl RequestBridgeOndemand<'_> {
-    pub fn apply(ctx: &mut Context<RequestBridgeOndemand>) -> Result<()> {
-        require!(ctx.accounts.wrapper.snapshot.is_some(), LendMirrorError::NoPositionSnapshot);
-        let wrapper = &mut ctx.accounts.wrapper;
-        wrapper.lz_send_allowed = true;
-        wrapper.ccip_send_allowed = true;
+        ctx.accounts.wrapper.snapshot = Some(snapshot);
         Ok(())
     }
 }

@@ -16,7 +16,7 @@ pub fn program_data_address() -> Pubkey {
 /// If a check fails, apply never runs.
 ///
 /// #[instruction(params)] lets seed constraints below read params
-/// (not used here; send.rs uses params.dst_eid in seeds).
+/// (not used here; send_position_snapshot.rs uses params.dst_eid in seeds).
 ///
 /// 'info = these account refs live only for this instruction.
 #[derive(Accounts)]
@@ -73,7 +73,7 @@ impl InitStore<'_> {
         ctx.accounts.store.endpoint_program = params.endpoint;
         ctx.accounts.store.vaults_program = params.vaults_program;
         ctx.accounts.store.last_position = None;
-        // Seed both allowlists with admin so create → snapshot → send works
+        // Seed both allowlists with admin so create → wrap → refresh → send works
         // without an extra set_* call. Admin can replace the lists later.
         ctx.accounts.store.set_snapshotters(&[params.admin])?;
         ctx.accounts.store.set_senders(&[params.admin])?;

@@ -53,7 +53,7 @@ pub trait LzMessage: Sized {
     fn decode(buf: &[u8]) -> std::result::Result<Self, MsgCodecError>;
 }
 
-/// Already-encoded payload (what the `send` / `quote_send` instructions carry).
+/// Already-encoded payload (what `quote_send` and the send instruction carry).
 impl LzMessage for Vec<u8> {
     fn encode(&self) -> Vec<u8> {
         self.clone()

@@ -15,6 +15,7 @@ export type RefreshWrapperInstructionAccounts = {
     authority?: Signer
     store: PublicKey | Pda
     wrapper: PublicKey | Pda
+    ondemand: PublicKey | Pda
     vaultsProgram: PublicKey | Pda
     position: PublicKey | Pda
     vaultState: PublicKey | Pda
@@ -53,12 +54,13 @@ export function refreshWrapper(
         authority: { index: 0, isWritable: false as boolean, value: input.authority ?? null },
         store: { index: 1, isWritable: false as boolean, value: input.store ?? null },
         wrapper: { index: 2, isWritable: true as boolean, value: input.wrapper ?? null },
-        vaultsProgram: { index: 3, isWritable: false as boolean, value: input.vaultsProgram ?? null },
-        position: { index: 4, isWritable: false as boolean, value: input.position ?? null },
-        vaultState: { index: 5, isWritable: false as boolean, value: input.vaultState ?? null },
-        vaultConfig: { index: 6, isWritable: false as boolean, value: input.vaultConfig ?? null },
-        tick: { index: 7, isWritable: false as boolean, value: input.tick ?? null },
-        tickIdLiquidation: { index: 8, isWritable: false as boolean, value: input.tickIdLiquidation ?? null },
+        ondemand: { index: 3, isWritable: false as boolean, value: input.ondemand ?? null },
+        vaultsProgram: { index: 4, isWritable: false as boolean, value: input.vaultsProgram ?? null },
+        position: { index: 5, isWritable: false as boolean, value: input.position ?? null },
+        vaultState: { index: 6, isWritable: false as boolean, value: input.vaultState ?? null },
+        vaultConfig: { index: 7, isWritable: false as boolean, value: input.vaultConfig ?? null },
+        tick: { index: 8, isWritable: false as boolean, value: input.tick ?? null },
+        tickIdLiquidation: { index: 9, isWritable: false as boolean, value: input.tickIdLiquidation ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Default values.

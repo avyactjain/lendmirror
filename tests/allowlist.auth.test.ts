@@ -266,108 +266,13 @@ describe('allowlist auth', function () {
             .rpc()
     })
 
-    it('send rejects non-sender', async () => {
-        const eidBuf = Buffer.alloc(4)
-        eidBuf.writeUInt32BE(DST_EID)
-        const [peerPda] = PublicKey.findProgramAddressSync(
-            [PEER_SEED, storePda.toBuffer(), eidBuf],
-            PROGRAM_ID
+    it('send is not a public instruction', () => {
+        expect((idl as { instructions: { name: string }[] }).instructions.some((ix) => ix.name === 'send')).to.equal(
+            false
         )
-        const [endpointSetting] = PublicKey.findProgramAddressSync(
-            [Buffer.from('Endpoint')],
-            ENDPOINT_PROGRAM
-        )
-        const vaultId = 1
-        const nftId = 9001
-        const vaultBuf = Buffer.alloc(2)
-        vaultBuf.writeUInt16LE(vaultId)
-        const nftBuf = Buffer.alloc(4)
-        nftBuf.writeUInt32LE(nftId)
-        const [wrapperPda] = PublicKey.findProgramAddressSync(
-            [WRAPPER_SEED, vaultBuf, nftBuf],
-            PROGRAM_ID
-        )
-        await program.methods
-            .wrapPosition({ vaultId, nftId })
-            .accounts({
-                authority: admin.publicKey,
-                store: storePda,
-                wrapper: wrapperPda,
-                systemProgram: SystemProgram.programId,
-            })
-            .rpc()
-        try {
-            await program.methods
-                .send({
-                    dstEid: DST_EID,
-                    options: Buffer.alloc(0),
-                    nativeFee: new BN(0),
-                    lzTokenFee: new BN(0),
-                })
-                .accounts({
-                    authority: stranger.publicKey,
-                    peer: peerPda,
-                    store: storePda,
-                    wrapper: wrapperPda,
-                    endpoint: endpointSetting,
-                })
-                .signers([stranger])
-                .rpc()
-            expect.fail('expected Unauthorized')
-        } catch (err) {
-            assertLogsMatch(err, /Unauthorized|6004/)
-        }
+        expect(
+            (idl as { instructions: { name: string }[] }).instructions.some((ix) => ix.name === 'send_ccip')
+        ).to.equal(false)
     })
 
-    it('send rejects when lz_send_allowed is false', async () => {
-        const eidBuf = Buffer.alloc(4)
-        eidBuf.writeUInt32BE(DST_EID)
-        const [peerPda] = PublicKey.findProgramAddressSync(
-            [PEER_SEED, storePda.toBuffer(), eidBuf],
-            PROGRAM_ID
-        )
-        const [endpointSetting] = PublicKey.findProgramAddressSync(
-            [Buffer.from('Endpoint')],
-            ENDPOINT_PROGRAM
-        )
-        const vaultId = 1
-        const nftId = 9002
-        const vaultBuf = Buffer.alloc(2)
-        vaultBuf.writeUInt16LE(vaultId)
-        const nftBuf = Buffer.alloc(4)
-        nftBuf.writeUInt32LE(nftId)
-        const [wrapperPda] = PublicKey.findProgramAddressSync(
-            [WRAPPER_SEED, vaultBuf, nftBuf],
-            PROGRAM_ID
-        )
-        await program.methods
-            .wrapPosition({ vaultId, nftId })
-            .accounts({
-                authority: admin.publicKey,
-                store: storePda,
-                wrapper: wrapperPda,
-                systemProgram: SystemProgram.programId,
-            })
-            .rpc()
-        try {
-            await program.methods
-                .send({
-                    dstEid: DST_EID,
-                    options: Buffer.alloc(0),
-                    nativeFee: new BN(0),
-                    lzTokenFee: new BN(0),
-                })
-                .accounts({
-                    authority: admin.publicKey,
-                    peer: peerPda,
-                    store: storePda,
-                    wrapper: wrapperPda,
-                    endpoint: endpointSetting,
-                })
-                .rpc()
-            expect.fail('expected Unauthorized')
-        } catch (err) {
-            assertLogsMatch(err, /Unauthorized|6004/)
-        }
-    })
 })

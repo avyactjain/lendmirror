@@ -5,7 +5,6 @@ use anchor_lang::prelude::*;
 /// One PDA per Jupiter position. Seeds: `["LendMirrorWrapper", vault_id le, nft_id le]`.
 ///
 /// `owner` is the wallet that called `wrap_position` (not the program id).
-/// `lz_send_allowed` / `ccip_send_allowed` start false; `request_bridge_ondemand` sets them true.
 #[account]
 #[derive(InitSpace)]
 pub struct PositionWrapper {
@@ -15,9 +14,9 @@ pub struct PositionWrapper {
     pub bump: u8,
     /// Live snapshot. Empty until `refresh_wrapper`.
     pub snapshot: Option<PositionSnapshot>,
-    /// When true, `send` may encode `snapshot` and clear this flag.
+    /// Kept so existing wrapper accounts stay the same size. Not read.
     pub lz_send_allowed: bool,
-    /// When true, `send_ccip` may encode `snapshot` and clear this flag.
+    /// Kept so existing wrapper accounts stay the same size. Not read.
     pub ccip_send_allowed: bool,
 }
 
@@ -27,7 +26,7 @@ impl PositionWrapper {
     }
 }
 
-/// Allowlist for who may call `request_bridge_ondemand` on one wrapper.
+/// Allowlist for who may refresh and send one wrapper's snapshot.
 /// Seeds: `["LendMirrorOnDemand", wrapper.key()]`.
 #[account]
 #[derive(InitSpace)]

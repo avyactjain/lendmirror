@@ -12,7 +12,7 @@ pub const ALLOWLIST_LEN: usize = 8;
 /// call that instruction. `admin` is then the operational key for allowlists.
 ///
 /// #[account] is NOT the PDA seed. It only packs this struct into account bytes.
-/// The seed lives in init_store / send as `seeds = [STORE_SEED]`.
+/// The seed lives in every instruction that names the Store as `seeds = [STORE_SEED]`.
 /// The 8 bytes stop you passing a PeerConfig account where a Store is required.
 #[account]
 #[derive(InitSpace)]
@@ -25,7 +25,7 @@ pub struct Store {
     /// Wallets allowed to call `get_jupiter_position`. Admin updates only.
     pub snapshotters: [Pubkey; ALLOWLIST_LEN],
     pub snapshotter_count: u8,
-    /// Wallets allowed to call `send`. Admin updates only.
+    /// Wallets allowed to send any wrapper's snapshot. Admin updates only.
     pub senders: [Pubkey; ALLOWLIST_LEN],
     pub sender_count: u8,
     pub last_position: Option<PositionSnapshot>,

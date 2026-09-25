@@ -98,7 +98,7 @@ task('lz:oapp:solana:set-ondemand-callers', 'Replace OnDemand callers (comma-sep
         console.log('callers', keys.map(String))
     })
 
-task('lz:oapp:solana:refresh-wrapper', 'Read Jupiter into wrapper.snapshot; clears both send flags')
+task('lz:oapp:solana:refresh-wrapper', 'Read Jupiter into wrapper.snapshot')
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
     .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
@@ -136,39 +136,70 @@ task('lz:oapp:solana:refresh-wrapper', 'Read Jupiter into wrapper.snapshot; clea
             nftId: snap.nftId,
             colRaw: snap.colRaw.toString(),
             debtRaw: snap.debtRaw.toString(),
-            lzSendAllowed: wrapper!.lzSendAllowed,
-            ccipSendAllowed: wrapper!.ccipSendAllowed,
         })
     })
 
-task('lz:oapp:solana:request-bridge', 'OnDemand caller: set both *_send_allowed true')
-    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+task(
+    'lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz',
+    'OnDemand caller sends wrapper.snapshot on LayerZero and Chainlink'
+)
+    .addOptionalParam('fromEid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('dstEid', 'Destination endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
     .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
+    .addOptionalParam('fundLamports', 'SOL lamports moved onto the CCIP payer in this call', 50_000_000, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid: eidArg, vaultId, nftId, computeUnitPriceScaleFactor }) => {
-        const eid = resolveSolanaEid(eidArg)
-        const solanaDeployment = getSolanaDeployment(eid)
-        const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
+    .setAction(async ({ fromEid: fromArg, dstEid: dstArg, vaultId, nftId, fundLamports, computeUnitPriceScaleFactor }) => {
+        const { resolveEvmEid, requireCcip } = await import('../common/deployment')
+        const { Options } = await import('@layerzerolabs/lz-v2-utilities')
+        const { getLayerZeroScanLink, isV2Testnet } = await import('../utils')
+        const { ccipRouteAddress, decodeCcipRoute } = await import('../../lib/client/ccip')
+        const { PublicKey } = await import('@solana/web3.js')
+        requireCcip()
+        const fromEid = resolveSolanaEid(fromArg)
+        const dstEid = resolveEvmEid(dstArg)
+        const solanaDeployment = getSolanaDeployment(fromEid)
+        const { connection, umi, umiWalletSigner } = await deriveConnection(fromEid)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))
-
+        const wrapper = await instance.getWrapper(umi.rpc, vaultId, nftId)
+        const snap = wrapper ? unwrapOption(wrapper.snapshot) : null
+        if (!wrapper || !snap) {
+            throw new Error('No wrapper snapshot. Run wrap-position, attach-ondemand, then refresh-wrapper.')
+        }
+        const routeInfo = await connection.getAccountInfo(new PublicKey(ccipRouteAddress(solanaDeployment.programId)))
+        if (!routeInfo) throw new Error('No CCIP route. Run lz:oapp:solana:set-ccip-route first.')
+        const route = decodeCcipRoute(routeInfo.data)
+        const options = Options.newOptions().addExecutorLzReceiveOption(400000, 0).toBytes()
+        const { nativeFee } = await instance.quotePayload(umi.rpc, umiWalletSigner.publicKey, {
+            dstEid,
+            options,
+            payInLzToken: false,
+            vaultId,
+            nftId,
+        })
+        console.log('LayerZero fee:', nativeFee.toString())
         let txBuilder = transactionBuilder().add(
-            instance.requestBridgeOndemand(umiWalletSigner, vaultId, nftId)
+            await instance.sendPayload(umi.rpc, umiWalletSigner, {
+                dstEid,
+                options,
+                nativeFee,
+                vaultId,
+                nftId,
+                ccipFeeLamports: BigInt(fundLamports),
+                route,
+            })
         )
         txBuilder = await addComputeUnitInstructions(
             connection,
             umi,
-            eid,
+            fromEid,
             txBuilder,
             umiWalletSigner,
             computeUnitPriceScaleFactor,
             TransactionType.SendMessage
         )
         const tx = await txBuilder.sendAndConfirm(umi)
-        console.log(`requestBridgeOndemand: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
-        const wrapper = await instance.getWrapper(umi.rpc, vaultId, nftId)
-        console.log({
-            lzSendAllowed: wrapper?.lzSendAllowed,
-            ccipSendAllowed: wrapper?.ccipSendAllowed,
-        })
+        const txHash = bs58.encode(tx.signature)
+        console.log(getExplorerTxLink(txHash, fromEid === 40168))
+        console.log('LayerZero:', getLayerZeroScanLink(txHash, isV2Testnet(dstEid)))
     })

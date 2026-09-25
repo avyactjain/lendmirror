@@ -20,7 +20,6 @@ const SYSTEM_PROGRAM = publicKey('11111111111111111111111111111111')
 const ZERO = publicKey('11111111111111111111111111111111')
 
 const SET_CCIP_ROUTE_DISCRIMINATOR = Uint8Array.from([224, 164, 215, 196, 56, 195, 20, 30])
-const SEND_CCIP_DISCRIMINATOR = Uint8Array.from([252, 232, 200, 9, 53, 141, 69, 60])
 const CCIP_ROUTE_DISCRIMINATOR = Uint8Array.from([61, 87, 7, 199, 227, 253, 152, 120])
 
 export type CcipRouteAccount = {
@@ -130,61 +129,6 @@ export function setCcipRouteInstruction(args: {
             { pubkey: publicKey(route), isSigner: false, isWritable: true },
             { pubkey: publicKey(args.store), isSigner: false, isWritable: false },
             { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
-        ],
-    }
-}
-
-export function sendCcipInstruction(args: {
-    programId: string
-    authority: UmiPublicKey
-    store: string
-    wrapper: string
-    route: CcipRouteAccount
-}): Instruction {
-    const payer = ccipPayerAddress(args.programId)
-    const accounts = ccipSendAccounts(args.route, payer)
-    return {
-        programId: publicKey(args.programId),
-        data: SEND_CCIP_DISCRIMINATOR,
-        keys: [
-            { pubkey: args.authority, isSigner: true, isWritable: false },
-            { pubkey: publicKey(args.store), isSigner: false, isWritable: false },
-            { pubkey: publicKey(args.wrapper), isSigner: false, isWritable: true },
-            { pubkey: publicKey(payer), isSigner: false, isWritable: true },
-            { pubkey: publicKey(ccipRouteAddress(args.programId)), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.config), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.destChainState), isSigner: false, isWritable: true },
-            { pubkey: publicKey(accounts.nonce), isSigner: false, isWritable: true },
-            { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeTokenMint), isSigner: false, isWritable: false },
-            { pubkey: accounts.feeTokenUser, isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeTokenReceiver), isSigner: false, isWritable: true },
-            { pubkey: publicKey(accounts.feeBillingSigner), isSigner: false, isWritable: false },
-            { pubkey: publicKey(args.route.feeQuoter), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeQuoterConfig), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeQuoterDestChain), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeQuoterBillingTokenConfig), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.feeQuoterLinkTokenConfig), isSigner: false, isWritable: false },
-            { pubkey: publicKey(args.route.rmnRemote), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.rmnRemoteCurses), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.rmnRemoteConfig), isSigner: false, isWritable: false },
-            { pubkey: publicKey(accounts.tokenPoolsSigner), isSigner: false, isWritable: true },
-            { pubkey: publicKey(args.route.router), isSigner: false, isWritable: false },
-        ],
-    }
-}
-
-export function fundStoreInstruction(payer: UmiPublicKey, store: string, lamports: bigint): Instruction {
-    const data = Buffer.alloc(12)
-    data.writeUInt32LE(2, 0)
-    data.writeBigUInt64LE(lamports, 4)
-    return {
-        programId: SYSTEM_PROGRAM,
-        data: new Uint8Array(data),
-        keys: [
-            { pubkey: payer, isSigner: true, isWritable: true },
-            { pubkey: publicKey(store), isSigner: false, isWritable: true },
         ],
     }
 }

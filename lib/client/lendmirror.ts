@@ -47,6 +47,7 @@ import {
     liquidationSlotIndex,
     normalizeTick,
 } from './jupiter'
+import { ccipPayerAddress, ccipRouteAddress, ccipSendAccounts, CcipRouteAccount } from './ccip'
 import { LendMirrorPDA as LendMirrorPDA } from './pda'
 import { SetPeerAddressParam, SetPeerEnforcedOptionsParam } from './types'
 
@@ -291,18 +292,6 @@ export class LendMirror {
         ).items[0]
     }
 
-    requestBridgeOndemand(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {
-        const [wrapper] = this.pda.wrapper(vaultId, nftId)
-        return instructions.requestBridgeOndemand(
-            { identity: authority, programs: this.programRepo },
-            {
-                authority,
-                wrapper,
-                ondemand: this.pda.ondemand(wrapper)[0],
-            }
-        ).items[0]
-    }
-
     async refreshWrapper(
         rpc: RpcInterface,
         authority: Signer,
@@ -340,6 +329,7 @@ export class LendMirror {
                     vaultConfig,
                     tick: tickPda,
                     tickIdLiquidation,
+                    ondemand: this.pda.ondemand(wrapper)[0],
                 }
             )
             .addRemainingAccounts(branches.map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))).items[0]
@@ -419,6 +409,8 @@ export class LendMirror {
             options: Uint8Array
             vaultId: number
             nftId: number
+            ccipFeeLamports: number | bigint
+            route: CcipRouteAccount
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
@@ -449,19 +441,44 @@ export class LendMirror {
         if (remainingAccounts === undefined) {
             throw new Error('Failed to get remaining accounts for send instruction')
         }
+        const programId = String(this.programId)
+        const payerPda = ccipPayerAddress(programId)
+        const routeAccounts = ccipSendAccounts(params.route, payerPda)
         return instructions
-            .send(
+            .sendPositionSnapshotViaChainlinkAndLz(
                 { identity: authority, programs: this.programRepo },
                 {
                     authority,
-                    store: oapp,
-                    peer: peer,
+                    ondemand: this.pda.ondemand(wrapper)[0],
                     wrapper,
+                    store: oapp,
+                    peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
+                    ccipPayer: publicKey(payerPda),
+                    ccipRoute: publicKey(ccipRouteAddress(programId)),
+                    config: publicKey(routeAccounts.config),
+                    destChainState: publicKey(routeAccounts.destChainState),
+                    nonce: publicKey(routeAccounts.nonce),
+                    feeTokenProgram: publicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+                    feeTokenMint: publicKey(routeAccounts.feeTokenMint),
+                    feeTokenUser: routeAccounts.feeTokenUser,
+                    feeTokenReceiver: publicKey(routeAccounts.feeTokenReceiver),
+                    feeBillingSigner: publicKey(routeAccounts.feeBillingSigner),
+                    feeQuoter: publicKey(params.route.feeQuoter),
+                    feeQuoterConfig: publicKey(routeAccounts.feeQuoterConfig),
+                    feeQuoterDestChain: publicKey(routeAccounts.feeQuoterDestChain),
+                    feeQuoterBillingTokenConfig: publicKey(routeAccounts.feeQuoterBillingTokenConfig),
+                    feeQuoterLinkTokenConfig: publicKey(routeAccounts.feeQuoterLinkTokenConfig),
+                    rmnRemote: publicKey(params.route.rmnRemote),
+                    rmnRemoteCurses: publicKey(routeAccounts.rmnRemoteCurses),
+                    rmnRemoteConfig: publicKey(routeAccounts.rmnRemoteConfig),
+                    tokenPoolsSigner: publicKey(routeAccounts.tokenPoolsSigner),
+                    ccipRouter: publicKey(params.route.router),
                     dstEid,
                     options,
-                    nativeFee: nativeFee,
+                    nativeFee,
                     lzTokenFee: lzTokenFee ?? 0,
+                    ccipFeeLamports: params.ccipFeeLamports,
                 }
             )
             .addRemainingAccounts(remainingAccounts).items[0]
