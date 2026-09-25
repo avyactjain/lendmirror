@@ -13,6 +13,7 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 // Accounts.
 export type WrapPositionInstructionAccounts = {
     authority?: Signer
+    store: PublicKey | Pda
     wrapper: PublicKey | Pda
     systemProgram?: PublicKey | Pda
 }
@@ -53,8 +54,9 @@ export function wrapPosition(
     // Accounts.
     const resolvedAccounts = {
         authority: { index: 0, isWritable: true as boolean, value: input.authority ?? null },
-        wrapper: { index: 1, isWritable: true as boolean, value: input.wrapper ?? null },
-        systemProgram: { index: 2, isWritable: false as boolean, value: input.systemProgram ?? null },
+        store: { index: 1, isWritable: false as boolean, value: input.store ?? null },
+        wrapper: { index: 2, isWritable: true as boolean, value: input.wrapper ?? null },
+        systemProgram: { index: 3, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

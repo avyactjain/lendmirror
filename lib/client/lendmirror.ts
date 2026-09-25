@@ -258,6 +258,7 @@ export class LendMirror {
             { identity: authority, programs: this.programRepo },
             {
                 authority,
+                store: this.pda.oapp()[0],
                 wrapper: this.pda.wrapper(vaultId, nftId)[0],
                 vaultId,
                 nftId,
