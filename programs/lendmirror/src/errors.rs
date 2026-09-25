@@ -15,4 +15,10 @@ pub enum LendMirrorError {
     MissingBranchAccount,
     MissingLiquidationRecord,
     InvalidCcipAccount,
+    /// This snapshot (same `snapshot_time`) already went out. Run `refresh_wrapper` first.
+    SnapshotAlreadySent,
+    /// The wrapper's access level does not allow this operation.
+    LevelDenied,
+    /// Level must be 0..=4.
+    InvalidLevel,
 }

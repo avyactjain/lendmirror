@@ -12,11 +12,16 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type SendPositionSnapshotViaChainlinkAndLzInstructionAccounts = {
+    /** Pays the LayerZero fee (via remaining accounts) and tops up the CCIP payer. */
     authority?: Signer
-    ondemand: PublicKey | Pda
+    /** Optional. Needed only when the caller is on this wrapper's OnDemand list. */
+    ondemand?: PublicKey | Pda
+    /** `mut` because `record_send` writes the guard fields after the CPIs. */
     wrapper: PublicKey | Pda
     store: PublicKey | Pda
+    /** LayerZero peer for `params.dst_eid`: the EVM proxy address and enforced options. */
     peer: PublicKey | Pda
+    /** LayerZero Endpoint settings PDA, owned by the Endpoint program (`seeds::program`). */
     endpoint: PublicKey | Pda
     ccipPayer: PublicKey | Pda
     ccipRoute: PublicKey | Pda
@@ -44,18 +49,26 @@ export type SendPositionSnapshotViaChainlinkAndLzInstructionAccounts = {
 // Data.
 export type SendPositionSnapshotViaChainlinkAndLzInstructionData = {
     discriminator: Uint8Array
+    /** LayerZero destination endpoint id (Sepolia 40161, Arbitrum 30110). */
     dstEid: number
+    /** Extra LayerZero options (executor gas). Combined with the peer's enforced options. */
     options: Uint8Array
+    /** LayerZero fee in lamports, from `quote_send`. */
     nativeFee: bigint
     lzTokenFee: bigint
+    /** Lamports moved from `authority` to the CCIP payer before the Chainlink CPI. */
     ccipFeeLamports: bigint
 }
 
 export type SendPositionSnapshotViaChainlinkAndLzInstructionDataArgs = {
+    /** LayerZero destination endpoint id (Sepolia 40161, Arbitrum 30110). */
     dstEid: number
+    /** Extra LayerZero options (executor gas). Combined with the peer's enforced options. */
     options: Uint8Array
+    /** LayerZero fee in lamports, from `quote_send`. */
     nativeFee: number | bigint
     lzTokenFee: number | bigint
+    /** Lamports moved from `authority` to the CCIP payer before the Chainlink CPI. */
     ccipFeeLamports: number | bigint
 }
 
@@ -103,7 +116,7 @@ export function sendPositionSnapshotViaChainlinkAndLz(
     const resolvedAccounts = {
         authority: { index: 0, isWritable: true as boolean, value: input.authority ?? null },
         ondemand: { index: 1, isWritable: false as boolean, value: input.ondemand ?? null },
-        wrapper: { index: 2, isWritable: false as boolean, value: input.wrapper ?? null },
+        wrapper: { index: 2, isWritable: true as boolean, value: input.wrapper ?? null },
         store: { index: 3, isWritable: false as boolean, value: input.store ?? null },
         peer: { index: 4, isWritable: false as boolean, value: input.peer ?? null },
         endpoint: { index: 5, isWritable: false as boolean, value: input.endpoint ?? null },

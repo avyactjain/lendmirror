@@ -10,7 +10,7 @@ describe('wrapper PDAs', () => {
     const pda = new LendMirrorPDA(publicKey(PROGRAM_ID))
     const programId = new PublicKey(PROGRAM_ID)
 
-    it('wrapper seeds match LendMirrorWrapper + vault_id le + nft_id le', () => {
+    it('wrapper seeds match LendMirrorWrapperV1 + vault_id le + nft_id le', () => {
         const vaultId = 1
         const nftId = 29
         const [client] = pda.wrapper(vaultId, nftId)
@@ -19,7 +19,7 @@ describe('wrapper PDAs', () => {
         const nftBuf = Buffer.alloc(4)
         nftBuf.writeUInt32LE(nftId)
         const [expected] = PublicKey.findProgramAddressSync(
-            [Buffer.from('LendMirrorWrapper'), vaultBuf, nftBuf],
+            [Buffer.from('LendMirrorWrapperV1'), vaultBuf, nftBuf],
             programId
         )
         expect(client).to.equal(expected.toBase58())

@@ -25,12 +25,14 @@ import {
     Serializer,
     bool,
     bytes,
+    i64,
     mapSerializer,
     option,
     publicKey as publicKeySerializer,
     struct,
     u16,
     u32,
+    u64,
     u8,
 } from '@metaplex-foundation/umi/serializers'
 import { PositionSnapshot, PositionSnapshotArgs, getPositionSnapshotSerializer } from '../types'
@@ -42,26 +44,48 @@ export type PositionWrapperAccountData = {
     owner: PublicKey
     vaultId: number
     nftId: number
+    /** PDA bump. Needed to sign as this wrapper in CPIs (`invoke_signed`). */
     bump: number
     /** Live snapshot. Empty until `refresh_wrapper`. */
     snapshot: Option<PositionSnapshot>
-    /** When true, `send` may encode `snapshot` and clear this flag. */
-    lzSendAllowed: boolean
-    /** When true, `send_ccip` may encode `snapshot` and clear this flag. */
-    ccipSendAllowed: boolean
+    /** Always `WRAPPER_VERSION`. Lets a client tell layouts apart. */
+    version: number
+    /** Access level 0..=4. 0 means "mirror only, no operations". See `level_allows`. */
+    level: number
+    /** True once the position NFT sits in this wrapper's token account. */
+    custody: boolean
+    /** Mint of the position NFT. Zero until `deposit_position_nft`. */
+    positionMint: PublicKey
+    /** `snapshot_time` of the last snapshot that went out. 0 before the first send. */
+    lastSentSnapshotTime: bigint
+    /** How many sends this wrapper has made. Informational. */
+    sendCount: bigint
+    /** Spare bytes so small future fields do not force another seed bump. */
+    reserved: Uint8Array
 }
 
 export type PositionWrapperAccountDataArgs = {
     owner: PublicKey
     vaultId: number
     nftId: number
+    /** PDA bump. Needed to sign as this wrapper in CPIs (`invoke_signed`). */
     bump: number
     /** Live snapshot. Empty until `refresh_wrapper`. */
     snapshot: OptionOrNullable<PositionSnapshotArgs>
-    /** When true, `send` may encode `snapshot` and clear this flag. */
-    lzSendAllowed: boolean
-    /** When true, `send_ccip` may encode `snapshot` and clear this flag. */
-    ccipSendAllowed: boolean
+    /** Always `WRAPPER_VERSION`. Lets a client tell layouts apart. */
+    version: number
+    /** Access level 0..=4. 0 means "mirror only, no operations". See `level_allows`. */
+    level: number
+    /** True once the position NFT sits in this wrapper's token account. */
+    custody: boolean
+    /** Mint of the position NFT. Zero until `deposit_position_nft`. */
+    positionMint: PublicKey
+    /** `snapshot_time` of the last snapshot that went out. 0 before the first send. */
+    lastSentSnapshotTime: number | bigint
+    /** How many sends this wrapper has made. Informational. */
+    sendCount: number | bigint
+    /** Spare bytes so small future fields do not force another seed bump. */
+    reserved: Uint8Array
 }
 
 export function getPositionWrapperAccountDataSerializer(): Serializer<
@@ -77,8 +101,13 @@ export function getPositionWrapperAccountDataSerializer(): Serializer<
                 ['nftId', u32()],
                 ['bump', u8()],
                 ['snapshot', option(getPositionSnapshotSerializer())],
-                ['lzSendAllowed', bool()],
-                ['ccipSendAllowed', bool()],
+                ['version', u8()],
+                ['level', u8()],
+                ['custody', bool()],
+                ['positionMint', publicKeySerializer()],
+                ['lastSentSnapshotTime', i64()],
+                ['sendCount', u64()],
+                ['reserved', bytes({ size: 64 })],
             ],
             { description: 'PositionWrapperAccountData' }
         ),
@@ -148,8 +177,13 @@ export function getPositionWrapperGpaBuilder(context: Pick<Context, 'rpc' | 'pro
             nftId: number
             bump: number
             snapshot: OptionOrNullable<PositionSnapshotArgs>
-            lzSendAllowed: boolean
-            ccipSendAllowed: boolean
+            version: number
+            level: number
+            custody: boolean
+            positionMint: PublicKey
+            lastSentSnapshotTime: number | bigint
+            sendCount: number | bigint
+            reserved: Uint8Array
         }>({
             discriminator: [0, bytes({ size: 8 })],
             owner: [8, publicKeySerializer()],
@@ -157,8 +191,13 @@ export function getPositionWrapperGpaBuilder(context: Pick<Context, 'rpc' | 'pro
             nftId: [42, u32()],
             bump: [46, u8()],
             snapshot: [47, option(getPositionSnapshotSerializer())],
-            lzSendAllowed: [null, bool()],
-            ccipSendAllowed: [null, bool()],
+            version: [null, u8()],
+            level: [null, u8()],
+            custody: [null, bool()],
+            positionMint: [null, publicKeySerializer()],
+            lastSentSnapshotTime: [null, i64()],
+            sendCount: [null, u64()],
+            reserved: [null, bytes({ size: 64 })],
         })
         .deserializeUsing<PositionWrapper>((account) => deserializePositionWrapper(account))
         .whereField('discriminator', new Uint8Array([106, 186, 207, 58, 39, 95, 229, 60]))

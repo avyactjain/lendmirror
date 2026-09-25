@@ -13,10 +13,12 @@ import idl from '../target/idl/lendmirror.json'
 
 const STORE_SEED = Buffer.from('LendMirrorStoreV0')
 const PEER_SEED = Buffer.from('LendMirrorPeer')
-const WRAPPER_SEED = Buffer.from('LendMirrorWrapper')
+const WRAPPER_SEED = Buffer.from('LendMirrorWrapperV1')
 const PROGRAM_ID = new PublicKey('GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1')
 const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6')
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const NATIVE_MINT = new PublicKey('So11111111111111111111111111111111111111112')
 /** BPFLoaderUpgradeab1e11111111111111111111111 */
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 /** Sepolia V2 testnet eid */
@@ -44,6 +46,7 @@ describe('allowlist auth', function () {
     const stranger = Keypair.generate()
 
     const [storePda] = PublicKey.findProgramAddressSync([STORE_SEED], PROGRAM_ID)
+    const [ccipRoutePda] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcip')], PROGRAM_ID)
     const programData = programDataPda(PROGRAM_ID)
 
     function initStoreAccounts(payer: PublicKey) {
@@ -266,13 +269,177 @@ describe('allowlist auth', function () {
             .rpc()
     })
 
-    it('send is not a public instruction', () => {
-        expect((idl as { instructions: { name: string }[] }).instructions.some((ix) => ix.name === 'send')).to.equal(
-            false
-        )
-        expect(
-            (idl as { instructions: { name: string }[] }).instructions.some((ix) => ix.name === 'send_ccip')
-        ).to.equal(false)
+    it('wrap_position stores layout version 1 and level 0', async () => {
+        const [wrapperPda] = wrapperAddress(1, 8002)
+        const wrapper = await program.account.positionWrapper.fetch(wrapperPda)
+        expect(wrapper.version).to.equal(1)
+        expect(wrapper.level).to.equal(0)
+        expect(wrapper.custody).to.equal(false)
+        expect(wrapper.sendCount.toNumber()).to.equal(0)
+        expect(wrapper.lastSentSnapshotTime.toNumber()).to.equal(0)
     })
 
+    it('old flow instructions are gone; the combined send exists', () => {
+        const names = (idl as { instructions: { name: string }[] }).instructions.map((ix) => ix.name)
+        expect(names).to.not.include('send')
+        expect(names).to.not.include('send_ccip')
+        expect(names).to.not.include('request_bridge_ondemand')
+        expect(names).to.include('send_position_snapshot_via_chainlink_and_lz')
+    })
+
+    it('refresh_wrapper works without an OnDemand account (fails later, on the Jupiter account)', async () => {
+        // The owner refreshes with `ondemand = null`. There is no Jupiter position on this
+        // local validator, so the call must fail on the Jupiter `position` account, not on
+        // the missing OnDemand account (AccountNotInitialized = 3012).
+        const [wrapperPda] = wrapperAddress(1, 8002)
+        const [position] = jupiterPda('position', 1, 8002)
+        const [vaultState] = jupiterPda('vault_state', 1)
+        const [vaultConfig] = jupiterPda('vault_config', 1)
+        try {
+            await program.methods
+                .refreshWrapper()
+                .accounts({
+                    authority: admin.publicKey,
+                    store: storePda,
+                    wrapper: wrapperPda,
+                    ondemand: null,
+                    vaultsProgram: JUPITER_VAULTS_DEVNET,
+                    position,
+                    vaultState,
+                    vaultConfig,
+                    tick: position,
+                    tickIdLiquidation: null,
+                })
+                .rpc()
+            expect.fail('expected a Jupiter account failure')
+        } catch (err) {
+            assertLogsMatch(err, /ConstraintOwner|2004|AccountOwnedByWrongProgram|3007|ConstraintSeeds|2006/)
+            const text = String((err as { logs?: string[] }).logs ?? err)
+            expect(text).to.not.match(/AccountNotInitialized|3012/)
+        }
+    })
+
+    it('set_ccip_route with placeholder programs, so the send accounts all exist', async () => {
+        // Anchor loads and type-checks EVERY account before it evaluates any `constraint = ...`
+        // expression. Without a CcipRoute account the send would fail with
+        // AccountNotInitialized (3012) on `ccip_route` before the Unauthorized check ran.
+        await program.methods
+            .setCcipRoute({
+                router: SystemProgram.programId,
+                feeQuoter: SystemProgram.programId,
+                rmnRemote: SystemProgram.programId,
+                linkMint: SystemProgram.programId,
+                destChainSelector: new BN(1),
+                receiver: Array(20).fill(7),
+                gasLimit: new BN(0),
+            })
+            .accounts({
+                admin: admin.publicKey,
+                ccipRoute: ccipRoutePda,
+                store: storePda,
+                systemProgram: SystemProgram.programId,
+            })
+            .rpc()
+    })
+
+    it('send rejects a caller who is neither a sender nor an OnDemand caller', async () => {
+        try {
+            await program.methods
+                .sendPositionSnapshotViaChainlinkAndLz(sendParams())
+                .accounts(sendAccounts(stranger.publicKey, wrapperAddress(1, 8002)[0]))
+                .signers([stranger])
+                .rpc()
+            expect.fail('expected Unauthorized')
+        } catch (err) {
+            assertLogsMatch(err, /Unauthorized|6004/)
+        }
+    })
+
+    it('send by a sender stops on the empty snapshot, after the account checks pass', async () => {
+        // Admin is on `senders`. With every account in place the first thing `apply`
+        // does is look for a snapshot, so the expected error is NoPositionSnapshot.
+        try {
+            await program.methods
+                .sendPositionSnapshotViaChainlinkAndLz(sendParams())
+                .accounts(sendAccounts(admin.publicKey, wrapperAddress(1, 8002)[0]))
+                .rpc()
+            expect.fail('expected NoPositionSnapshot')
+        } catch (err) {
+            assertLogsMatch(err, /NoPositionSnapshot|6006/)
+        }
+    })
+
+    /** Wrapper PDA under the V1 seed. */
+    function wrapperAddress(vaultId: number, nftId: number): [PublicKey, number] {
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        return PublicKey.findProgramAddressSync([WRAPPER_SEED, vaultBuf, nftBuf], PROGRAM_ID)
+    }
+
+    /** Jupiter vault PDAs: ["position", vault le, nft le] or ["vault_state" | "vault_config", vault le]. */
+    function jupiterPda(kind: string, vaultId: number, nftId?: number): [PublicKey, number] {
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const seeds = [Buffer.from(kind), vaultBuf]
+        if (nftId !== undefined) {
+            const nftBuf = Buffer.alloc(4)
+            nftBuf.writeUInt32LE(nftId)
+            seeds.push(nftBuf)
+        }
+        return PublicKey.findProgramAddressSync(seeds, JUPITER_VAULTS_DEVNET)
+    }
+
+    function sendParams() {
+        return {
+            dstEid: DST_EID,
+            options: Buffer.alloc(0),
+            nativeFee: new BN(0),
+            lzTokenFee: new BN(0),
+            ccipFeeLamports: new BN(0),
+        }
+    }
+
+    /**
+     * All 27 accounts of the combined send. The CCIP accounts are placeholders: the
+     * test never reaches the Chainlink CPI, only the checks in front of it.
+     */
+    function sendAccounts(authority: PublicKey, wrapper: PublicKey) {
+        const eidBuf = Buffer.alloc(4)
+        eidBuf.writeUInt32BE(DST_EID)
+        const [peer] = PublicKey.findProgramAddressSync([PEER_SEED, storePda.toBuffer(), eidBuf], PROGRAM_ID)
+        const [endpoint] = PublicKey.findProgramAddressSync([Buffer.from('Endpoint')], ENDPOINT_PROGRAM)
+        const [ccipPayer] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayer')], PROGRAM_ID)
+        const placeholder = Keypair.generate().publicKey
+        return {
+            authority,
+            ondemand: null,
+            wrapper,
+            store: storePda,
+            peer,
+            endpoint,
+            ccipPayer,
+            ccipRoute: ccipRoutePda,
+            config: placeholder,
+            destChainState: placeholder,
+            nonce: placeholder,
+            systemProgram: SystemProgram.programId,
+            feeTokenProgram: TOKEN_PROGRAM,
+            feeTokenMint: NATIVE_MINT,
+            feeTokenUser: PublicKey.default,
+            feeTokenReceiver: placeholder,
+            feeBillingSigner: placeholder,
+            feeQuoter: SystemProgram.programId,
+            feeQuoterConfig: placeholder,
+            feeQuoterDestChain: placeholder,
+            feeQuoterBillingTokenConfig: placeholder,
+            feeQuoterLinkTokenConfig: placeholder,
+            rmnRemote: SystemProgram.programId,
+            rmnRemoteCurses: placeholder,
+            rmnRemoteConfig: placeholder,
+            tokenPoolsSigner: placeholder,
+            ccipRouter: SystemProgram.programId,
+        }
+    }
 })

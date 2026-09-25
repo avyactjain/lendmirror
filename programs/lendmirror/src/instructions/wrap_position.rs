@@ -47,8 +47,14 @@ impl WrapPosition<'_> {
         wrapper.nft_id = params.nft_id;
         wrapper.bump = ctx.bumps.wrapper;
         wrapper.snapshot = None;
-        wrapper.lz_send_allowed = false;
-        wrapper.ccip_send_allowed = false;
+        wrapper.version = WRAPPER_VERSION;
+        // Level 0: the wrapper only mirrors data until the admin raises it.
+        wrapper.level = 0;
+        wrapper.custody = false;
+        wrapper.position_mint = Pubkey::default();
+        wrapper.last_sent_snapshot_time = 0;
+        wrapper.send_count = 0;
+        wrapper.reserved = [0; 64];
         Ok(())
     }
 }

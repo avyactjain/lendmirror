@@ -33,7 +33,10 @@ const CCIP_SEED: &[u8] = b"LendMirrorCcip";
 /// Empty account that signs `ccip_send` and pays the SOL fee. It must hold no data.
 const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
 /// One PDA per Jupiter position. Seeds: this + vault_id le + nft_id le.
-const WRAPPER_SEED: &[u8] = b"LendMirrorWrapper";
+/// "V1" because the layout grew (level, custody, send guard). Solana accounts cannot be
+/// resized in place by `init`, so the old `LendMirrorWrapper` accounts on Devnet stay as they
+/// are and every position is wrapped again under the new seed.
+const WRAPPER_SEED: &[u8] = b"LendMirrorWrapperV1";
 /// OnDemand strategy for one wrapper. Seeds: this + wrapper pubkey.
 const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
 

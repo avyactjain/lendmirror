@@ -45,7 +45,7 @@ export type StoreAccountData = {
     /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
     snapshotters: Array<PublicKey>
     snapshotterCount: number
-    /** Wallets allowed to call `send`. Admin updates only. */
+    /** Wallets allowed to send any wrapper's snapshot. Admin updates only. */
     senders: Array<PublicKey>
     senderCount: number
     lastPosition: Option<PositionSnapshot>
@@ -60,7 +60,7 @@ export type StoreAccountDataArgs = {
     /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
     snapshotters: Array<PublicKey>
     snapshotterCount: number
-    /** Wallets allowed to call `send`. Admin updates only. */
+    /** Wallets allowed to send any wrapper's snapshot. Admin updates only. */
     senders: Array<PublicKey>
     senderCount: number
     lastPosition: OptionOrNullable<PositionSnapshotArgs>

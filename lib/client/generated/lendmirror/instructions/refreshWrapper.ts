@@ -15,7 +15,12 @@ export type RefreshWrapperInstructionAccounts = {
     authority?: Signer
     store: PublicKey | Pda
     wrapper: PublicKey | Pda
-    ondemand: PublicKey | Pda
+    /**
+     * Optional. Only needed when the caller is on the OnDemand list rather than owner or
+     * snapshotter. When present it must be this wrapper's list.
+     */
+
+    ondemand?: PublicKey | Pda
     vaultsProgram: PublicKey | Pda
     position: PublicKey | Pda
     vaultState: PublicKey | Pda

@@ -254,6 +254,21 @@ export class LendMirror {
         return accounts.safeFetchPositionWrapper({ rpc }, wrapper, { commitment })
     }
 
+    /**
+     * The wrapper's OnDemand PDA if `attach_ondemand` ran, else undefined.
+     * The program treats the account as optional: owner and Store lists work without it.
+     */
+    async ondemandIfAttached(rpc: RpcInterface, wrapper: PublicKey): Promise<PublicKey | undefined> {
+        const [ondemand] = this.pda.ondemand(wrapper)
+        const info = await rpc.getAccount(ondemand)
+        return info.exists ? ondemand : undefined
+    }
+
+    /** Every PositionWrapper this program owns, found by account discriminator. */
+    async listWrappers(rpc: RpcInterface): Promise<accounts.PositionWrapper[]> {
+        return accounts.getPositionWrapperGpaBuilder({ rpc, programs: this.programRepo }).getDeserialized()
+    }
+
     wrapPosition(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {
         return instructions.wrapPosition(
             { identity: authority, programs: this.programRepo },
@@ -329,7 +344,7 @@ export class LendMirror {
                     vaultConfig,
                     tick: tickPda,
                     tickIdLiquidation,
-                    ondemand: this.pda.ondemand(wrapper)[0],
+                    ondemand: await this.ondemandIfAttached(rpc, wrapper),
                 }
             )
             .addRemainingAccounts(branches.map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))).items[0]
@@ -449,7 +464,7 @@ export class LendMirror {
                 { identity: authority, programs: this.programRepo },
                 {
                     authority,
-                    ondemand: this.pda.ondemand(wrapper)[0],
+                    ondemand: await this.ondemandIfAttached(rpc, wrapper),
                     wrapper,
                     store: oapp,
                     peer,

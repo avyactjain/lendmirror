@@ -18,7 +18,8 @@ export class LendMirrorPDA extends OmniAppPDA {
     static PEER_SEED = 'LendMirrorPeer'
     static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'
-    static WRAPPER_SEED = 'LendMirrorWrapper'
+    /** V1: layout grew (level, custody, send guard). Old `LendMirrorWrapper` accounts are abandoned. */
+    static WRAPPER_SEED = 'LendMirrorWrapperV1'
     static ONDEMAND_SEED = 'LendMirrorOnDemand'
 
     constructor(public readonly programId: PublicKey) {
@@ -70,7 +71,7 @@ export class LendMirrorPDA extends OmniAppPDA {
         ])
     }
 
-    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]
+    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]  (WRAPPER_SEED = LendMirrorWrapperV1)
     wrapper(vaultId: number, nftId: number): Pda {
         return eddsa.findPda(this.programId, [
             Buffer.from(LendMirrorPDA.WRAPPER_SEED, 'utf8'),
