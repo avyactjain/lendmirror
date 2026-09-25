@@ -21,6 +21,8 @@ export class LendMirrorPDA extends OmniAppPDA {
     /** V1: layout grew (level, custody, send guard). Old `LendMirrorWrapper` accounts are abandoned. */
     static WRAPPER_SEED = 'LendMirrorWrapperV1'
     static ONDEMAND_SEED = 'LendMirrorOnDemand'
+    /** Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`. */
+    static WRAPPER_AUTH_SEED = 'LendMirrorWrapperAuth'
 
     constructor(public readonly programId: PublicKey) {
         super(programId)
@@ -84,6 +86,14 @@ export class LendMirrorPDA extends OmniAppPDA {
     ondemand(wrapper: PublicKey): Pda {
         return eddsa.findPda(this.programId, [
             Buffer.from(LendMirrorPDA.ONDEMAND_SEED, 'utf8'),
+            publicKeyBytes(wrapper),
+        ])
+    }
+
+    // seeds = [WRAPPER_AUTH_SEED, wrapper.key()]. Never created as an account; it only signs.
+    wrapperAuthority(wrapper: PublicKey): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.WRAPPER_AUTH_SEED, 'utf8'),
             publicKeyBytes(wrapper),
         ])
     }

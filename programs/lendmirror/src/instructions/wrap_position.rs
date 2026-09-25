@@ -54,6 +54,10 @@ impl WrapPosition<'_> {
         wrapper.position_mint = Pubkey::default();
         wrapper.last_sent_snapshot_time = 0;
         wrapper.send_count = 0;
+        // The authority PDA is never created as an account; it stays empty and only signs.
+        // Its bump is fixed by the wrapper key, so compute it once here.
+        wrapper.authority_bump =
+            Pubkey::find_program_address(&[WRAPPER_AUTH_SEED, wrapper.key().as_ref()], &crate::ID).1;
         wrapper.reserved = [0; 64];
         Ok(())
     }

@@ -60,6 +60,11 @@ export type PositionWrapperAccountData = {
     lastSentSnapshotTime: bigint
     /** How many sends this wrapper has made. Informational. */
     sendCount: bigint
+    /**
+     * Bump of the wrapper authority PDA (`[WRAPPER_AUTH_SEED, wrapper.key()]`). Stored so
+     * `invoke_signed` does not have to search for it on every call.
+     */
+    authorityBump: number
     /** Spare bytes so small future fields do not force another seed bump. */
     reserved: Uint8Array
 }
@@ -84,6 +89,11 @@ export type PositionWrapperAccountDataArgs = {
     lastSentSnapshotTime: number | bigint
     /** How many sends this wrapper has made. Informational. */
     sendCount: number | bigint
+    /**
+     * Bump of the wrapper authority PDA (`[WRAPPER_AUTH_SEED, wrapper.key()]`). Stored so
+     * `invoke_signed` does not have to search for it on every call.
+     */
+    authorityBump: number
     /** Spare bytes so small future fields do not force another seed bump. */
     reserved: Uint8Array
 }
@@ -107,6 +117,7 @@ export function getPositionWrapperAccountDataSerializer(): Serializer<
                 ['positionMint', publicKeySerializer()],
                 ['lastSentSnapshotTime', i64()],
                 ['sendCount', u64()],
+                ['authorityBump', u8()],
                 ['reserved', bytes({ size: 64 })],
             ],
             { description: 'PositionWrapperAccountData' }
@@ -183,6 +194,7 @@ export function getPositionWrapperGpaBuilder(context: Pick<Context, 'rpc' | 'pro
             positionMint: PublicKey
             lastSentSnapshotTime: number | bigint
             sendCount: number | bigint
+            authorityBump: number
             reserved: Uint8Array
         }>({
             discriminator: [0, bytes({ size: 8 })],
@@ -197,6 +209,7 @@ export function getPositionWrapperGpaBuilder(context: Pick<Context, 'rpc' | 'pro
             positionMint: [null, publicKeySerializer()],
             lastSentSnapshotTime: [null, i64()],
             sendCount: [null, u64()],
+            authorityBump: [null, u8()],
             reserved: [null, bytes({ size: 64 })],
         })
         .deserializeUsing<PositionWrapper>((account) => deserializePositionWrapper(account))

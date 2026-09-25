@@ -11,6 +11,11 @@
 //!     can never point at the same Jupiter position.
 //!   - `last_sent_snapshot_time` only moves forward. A snapshot is sent at most once.
 //!   - `level` is written only by the Store admin (`set_wrapper_level`).
+//!   - Every token account the wrapper controls (position NFT, collateral, debt token) is an
+//!     associated token account owned by the wrapper AUTHORITY, an empty PDA at
+//!     `[WRAPPER_AUTH_SEED, wrapper.key()]`. The wrapper account itself holds data, and the
+//!     System program refuses to move lamports out of a data-carrying account, so it cannot
+//!     act as a fee payer or as Jupiter's `signer`. The empty authority PDA can.
 //!
 //! Typical call: `wrap_position` creates the account → `refresh_wrapper` fills `snapshot`
 //! → `send_position_snapshot_via_chainlink_and_lz` checks `can_send`, sends, calls `record_send`.
@@ -63,6 +68,9 @@ pub struct PositionWrapper {
     pub last_sent_snapshot_time: i64,
     /// How many sends this wrapper has made. Informational.
     pub send_count: u64,
+    /// Bump of the wrapper authority PDA (`[WRAPPER_AUTH_SEED, wrapper.key()]`). Stored so
+    /// `invoke_signed` does not have to search for it on every call.
+    pub authority_bump: u8,
     /// Spare bytes so small future fields do not force another seed bump.
     pub reserved: [u8; 64],
 }
@@ -149,6 +157,7 @@ mod tests {
             position_mint: Pubkey::default(),
             last_sent_snapshot_time: 0,
             send_count: 0,
+            authority_bump: 254,
             reserved: [0; 64],
         }
     }

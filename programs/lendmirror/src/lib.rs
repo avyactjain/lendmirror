@@ -39,6 +39,9 @@ const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
 const WRAPPER_SEED: &[u8] = b"LendMirrorWrapperV1";
 /// OnDemand strategy for one wrapper. Seeds: this + wrapper pubkey.
 const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
+/// Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`.
+/// Seeds: this + wrapper pubkey. See `state/wrapper.rs` for why it is separate from the wrapper.
+const WRAPPER_AUTH_SEED: &[u8] = b"LendMirrorWrapperAuth";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///
@@ -133,11 +136,37 @@ pub mod lendmirror {
         RefreshWrapper::apply(&mut ctx)
     }
 
-    // OnDemand caller: Store signs LayerZero, empty payer signs Chainlink.
+    // OnDemand caller or Store sender: Store signs LayerZero, empty payer signs Chainlink.
     pub fn send_position_snapshot_via_chainlink_and_lz(
         mut ctx: Context<SendPositionSnapshotViaChainlinkAndLz>,
         params: SendPositionSnapshotViaChainlinkAndLzParams,
     ) -> Result<()> {
         SendPositionSnapshotViaChainlinkAndLz::apply(&mut ctx, &params)
+    }
+
+    // Admin only. Set a wrapper's access level (0 mirror only, 1 deposit/payback,
+    // 2 also withdraw/borrow, 3 and 4 reserved).
+    pub fn set_wrapper_level(mut ctx: Context<SetWrapperLevel>, level: u8) -> Result<()> {
+        SetWrapperLevel::apply(&mut ctx, level)
+    }
+
+    // Wrapper owner moves the Jupiter position NFT into the wrapper authority's token account.
+    pub fn deposit_position_nft(mut ctx: Context<DepositPositionNft>) -> Result<()> {
+        DepositPositionNft::apply(&mut ctx)
+    }
+
+    // Admin only. Escape hatch: move the position NFT back to the wrapper owner.
+    pub fn release_position_nft(mut ctx: Context<ReleasePositionNft>) -> Result<()> {
+        ReleasePositionNft::apply(&mut ctx)
+    }
+
+    // Owner, snapshotter, or OnDemand caller: deposit / withdraw / borrow / payback on the
+    // custodied Jupiter position, within the wrapper's level. Tokens only move between
+    // Jupiter and the wrapper authority's own token accounts.
+    pub fn operate_position<'info>(
+        mut ctx: Context<'_, '_, '_, 'info, OperatePosition<'info>>,
+        params: OperatePositionParams,
+    ) -> Result<()> {
+        OperatePosition::apply(&mut ctx, &params)
     }
 }

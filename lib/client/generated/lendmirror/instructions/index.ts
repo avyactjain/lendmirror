@@ -7,14 +7,18 @@
  */
 
 export * from './attachOndemand'
+export * from './depositPositionNft'
 export * from './getJupiterPosition'
 export * from './initStore'
+export * from './operatePosition'
 export * from './quoteSend'
 export * from './refreshWrapper'
+export * from './releasePositionNft'
 export * from './sendPositionSnapshotViaChainlinkAndLz'
 export * from './setCcipRoute'
 export * from './setOndemandCallers'
 export * from './setPeerConfig'
 export * from './setSenders'
 export * from './setSnapshotters'
+export * from './setWrapperLevel'
 export * from './wrapPosition'

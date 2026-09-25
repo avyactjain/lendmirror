@@ -15,7 +15,8 @@ import {
 } from '@metaplex-foundation/umi'
 import { createDefaultProgramRepository } from '@metaplex-foundation/umi-program-repository'
 import { toWeb3JsInstruction } from '@metaplex-foundation/umi-web3js-adapters'
-import { ComputeBudgetProgram } from '@solana/web3.js'
+import { ComputeBudgetProgram, PublicKey as Web3PublicKey } from '@solana/web3.js'
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { hexlify } from 'ethers/lib/utils'
 
 import {
@@ -39,6 +40,7 @@ import {
     decodeJupiterTickFields,
     decodeJupiterTickIdLiquidation,
     jupiterBranchPda,
+    jupiterPositionMintPda,
     jupiterPositionPda,
     jupiterTickIdLiquidationPda,
     jupiterTickPda,
@@ -267,6 +269,75 @@ export class LendMirror {
     /** Every PositionWrapper this program owns, found by account discriminator. */
     async listWrappers(rpc: RpcInterface): Promise<accounts.PositionWrapper[]> {
         return accounts.getPositionWrapperGpaBuilder({ rpc, programs: this.programRepo }).getDeserialized()
+    }
+
+    /** Associated token account of `owner` for `mint`, as a umi PublicKey. */
+    static ata(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey = publicKey(TOKEN_PROGRAM_ID)): PublicKey {
+        return publicKey(
+            getAssociatedTokenAddressSync(
+                new Web3PublicKey(mint),
+                new Web3PublicKey(owner),
+                true, // owner may be a PDA
+                new Web3PublicKey(tokenProgram)
+            )
+        )
+    }
+
+    /** Admin sets the wrapper's access level (0..=4). */
+    setWrapperLevel(admin: Signer, vaultId: number, nftId: number, level: number): WrappedInstruction {
+        return instructions.setWrapperLevel(
+            { programs: this.programRepo },
+            { admin, store: this.pda.oapp()[0], wrapper: this.pda.wrapper(vaultId, nftId)[0], level }
+        ).items[0]
+    }
+
+    /** Wrapper owner moves the position NFT from their wallet into the wrapper authority's ATA. */
+    depositPositionNft(authority: Signer, vaultId: number, nftId: number, vaultsProgram: PublicKey): WrappedInstruction {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        const [wrapperAuthority] = this.pda.wrapperAuthority(wrapper)
+        const [positionMint] = jupiterPositionMintPda(vaultsProgram, vaultId, nftId)
+        return instructions.depositPositionNft(
+            { identity: authority, programs: this.programRepo },
+            {
+                authority,
+                store: this.pda.oapp()[0],
+                wrapper,
+                wrapperAuthority,
+                vaultsProgram,
+                positionMint,
+                sourceNftAta: LendMirror.ata(authority.publicKey, positionMint),
+                wrapperNftAta: LendMirror.ata(wrapperAuthority, positionMint),
+                tokenProgram: publicKey(TOKEN_PROGRAM_ID),
+                associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
+            }
+        ).items[0]
+    }
+
+    /** Admin returns the position NFT to the wrapper owner. */
+    releasePositionNft(
+        admin: Signer,
+        vaultId: number,
+        nftId: number,
+        owner: PublicKey,
+        positionMint: PublicKey
+    ): WrappedInstruction {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        const [wrapperAuthority] = this.pda.wrapperAuthority(wrapper)
+        return instructions.releasePositionNft(
+            { programs: this.programRepo },
+            {
+                admin,
+                store: this.pda.oapp()[0],
+                wrapper,
+                wrapperAuthority,
+                owner,
+                positionMint,
+                wrapperNftAta: LendMirror.ata(wrapperAuthority, positionMint),
+                ownerNftAta: LendMirror.ata(owner, positionMint),
+                tokenProgram: publicKey(TOKEN_PROGRAM_ID),
+                associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
+            }
+        ).items[0]
     }
 
     wrapPosition(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {

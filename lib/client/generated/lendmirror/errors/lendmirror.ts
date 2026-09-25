@@ -12,9 +12,9 @@ type ProgramErrorConstructor = new (program: Program, cause?: Error) => ProgramE
 const codeToErrorMap: Map<number, ProgramErrorConstructor> = new Map()
 const nameToErrorMap: Map<string, ProgramErrorConstructor> = new Map()
 
-/** InvalidLength:  */
-export class InvalidLengthError extends ProgramError {
-    override readonly name: string = 'InvalidLength'
+/** InvalidJupiterAccount:  */
+export class InvalidJupiterAccountError extends ProgramError {
+    override readonly name: string = 'InvalidJupiterAccount'
 
     readonly code: number = 0x1770 // 6000
 
@@ -22,12 +22,12 @@ export class InvalidLengthError extends ProgramError {
         super('', program, cause)
     }
 }
-codeToErrorMap.set(0x1770, InvalidLengthError)
-nameToErrorMap.set('InvalidLength', InvalidLengthError)
+codeToErrorMap.set(0x1770, InvalidJupiterAccountError)
+nameToErrorMap.set('InvalidJupiterAccount', InvalidJupiterAccountError)
 
-/** BodyTooShort:  */
-export class BodyTooShortError extends ProgramError {
-    override readonly name: string = 'BodyTooShort'
+/** PositionIdMismatch:  */
+export class PositionIdMismatchError extends ProgramError {
+    override readonly name: string = 'PositionIdMismatch'
 
     readonly code: number = 0x1771 // 6001
 
@@ -35,8 +35,229 @@ export class BodyTooShortError extends ProgramError {
         super('', program, cause)
     }
 }
-codeToErrorMap.set(0x1771, BodyTooShortError)
-nameToErrorMap.set('BodyTooShort', BodyTooShortError)
+codeToErrorMap.set(0x1771, PositionIdMismatchError)
+nameToErrorMap.set('PositionIdMismatch', PositionIdMismatchError)
+
+/** TickPdaMismatch:  */
+export class TickPdaMismatchError extends ProgramError {
+    override readonly name: string = 'TickPdaMismatch'
+
+    readonly code: number = 0x1772 // 6002
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1772, TickPdaMismatchError)
+nameToErrorMap.set('TickPdaMismatch', TickPdaMismatchError)
+
+/** TickOutOfRange:  */
+export class TickOutOfRangeError extends ProgramError {
+    override readonly name: string = 'TickOutOfRange'
+
+    readonly code: number = 0x1773 // 6003
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1773, TickOutOfRangeError)
+nameToErrorMap.set('TickOutOfRange', TickOutOfRangeError)
+
+/** Unauthorized:  */
+export class UnauthorizedError extends ProgramError {
+    override readonly name: string = 'Unauthorized'
+
+    readonly code: number = 0x1774 // 6004
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1774, UnauthorizedError)
+nameToErrorMap.set('Unauthorized', UnauthorizedError)
+
+/** AllowlistTooLong:  */
+export class AllowlistTooLongError extends ProgramError {
+    override readonly name: string = 'AllowlistTooLong'
+
+    readonly code: number = 0x1775 // 6005
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1775, AllowlistTooLongError)
+nameToErrorMap.set('AllowlistTooLong', AllowlistTooLongError)
+
+/** NoPositionSnapshot:  */
+export class NoPositionSnapshotError extends ProgramError {
+    override readonly name: string = 'NoPositionSnapshot'
+
+    readonly code: number = 0x1776 // 6006
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1776, NoPositionSnapshotError)
+nameToErrorMap.set('NoPositionSnapshot', NoPositionSnapshotError)
+
+/** DebtFactorUnderflow:  */
+export class DebtFactorUnderflowError extends ProgramError {
+    override readonly name: string = 'DebtFactorUnderflow'
+
+    readonly code: number = 0x1777 // 6007
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1777, DebtFactorUnderflowError)
+nameToErrorMap.set('DebtFactorUnderflow', DebtFactorUnderflowError)
+
+/** DebtFactorOverflow:  */
+export class DebtFactorOverflowError extends ProgramError {
+    override readonly name: string = 'DebtFactorOverflow'
+
+    readonly code: number = 0x1778 // 6008
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1778, DebtFactorOverflowError)
+nameToErrorMap.set('DebtFactorOverflow', DebtFactorOverflowError)
+
+/** BranchChainTooLong:  */
+export class BranchChainTooLongError extends ProgramError {
+    override readonly name: string = 'BranchChainTooLong'
+
+    readonly code: number = 0x1779 // 6009
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1779, BranchChainTooLongError)
+nameToErrorMap.set('BranchChainTooLong', BranchChainTooLongError)
+
+/** MissingBranchAccount:  */
+export class MissingBranchAccountError extends ProgramError {
+    override readonly name: string = 'MissingBranchAccount'
+
+    readonly code: number = 0x177a // 6010
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177a, MissingBranchAccountError)
+nameToErrorMap.set('MissingBranchAccount', MissingBranchAccountError)
+
+/** MissingLiquidationRecord:  */
+export class MissingLiquidationRecordError extends ProgramError {
+    override readonly name: string = 'MissingLiquidationRecord'
+
+    readonly code: number = 0x177b // 6011
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177b, MissingLiquidationRecordError)
+nameToErrorMap.set('MissingLiquidationRecord', MissingLiquidationRecordError)
+
+/** InvalidCcipAccount:  */
+export class InvalidCcipAccountError extends ProgramError {
+    override readonly name: string = 'InvalidCcipAccount'
+
+    readonly code: number = 0x177c // 6012
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177c, InvalidCcipAccountError)
+nameToErrorMap.set('InvalidCcipAccount', InvalidCcipAccountError)
+
+/** SnapshotAlreadySent:  */
+export class SnapshotAlreadySentError extends ProgramError {
+    override readonly name: string = 'SnapshotAlreadySent'
+
+    readonly code: number = 0x177d // 6013
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177d, SnapshotAlreadySentError)
+nameToErrorMap.set('SnapshotAlreadySent', SnapshotAlreadySentError)
+
+/** LevelDenied:  */
+export class LevelDeniedError extends ProgramError {
+    override readonly name: string = 'LevelDenied'
+
+    readonly code: number = 0x177e // 6014
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177e, LevelDeniedError)
+nameToErrorMap.set('LevelDenied', LevelDeniedError)
+
+/** InvalidLevel:  */
+export class InvalidLevelError extends ProgramError {
+    override readonly name: string = 'InvalidLevel'
+
+    readonly code: number = 0x177f // 6015
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177f, InvalidLevelError)
+nameToErrorMap.set('InvalidLevel', InvalidLevelError)
+
+/** NoCustody:  */
+export class NoCustodyError extends ProgramError {
+    override readonly name: string = 'NoCustody'
+
+    readonly code: number = 0x1780 // 6016
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1780, NoCustodyError)
+nameToErrorMap.set('NoCustody', NoCustodyError)
+
+/** AlreadyInCustody:  */
+export class AlreadyInCustodyError extends ProgramError {
+    override readonly name: string = 'AlreadyInCustody'
+
+    readonly code: number = 0x1781 // 6017
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1781, AlreadyInCustodyError)
+nameToErrorMap.set('AlreadyInCustody', AlreadyInCustodyError)
+
+/** InvalidTokenAccount:  */
+export class InvalidTokenAccountError extends ProgramError {
+    override readonly name: string = 'InvalidTokenAccount'
+
+    readonly code: number = 0x1782 // 6018
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1782, InvalidTokenAccountError)
+nameToErrorMap.set('InvalidTokenAccount', InvalidTokenAccountError)
 
 /**
  * Attempts to resolve a custom program error from the provided error code.

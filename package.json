@@ -30,10 +30,12 @@
     "hardhat-deploy": "^0.12.1"
   },
   "dependencies": {
+    "@jup-ag/lend": "^0.3.0",
     "@kinobi-so/nodes": "^0.21.4",
     "@kinobi-so/nodes-from-anchor": "^0.21.2",
     "@kinobi-so/renderers": "^0.21.3",
     "@kinobi-so/renderers-js-umi": "^0.21.6",
+    "@solana/spl-token": "^0.4.13",
     "kinobi": "^0.21.4"
   },
   "devDependencies": {

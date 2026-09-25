@@ -148,6 +148,11 @@ export function jupiterPositionPda(vaultsProgram: PublicKey, vaultId: number, nf
     return eddsa.findPda(vaultsProgram, [Buffer.from('position'), u16Le(vaultId), u32Le(nftId)])
 }
 
+/** Position NFT mint: ["position_mint", vault le, nft le] under the Vaults program (from init_position). */
+export function jupiterPositionMintPda(vaultsProgram: PublicKey, vaultId: number, nftId: number): Pda {
+    return eddsa.findPda(vaultsProgram, [Buffer.from('position_mint'), u16Le(vaultId), u32Le(nftId)])
+}
+
 export function jupiterVaultStatePda(vaultsProgram: PublicKey, vaultId: number): Pda {
     return eddsa.findPda(vaultsProgram, [Buffer.from('vault_state'), u16Le(vaultId)])
 }

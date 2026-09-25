@@ -19,6 +19,7 @@ const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqg
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const NATIVE_MINT = new PublicKey('So11111111111111111111111111111111111111112')
+const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 /** BPFLoaderUpgradeab1e11111111111111111111111 */
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 /** Sepolia V2 testnet eid */
@@ -366,6 +367,79 @@ describe('allowlist auth', function () {
             expect.fail('expected NoPositionSnapshot')
         } catch (err) {
             assertLogsMatch(err, /NoPositionSnapshot|6006/)
+        }
+    })
+
+    it('set_wrapper_level: admin only, 0..4, and it does not touch custody', async () => {
+        const [wrapperPda] = wrapperAddress(1, 8002)
+        try {
+            await program.methods
+                .setWrapperLevel(1)
+                .accounts({ admin: stranger.publicKey, store: storePda, wrapper: wrapperPda })
+                .signers([stranger])
+                .rpc()
+            expect.fail('expected ConstraintAddress')
+        } catch (err) {
+            assertLogsMatch(err, /ConstraintAddress|2012|Unauthorized|6004/)
+        }
+        try {
+            await program.methods
+                .setWrapperLevel(5)
+                .accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda })
+                .rpc()
+            expect.fail('expected InvalidLevel')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidLevel|6015/)
+        }
+        await program.methods
+            .setWrapperLevel(2)
+            .accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda })
+            .rpc()
+        const wrapper = await program.account.positionWrapper.fetch(wrapperPda)
+        expect(wrapper.level).to.equal(2)
+        expect(wrapper.custody).to.equal(false)
+    })
+
+    it('deposit_position_nft fails on the Jupiter mint when the position does not exist', async () => {
+        // No Jupiter position on this validator, so the mint PDA is empty. The point of the
+        // test: the instruction is wired and reaches the mint check, and the wrapper keeps
+        // custody = false.
+        const [wrapperPda] = wrapperAddress(1, 8002)
+        const [wrapperAuthority] = PublicKey.findProgramAddressSync(
+            [Buffer.from('LendMirrorWrapperAuth'), wrapperPda.toBuffer()],
+            PROGRAM_ID
+        )
+        const [positionMint] = jupiterPda('position_mint', 1, 8002)
+        const placeholder = Keypair.generate().publicKey
+        try {
+            await program.methods
+                .depositPositionNft()
+                .accounts({
+                    authority: admin.publicKey,
+                    store: storePda,
+                    wrapper: wrapperPda,
+                    wrapperAuthority,
+                    vaultsProgram: JUPITER_VAULTS_DEVNET,
+                    positionMint,
+                    sourceNftAta: placeholder,
+                    wrapperNftAta: placeholder,
+                    tokenProgram: TOKEN_PROGRAM,
+                    associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM,
+                    systemProgram: SystemProgram.programId,
+                })
+                .rpc()
+            expect.fail('expected a mint account failure')
+        } catch (err) {
+            assertLogsMatch(err, /AccountNotInitialized|3012|AccountOwnedByWrongProgram|3007|ConstraintSeeds|2006/)
+        }
+        const wrapper = await program.account.positionWrapper.fetch(wrapperPda)
+        expect(wrapper.custody).to.equal(false)
+    })
+
+    it('custody and operate instructions are in the IDL', () => {
+        const names = (idl as { instructions: { name: string }[] }).instructions.map((ix) => ix.name)
+        for (const name of ['set_wrapper_level', 'deposit_position_nft', 'release_position_nft', 'operate_position']) {
+            expect(names).to.include(name)
         }
     })
 
