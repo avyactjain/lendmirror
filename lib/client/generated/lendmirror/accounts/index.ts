@@ -6,7 +6,10 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
+export * from './ccipRoute'
 export * from './endpointSettings'
+export * from './onDemandStrategy'
 export * from './peerConfig'
 export * from './positionSnapshotAccount'
+export * from './positionWrapper'
 export * from './store'

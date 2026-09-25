@@ -32,19 +32,32 @@ pub struct Send<'info> {
     /// Our OApp identity. This pubkey is the `sender` in PacketSent.
     /// The Store PDA also "signs" the CPI into the Endpoint (see seeds below).
     pub store: Account<'info, Store>,
+    #[account(
+        mut,
+        seeds = [
+            WRAPPER_SEED,
+            &wrapper.vault_id.to_le_bytes(),
+            &wrapper.nft_id.to_le_bytes()
+        ],
+        bump = wrapper.bump,
+        constraint = wrapper.lz_send_allowed @ LendMirrorError::Unauthorized
+    )]
+    pub wrapper: Account<'info, PositionWrapper>,
     #[account(seeds = [ENDPOINT_SEED], bump = endpoint.bump, seeds::program = ENDPOINT_ID)]
     pub endpoint: Account<'info, EndpointSettings>,
 }
 
 impl<'info> Send<'info> {
     pub fn apply(ctx: &mut Context<Send>, params: &SendMessageParams) -> Result<()> {
-        let snapshot = ctx
-            .accounts
-            .store
-            .last_position
-            .as_ref()
-            .ok_or(error!(LendMirrorError::NoPositionSnapshot))?;
-        let message = snapshot.encode();
+        let message = {
+            let snapshot = ctx
+                .accounts
+                .wrapper
+                .snapshot
+                .as_ref()
+                .ok_or(error!(LendMirrorError::NoPositionSnapshot))?;
+            snapshot.encode()
+        };
         // Store PDA signs the Endpoint CPI. Without this, Endpoint would reject us.
         let seeds: &[&[u8]] = &[STORE_SEED, &[ctx.accounts.store.bump]];
 
@@ -69,6 +82,7 @@ impl<'info> Send<'info> {
             seeds,
             send_params,
         )?;
+        ctx.accounts.wrapper.lz_send_allowed = false;
         Ok(())
     }
 }

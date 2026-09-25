@@ -2,23 +2,28 @@ import { PublicKey } from '@solana/web3.js'
 import { task, types } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 
-import { CCIP_SEPOLIA_ROUTER, CCIP_SOLANA_DEVNET_SELECTOR } from '../../lib/client/ccip'
-import { getSolanaDeployment } from '../solana'
+import { pubkeyBytes32 } from '../../lib/deployment'
+import { requireCcip, resolveSolanaEid } from '../common/deployment'
 
-task('lz:oapp:evm:set-ccip-route', 'Owner: allow the CCIP router and the Solana Store to deliver snapshots')
-    .addOptionalParam('router', 'CCIP router on this chain', CCIP_SEPOLIA_ROUTER, types.string)
-    .addOptionalParam('sourceSelector', 'Source chain selector', CCIP_SOLANA_DEVNET_SELECTOR.toString(), types.string)
-    .addOptionalParam('solanaEid', 'Solana eid whose Store is the CCIP sender', 40168, types.int)
+task('lz:oapp:evm:set-ccip-route', 'Owner: allow the CCIP router and the Solana CCIP payer to deliver snapshots')
+    .addOptionalParam('router', 'CCIP router on this chain. Default: DEPLOYMENT_TYPE profile.', '', types.string)
+    .addOptionalParam('sourceSelector', 'Source chain selector. Default: profile.', '', types.string)
+    .addOptionalParam('solanaEid', 'Solana eid. Default: profile.', undefined, types.int)
     .addOptionalParam('contractName', 'Deployed EVM contract name', 'LendMirror', types.string)
     .setAction(async ({ router, sourceSelector, solanaEid, contractName }, hre: HardhatRuntimeEnvironment) => {
-        const { oapp } = getSolanaDeployment(solanaEid)
-        const sender = '0x' + Buffer.from(new PublicKey(oapp).toBytes()).toString('hex')
+        const ccip = requireCcip()
+        resolveSolanaEid(solanaEid)
+        const sender = pubkeyBytes32(ccip.payer)
         const contract = await mirror(hre, contractName)
         console.log('proxy', contract.address)
-        console.log('router', router)
-        console.log('source selector', sourceSelector)
-        console.log('sender store', oapp)
-        const tx = await contract.setCcipRoute(router, sourceSelector, sender)
+        console.log('router', router || ccip.evmRouter)
+        console.log('source selector', sourceSelector || ccip.sourceChainSelector.toString())
+        console.log('sender (ccip payer)', ccip.payer)
+        const tx = await contract.setCcipRoute(
+            router || ccip.evmRouter,
+            sourceSelector || ccip.sourceChainSelector.toString(),
+            sender
+        )
         const receipt = await tx.wait()
         console.log('setCcipRoute tx', receipt.transactionHash)
     })

@@ -12,6 +12,15 @@ pub struct QuoteSend<'info> {
     #[account(seeds = [STORE_SEED], bump = store.bump)]
     pub store: Account<'info, Store>,
     #[account(
+        seeds = [
+            WRAPPER_SEED,
+            &wrapper.vault_id.to_le_bytes(),
+            &wrapper.nft_id.to_le_bytes()
+        ],
+        bump = wrapper.bump
+    )]
+    pub wrapper: Account<'info, PositionWrapper>,
+    #[account(
     seeds = [
         PEER_SEED,
         store.key().as_ref(),
@@ -28,8 +37,8 @@ impl<'info> QuoteSend<'info> {
     pub fn apply(ctx: &Context<QuoteSend>, params: &QuoteSendParams) -> Result<MessagingFee> {
         let snapshot = ctx
             .accounts
-            .store
-            .last_position
+            .wrapper
+            .snapshot
             .as_ref()
             .ok_or(error!(LendMirrorError::NoPositionSnapshot))?;
         let message = snapshot.encode();

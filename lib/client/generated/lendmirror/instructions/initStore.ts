@@ -18,11 +18,7 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type InitStoreInstructionAccounts = {
-    /**
-     * Pays rent. Must be this program's upgrade authority.
-     * `params.admin` is who becomes Store admin; it is not the gate.
-     */
-
+    /** Signs and pays rent. */
     payer?: Signer
     /**
      * init = create this account now. Fails if it already exists.
@@ -39,7 +35,11 @@ export type InitStoreInstructionAccounts = {
      */
 
     program: PublicKey | Pda
-    /** BPF-loader ProgramData for `program`. Upgrade authority is set at deploy. */
+    /**
+     * BPF-loader ProgramData for `program`. Upgrade authority is set at deploy.
+     * `payer` must be that authority. `params.admin` is Store admin, not the gate.
+     */
+
     programData: PublicKey | Pda
     /** System program creates accounts. Must be in the list or init fails. */
     systemProgram?: PublicKey | Pda

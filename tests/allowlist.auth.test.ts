@@ -11,8 +11,9 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import idl from '../target/idl/lendmirror.json'
 
-const STORE_SEED = Buffer.from('LendMirrorStore')
+const STORE_SEED = Buffer.from('LendMirrorStoreV0')
 const PEER_SEED = Buffer.from('LendMirrorPeer')
+const WRAPPER_SEED = Buffer.from('LendMirrorWrapper')
 const PROGRAM_ID = new PublicKey('GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1')
 const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6')
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
@@ -211,6 +212,60 @@ describe('allowlist auth', function () {
             .rpc()
     })
 
+    it('wrap_position rejects non-snapshotter', async () => {
+        await program.methods
+            .setSnapshotters({ keys: [admin.publicKey] })
+            .accounts({ admin: admin.publicKey, store: storePda })
+            .rpc()
+        const vaultId = 1
+        const nftId = 8001
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        try {
+            await program.methods
+                .wrapPosition({ vaultId, nftId })
+                .accounts({
+                    authority: stranger.publicKey,
+                    store: storePda,
+                    wrapper: wrapperPda,
+                    systemProgram: SystemProgram.programId,
+                })
+                .signers([stranger])
+                .rpc()
+            expect.fail('expected Unauthorized')
+        } catch (err) {
+            assertLogsMatch(err, /Unauthorized|6004/)
+        }
+    })
+
+    it('wrap_position succeeds for snapshotter', async () => {
+        const vaultId = 1
+        const nftId = 8002
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        await program.methods
+            .wrapPosition({ vaultId, nftId })
+            .accounts({
+                authority: admin.publicKey,
+                store: storePda,
+                wrapper: wrapperPda,
+                systemProgram: SystemProgram.programId,
+            })
+            .rpc()
+    })
+
     it('send rejects non-sender', async () => {
         const eidBuf = Buffer.alloc(4)
         eidBuf.writeUInt32BE(DST_EID)
@@ -222,6 +277,25 @@ describe('allowlist auth', function () {
             [Buffer.from('Endpoint')],
             ENDPOINT_PROGRAM
         )
+        const vaultId = 1
+        const nftId = 9001
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        await program.methods
+            .wrapPosition({ vaultId, nftId })
+            .accounts({
+                authority: admin.publicKey,
+                store: storePda,
+                wrapper: wrapperPda,
+                systemProgram: SystemProgram.programId,
+            })
+            .rpc()
         try {
             await program.methods
                 .send({
@@ -234,6 +308,7 @@ describe('allowlist auth', function () {
                     authority: stranger.publicKey,
                     peer: peerPda,
                     store: storePda,
+                    wrapper: wrapperPda,
                     endpoint: endpointSetting,
                 })
                 .signers([stranger])
@@ -244,7 +319,7 @@ describe('allowlist auth', function () {
         }
     })
 
-    it('send rejects when last_position is empty', async () => {
+    it('send rejects when lz_send_allowed is false', async () => {
         const eidBuf = Buffer.alloc(4)
         eidBuf.writeUInt32BE(DST_EID)
         const [peerPda] = PublicKey.findProgramAddressSync(
@@ -255,6 +330,25 @@ describe('allowlist auth', function () {
             [Buffer.from('Endpoint')],
             ENDPOINT_PROGRAM
         )
+        const vaultId = 1
+        const nftId = 9002
+        const vaultBuf = Buffer.alloc(2)
+        vaultBuf.writeUInt16LE(vaultId)
+        const nftBuf = Buffer.alloc(4)
+        nftBuf.writeUInt32LE(nftId)
+        const [wrapperPda] = PublicKey.findProgramAddressSync(
+            [WRAPPER_SEED, vaultBuf, nftBuf],
+            PROGRAM_ID
+        )
+        await program.methods
+            .wrapPosition({ vaultId, nftId })
+            .accounts({
+                authority: admin.publicKey,
+                store: storePda,
+                wrapper: wrapperPda,
+                systemProgram: SystemProgram.programId,
+            })
+            .rpc()
         try {
             await program.methods
                 .send({
@@ -267,12 +361,13 @@ describe('allowlist auth', function () {
                     authority: admin.publicKey,
                     peer: peerPda,
                     store: storePda,
+                    wrapper: wrapperPda,
                     endpoint: endpointSetting,
                 })
                 .rpc()
-            expect.fail('expected NoPositionSnapshot')
+            expect.fail('expected Unauthorized')
         } catch (err) {
-            assertLogsMatch(err, /NoPositionSnapshot|6006/)
+            assertLogsMatch(err, /Unauthorized|6004/)
         }
     })
 })

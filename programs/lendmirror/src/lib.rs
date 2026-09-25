@@ -32,6 +32,10 @@ const JUP_POSITION_SEED: &[u8] = b"JupPosition";
 const CCIP_SEED: &[u8] = b"LendMirrorCcip";
 /// Empty account that signs `ccip_send` and pays the SOL fee. It must hold no data.
 const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
+/// One PDA per Jupiter position. Seeds: this + vault_id le + nft_id le.
+const WRAPPER_SEED: &[u8] = b"LendMirrorWrapper";
+/// OnDemand strategy for one wrapper. Seeds: this + wrapper pubkey.
+const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///
@@ -77,24 +81,27 @@ pub mod lendmirror {
         SetSenders::apply(&mut ctx, &params)
     }
 
-    // How much SOL to attach to send(). Does not send. Quotes from store.last_position.
+    // How much SOL to attach to send(). Does not send. Quotes from wrapper.snapshot.
     pub fn quote_send(ctx: Context<QuoteSend>, params: QuoteSendParams) -> Result<MessagingFee> {
         QuoteSend::apply(&ctx, &params)
     }
 
-    // Encode store.last_position and CPI into the Solana Endpoint.
-    // Authority must be on the senders allowlist. DVNs still have to verify after.
+    // Encode wrapper.snapshot and CPI into the Solana Endpoint.
+    // Authority on senders allowlist; wrapper.lz_send_allowed must be true (then cleared).
     pub fn send(mut ctx: Context<Send>, params: SendMessageParams) -> Result<()> {
         Send::apply(&mut ctx, &params)
     }
 
     // Admin only. Router, destination chain, and Ethereum receiver for send_ccip.
-    pub fn set_ccip_route(mut ctx: Context<SetCcipRoute>, params: SetCcipRouteParams) -> Result<()> {
+    pub fn set_ccip_route(
+        mut ctx: Context<SetCcipRoute>,
+        params: SetCcipRouteParams,
+    ) -> Result<()> {
         SetCcipRoute::apply(&mut ctx, &params)
     }
 
-    // Encode the same snapshot body and CPI into the Chainlink CCIP router.
-    // Authority must be on the senders allowlist. The Store pays the SOL fee.
+    // Encode wrapper.snapshot body and CPI into the Chainlink CCIP router.
+    // Authority on senders allowlist; wrapper.ccip_send_allowed must be true (then cleared).
     pub fn send_ccip(mut ctx: Context<SendCcip>) -> Result<()> {
         SendCcip::apply(&mut ctx)
     }
@@ -108,5 +115,34 @@ pub mod lendmirror {
         params: GetJupiterPositionParams,
     ) -> Result<PositionSnapshot> {
         GetJupiterPosition::apply(&mut ctx, &params)
+    }
+
+    // Create a PositionWrapper PDA for (vault_id, nft_id).
+    // Authority must be on Store snapshotters; becomes wrapper.owner.
+    pub fn wrap_position(mut ctx: Context<WrapPosition>, params: WrapPositionParams) -> Result<()> {
+        WrapPosition::apply(&mut ctx, &params)
+    }
+
+    // Wrapper owner creates the OnDemand strategy PDA; callers starts as [owner].
+    pub fn attach_ondemand(mut ctx: Context<AttachOndemand>) -> Result<()> {
+        AttachOndemand::apply(&mut ctx)
+    }
+
+    // Wrapper owner replaces the OnDemand caller allowlist (max 8).
+    pub fn set_ondemand_callers(
+        mut ctx: Context<SetOndemandCallers>,
+        params: SetAllowlistParams,
+    ) -> Result<()> {
+        SetOndemandCallers::apply(&mut ctx, &params)
+    }
+
+    // Owner or Store snapshotter: read Jupiter into wrapper.snapshot; clear send flags.
+    pub fn refresh_wrapper(mut ctx: Context<RefreshWrapper>) -> Result<()> {
+        RefreshWrapper::apply(&mut ctx)
+    }
+
+    // OnDemand caller: require snapshot present; set both *_send_allowed true.
+    pub fn request_bridge_ondemand(mut ctx: Context<RequestBridgeOndemand>) -> Result<()> {
+        RequestBridgeOndemand::apply(&mut ctx)
     }
 }

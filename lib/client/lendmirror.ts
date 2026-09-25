@@ -243,6 +243,108 @@ export class LendMirror {
         return accounts.safeFetchStore({ rpc }, count, { commitment })
     }
 
+    async getWrapper(
+        rpc: RpcInterface,
+        vaultId: number,
+        nftId: number,
+        commitment: Commitment = 'confirmed'
+    ): Promise<accounts.PositionWrapper | null> {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        return accounts.safeFetchPositionWrapper({ rpc }, wrapper, { commitment })
+    }
+
+    wrapPosition(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {
+        return instructions.wrapPosition(
+            { identity: authority, programs: this.programRepo },
+            {
+                authority,
+                store: this.pda.oapp()[0],
+                wrapper: this.pda.wrapper(vaultId, nftId)[0],
+                vaultId,
+                nftId,
+            }
+        ).items[0]
+    }
+
+    attachOndemand(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        return instructions.attachOndemand(
+            { identity: authority, programs: this.programRepo },
+            {
+                authority,
+                wrapper,
+                ondemand: this.pda.ondemand(wrapper)[0],
+            }
+        ).items[0]
+    }
+
+    setOndemandCallers(authority: Signer, vaultId: number, nftId: number, keys: PublicKey[]): WrappedInstruction {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        return instructions.setOndemandCallers(
+            { identity: authority, programs: this.programRepo },
+            {
+                authority,
+                wrapper,
+                ondemand: this.pda.ondemand(wrapper)[0],
+                params: { keys },
+            }
+        ).items[0]
+    }
+
+    requestBridgeOndemand(authority: Signer, vaultId: number, nftId: number): WrappedInstruction {
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        return instructions.requestBridgeOndemand(
+            { identity: authority, programs: this.programRepo },
+            {
+                authority,
+                wrapper,
+                ondemand: this.pda.ondemand(wrapper)[0],
+            }
+        ).items[0]
+    }
+
+    async refreshWrapper(
+        rpc: RpcInterface,
+        authority: Signer,
+        vaultId: number,
+        nftId: number,
+        vaultsProgram: PublicKey
+    ): Promise<WrappedInstruction> {
+        const [store] = this.pda.oapp()
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
+        const [position] = jupiterPositionPda(vaultsProgram, vaultId, nftId)
+        const [vaultState] = jupiterVaultStatePda(vaultsProgram, vaultId)
+        const [vaultConfig] = jupiterVaultConfigPda(vaultsProgram, vaultId)
+        const positionAccount = await rpc.getAccount(position)
+        if (!positionAccount.exists) {
+            throw new Error(`No Jupiter position for vault ${vaultId} nft ${nftId} (${position})`)
+        }
+        const positionFields = decodeJupiterPositionFields(positionAccount.data)
+        const [tickPda] = jupiterTickPda(vaultsProgram, vaultId, positionFields.tick)
+        const { tickIdLiquidation, branches } = await collectLivePositionAccounts(
+            rpc,
+            vaultsProgram,
+            vaultId,
+            positionFields
+        )
+        return instructions
+            .refreshWrapper(
+                { identity: authority, programs: this.programRepo },
+                {
+                    authority,
+                    store,
+                    wrapper,
+                    vaultsProgram,
+                    position,
+                    vaultState,
+                    vaultConfig,
+                    tick: tickPda,
+                    tickIdLiquidation,
+                }
+            )
+            .addRemainingAccounts(branches.map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))).items[0]
+    }
+
     initStore(payer: Signer, admin: PublicKey, vaultsProgram: PublicKey): WrappedInstruction {
         const [oapp] = this.pda.oapp()
         const remainingAccounts = this.endpointSDK.getRegisterOappIxAccountMetaForCPI(payer.publicKey, oapp)
@@ -315,15 +417,18 @@ export class LendMirror {
         params: EndpointProgram.types.MessagingFee & {
             dstEid: number
             options: Uint8Array
+            vaultId: number
+            nftId: number
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<WrappedInstruction> {
-        const { dstEid, nativeFee, lzTokenFee, options } = params
+        const { dstEid, nativeFee, lzTokenFee, options, vaultId, nftId } = params
         const payer = authority.publicKey
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
         const receiverInfo = await accounts.fetchPeerConfig({ rpc }, peer, { commitment })
         const packetPath: SolanaPacketPath = {
             dstEid,
@@ -351,6 +456,7 @@ export class LendMirror {
                     authority,
                     store: oapp,
                     peer: peer,
+                    wrapper,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,
                     options,
@@ -429,14 +535,17 @@ export class LendMirror {
             dstEid: number
             options: Uint8Array
             payInLzToken: boolean
+            vaultId: number
+            nftId: number
         },
         remainingAccounts?: AccountMeta[],
         commitment: Commitment = 'confirmed'
     ): Promise<EndpointProgram.types.MessagingFee> {
-        const { dstEid, options, payInLzToken } = params
+        const { dstEid, options, payInLzToken, vaultId, nftId } = params
         const msgLibProgram = await this.getSendLibraryProgram(rpc, payer, dstEid)
         const [oapp] = this.pda.oapp()
         const [peer] = this.pda.peer(dstEid)
+        const [wrapper] = this.pda.wrapper(vaultId, nftId)
         const receiverInfo = await accounts.fetchPeerConfig({ rpc }, peer, { commitment })
         const packetPath: SolanaPacketPath = {
             dstEid,
@@ -459,6 +568,7 @@ export class LendMirror {
                 },
                 {
                     store: oapp,
+                    wrapper,
                     peer,
                     endpoint: this.endpointSDK.pda.setting()[0],
                     dstEid,

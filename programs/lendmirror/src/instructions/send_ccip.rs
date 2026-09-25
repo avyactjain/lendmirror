@@ -7,16 +7,16 @@ use anchor_lang::solana_program::{instruction::Instruction, program::invoke_sign
 pub const CCIP_SEND_DISCRIMINATOR: [u8; 8] = [108, 216, 134, 191, 249, 234, 33, 84];
 /// CCIP router rejects message data above this.
 pub const CCIP_DATA_LIMIT: usize = 256;
-/// Chainlink `GenericExtraArgsV2` tag. The fee program reads Borsh after it: `u128` gas, then one bool.
+/// Chainlink `GenericExtraArgsV2` tag. The fee program reads Borsh after it: `u128` gas, then one
+/// bool.
 const EXTRA_ARGS_V2_TAG: [u8; 4] = [0x18, 0x1d, 0xcf, 0x10];
 const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
-/// Accounts the CCIP router names on `ccip_send`, plus our Store and route.
+/// Accounts the CCIP router names on `ccip_send`, plus our Store, route, and wrapper.
 /// No tokens move. Fees are native SOL, paid from the empty CCIP payer account.
 #[derive(Accounts)]
 pub struct SendCcip<'info> {
-    /// Must be on `store.senders`.
     pub authority: Signer<'info>,
     #[account(
         seeds = [STORE_SEED],
@@ -24,6 +24,17 @@ pub struct SendCcip<'info> {
         constraint = store.is_sender(&authority.key()) @ LendMirrorError::Unauthorized
     )]
     pub store: Account<'info, Store>,
+    #[account(
+        mut,
+        seeds = [
+            WRAPPER_SEED,
+            &wrapper.vault_id.to_le_bytes(),
+            &wrapper.nft_id.to_le_bytes()
+        ],
+        bump = wrapper.bump,
+        constraint = wrapper.ccip_send_allowed @ LendMirrorError::Unauthorized
+    )]
+    pub wrapper: Account<'info, PositionWrapper>,
     /// CHECK: empty account. Signs the router call and pays the SOL fee. Must hold no data.
     #[account(mut, seeds = [CCIP_PAYER_SEED], bump)]
     pub ccip_payer: UncheckedAccount<'info>,
@@ -83,26 +94,45 @@ impl SendCcip<'_> {
             route.router,
             LendMirrorError::InvalidCcipAccount
         );
-        require_keys_eq!(ctx.accounts.fee_token_mint.key(), NATIVE_MINT, LendMirrorError::InvalidCcipAccount);
+        require_keys_eq!(
+            ctx.accounts.fee_token_mint.key(),
+            NATIVE_MINT,
+            LendMirrorError::InvalidCcipAccount
+        );
         require_keys_eq!(
             ctx.accounts.fee_token_user.key(),
             Pubkey::default(),
             LendMirrorError::InvalidCcipAccount
         );
-        require_keys_eq!(ctx.accounts.fee_quoter.key(), route.fee_quoter, LendMirrorError::InvalidCcipAccount);
-        require_keys_eq!(ctx.accounts.rmn_remote.key(), route.rmn_remote, LendMirrorError::InvalidCcipAccount);
+        require_keys_eq!(
+            ctx.accounts.fee_quoter.key(),
+            route.fee_quoter,
+            LendMirrorError::InvalidCcipAccount
+        );
+        require_keys_eq!(
+            ctx.accounts.rmn_remote.key(),
+            route.rmn_remote,
+            LendMirrorError::InvalidCcipAccount
+        );
         require!(ctx.accounts.ccip_payer.data_is_empty(), LendMirrorError::InvalidCcipAccount);
 
-        let snapshot = ctx
-            .accounts
-            .store
-            .last_position
-            .as_ref()
-            .ok_or(error!(LendMirrorError::NoPositionSnapshot))?;
-        let body = snapshot.encode_body();
+        let body = {
+            let snapshot = ctx
+                .accounts
+                .wrapper
+                .snapshot
+                .as_ref()
+                .ok_or(error!(LendMirrorError::NoPositionSnapshot))?;
+            snapshot.encode_body()
+        };
         require!(body.len() <= CCIP_DATA_LIMIT, LendMirrorError::InvalidCcipAccount);
 
-        let data = ccip_send_instruction_data(route.dest_chain_selector, &route.receiver, &body, route.gas_limit);
+        let data = ccip_send_instruction_data(
+            route.dest_chain_selector,
+            &route.receiver,
+            &body,
+            route.gas_limit,
+        );
         let payer_key = ctx.accounts.ccip_payer.key();
         let metas = vec![
             AccountMeta::new_readonly(ctx.accounts.config.key(), false),
@@ -154,6 +184,7 @@ impl SendCcip<'_> {
             &infos,
             &[seeds],
         )?;
+        ctx.accounts.wrapper.ccip_send_allowed = false;
         Ok(())
     }
 }

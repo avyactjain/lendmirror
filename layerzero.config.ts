@@ -3,16 +3,19 @@ import { ExecutorOptionType } from '@layerzerolabs/lz-v2-utilities'
 import { TwoWayConfig, generateConnectionsConfig } from '@layerzerolabs/metadata-tools'
 import { OAppEnforcedOption, OmniPointHardhat } from '@layerzerolabs/toolbox-hardhat'
 
+import { getProfile } from './lib/deployment'
 import { getSolanaOAppAddress } from './tasks/solana'
 
-const arbitrumContract: OmniPointHardhat = {
-    eid: EndpointId.ARBITRUM_V2_MAINNET, // 30110
+const profile = getProfile()
+
+const evmContract: OmniPointHardhat = {
+    eid: profile.evmEid as EndpointId,
     contractName: 'LendMirror',
 }
 
 const solanaContract: OmniPointHardhat = {
-    eid: EndpointId.SOLANA_V2_MAINNET, // 30168
-    address: getSolanaOAppAddress(EndpointId.SOLANA_V2_MAINNET),
+    eid: profile.solanaEid as EndpointId,
+    address: getSolanaOAppAddress(profile.solanaEid as EndpointId),
 }
 
 const EVM_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
@@ -33,7 +36,7 @@ const SOLANA_ENFORCED_OPTIONS: OAppEnforcedOption[] = [
 
 const pathways: TwoWayConfig[] = [
     [
-        arbitrumContract,
+        evmContract,
         solanaContract,
         [['LayerZero Labs'], []],
         [20, 32],
@@ -44,7 +47,7 @@ const pathways: TwoWayConfig[] = [
 export default async function () {
     const connections = await generateConnectionsConfig(pathways)
     return {
-        contracts: [{ contract: arbitrumContract }, { contract: solanaContract }],
+        contracts: [{ contract: evmContract }, { contract: solanaContract }],
         connections,
     }
 }
