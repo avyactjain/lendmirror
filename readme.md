@@ -116,7 +116,7 @@ Wormhole NTT is a reserved provider id with no instruction and no token that nee
 | LayerZero + Chainlink send in one instruction, once per refresh, newest wins on EVM | Built, Devnet |
 | Sync every wrapped position | Built |
 | NFT custody, access levels, Jupiter `operate` CPI | Built. On a local fork of Jupiter mainnet (`npm run test:fork`): NFT custody, level 1 deposit through the CPI, level 1 borrow denied. Level 2 borrow needs a live oracle, so it is exercised on Devnet. |
-| Token bridge: Circle CCTP v2 (USDC), Chainlink CCIP (PST, USDC), LayerZero OFT (USDT0, USDai, sUSDai) | Built, unit-tested; Devnet run pending |
+| Token bridge: Circle CCTP v2 (USDC), Chainlink CCIP (PST, USDC), LayerZero OFT (USDT0, USDai, sUSDai) | Built, unit-tested. Circle and Chainlink paths testable on Devnet. **LayerZero path not tested on any network**: no test token exists on Devnet, and the issuers' Solana program ids and escrows are still needed for mainnet. |
 | EVM treasury with owner-set strategies | Built, Foundry-tested; not deployed yet |
 | Mainnet (Arbitrum) upgrade | Pending: the Arbitrum contract still expects the old 200-byte snapshot |
 
