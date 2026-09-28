@@ -183,8 +183,12 @@ npx lm build -- --features no-log-ix-name
 # The program grew (token code): the on-chain account holds ~528 KB, the new binary is ~724 KB.
 # Extend once (upgrade authority signs), then deploy as usual.
 npx lm solana program extend GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 250000
-npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json target/deploy/lendmirror.so \
-  --use-rpc --max-sign-attempts 20 --with-compute-unit-price 50000
+# Devnet drops a few of the ~180 upload chunks per pass. Write to a buffer you own (rerun the
+# same command until "Buffer:" prints; it resumes), then deploy from that buffer.
+solana-keygen new --no-bip39-passphrase --silent -o deploy-buffer.json
+npx lm solana program write-buffer target/deploy/lendmirror.so --buffer deploy-buffer.json --use-rpc --max-sign-attempts 100 --with-compute-unit-price 500000
+npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json --buffer deploy-buffer.json target/deploy/lendmirror.so --use-rpc --max-sign-attempts 100 --with-compute-unit-price 500000
+npx lm solana program close --buffers      # reclaim SOL from any abandoned buffers
 npm run gen:api
 
 npx hardhat compile
