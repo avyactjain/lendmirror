@@ -12,14 +12,25 @@ Status legend: **built** = instruction exists and is unit-tested; **devnet** = e
 
 ## Tokens
 
-| Token | Solana mint | Rail to EVM | Destinations | Status | Notes |
+Token list confirmed on 2026-09-28: **USDC, USDT, USDai, sUSDai, PST**. Chainlink listing checked
+against the CCIP directory data (`smartcontractkit/documentation`, `ccip/v1_2_0/mainnet/tokens.json`
+and `lanes.json`), not against search summaries.
+
+| Token | Solana mint | Chainlink CCIP on Solana? | Rail to EVM | Destinations from Solana | Status |
 |---|---|---|---|---|---|
-| USDC | mainnet `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, devnet `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` | Circle CCTP v2 `deposit_for_burn` | Ethereum (domain 0), Avalanche 1, Optimism 2, Arbitrum 3, Base 6, Polygon 7 | **built** (`bridge_tokens_cctp`) | Native burn and mint, no wrapped asset. Standard finality is free; fast finality charges `max_fee`. The treasury claims when the route sets it as `destination_caller`. |
-| USDC (alt) | same | Chainlink CCIP token transfer | Ethereum, Arbitrum, Base, BNB, Optimism, Sonic (mainnet lanes) | **built** (`bridge_tokens_ccip`) | Uses Chainlink's USDC pool on mainnet. Devnet lanes carry test tokens (CCIP-BnM `7AC59PVvR64EoMnLX45FHnJAYzPsxdViyYBsaGEQPFvh`); use BnM for the Devnet experiment. Gas limit 0, out-of-order execution required. |
-| USDT | mainnet `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` | USDT0 (LayerZero OFT) lists Solana since 2026 | Ethereum, Arbitrum, Optimism, Base, BNB, Avalanche, Polygon, Tron, ... | **matrix** (`PROVIDER_LZ_OFT` reserved) | Verify whether native Tether USDT on Solana is the OFT's mint or whether USDT0 has its own Solana mint. Fallbacks: Wormhole Portal, Allbridge (wrapped). |
-| USDA | unknown on Solana | If Angle USDA or Avalon USDa: LayerZero OFT on EVM | "Arbitrum only" per the meeting | **unknown** | No Solana deployment found. Need the mint and issuer from the team. |
-| sDAI | none found on Solana | Sky ships USDS and sUSDS on Solana via Wormhole NTT, not sDAI | Ethereum | **unknown** | Possibly sUSDS was meant. Need the mint from the team. |
-| PST | unknown | unknown | "Polygon only" per the meeting | **unknown** | CCIP lists no Solana → Polygon lane; CCTP does have a Polygon domain (7). Need the mint and issuer. |
+| USDC | mainnet `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, devnet `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` | **Yes** (pool type `usdc`, which is Chainlink's CCTP-backed pool) | Circle CCTP v2 directly, or CCIP | CCTP: Ethereum, Arbitrum, Base, Optimism, Avalanche, Polygon and more. CCIP lanes: Ethereum, Arbitrum, Base, Optimism, Unichain, Avalanche, Polygon | **built** both ways (`bridge_tokens_cctp`, `bridge_tokens_ccip`) |
+| USDT | mainnet `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` | **No.** CCIP lists USDT on Ethereum, Base, Optimism, Sonic and a few others, but has no Solana entry | USDT0 (LayerZero OFT) | per USDT0's Solana pathways (verify) | **matrix**: needs `bridge_tokens_oft` (provider 3) |
+| USDai | `USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A` (LayerZero OFT spoke) | **No** (not in the directory) | LayerZero OFT. Hub: Arbitrum. Spokes: Ethereum, Base, Plasma, Solana | Arbitrum hub, and whichever spoke pathways USD.AI enabled (the meeting note "only Arbitrum" matches the hub) | **matrix**: needs `bridge_tokens_oft` |
+| sUSDai | `sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE` (LayerZero OFT spoke) | **No** | LayerZero OFT, same layout as USDai | same as USDai | **matrix**: needs `bridge_tokens_oft` |
+| PST (PayFi Strategy Token) | `59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw` (6 decimals, `lockRelease` pool) | **Yes** | CCIP | Ethereum mainnet and Arc mainnet. The directory shows **no Polygon lane for PST**; the meeting note said "PST only to Polygon", so confirm the intended destination | **built** (`bridge_tokens_ccip`, `--provider ccip`) |
+
+Devnet: CCIP-BnM `3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6` is the only burn-mint test token with a Solana Devnet lane; USDC also has a Devnet `usdc` pool.
+
+Summary: two of the five tokens can go over Chainlink from Solana (USDC, PST). The other three (USDT as USDT0, USDai, sUSDai) are LayerZero OFTs, so the next build item is one more provider instruction, `bridge_tokens_oft`, reusing `BridgeCommon` exactly like the CCTP and CCIP ones.
+
+## Circle CCTP or Chainlink for USDC?
+
+Chainlink's Solana USDC pool is itself built on Circle CCTP (pool type `usdc`), so going through CCIP means CCTP plus Chainlink's routing, fee, and risk management on top. Using CCTP directly means fewer parties, no LINK/SOL CCIP fee, and Circle's own attestation, at the cost of claiming on the EVM side ourselves (`claimCctp`) unless the route leaves `destination_caller` empty. Both are built; the route's `provider` field picks one per token. Recommendation: CCTP directly for USDC (it is the canonical rail and the cheapest), CCIP for PST (its only rail), OFT for the rest. Either way Circle can freeze USDC at the mint; that is true of USDC on any bridge.
 
 ## Providers
 
