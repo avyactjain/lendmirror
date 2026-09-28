@@ -9,10 +9,13 @@
  *
  * Read-only against mainnet (cloning reads accounts). Nothing is sent to mainnet.
  *
- * Known limit: the fork starts at slot 0 (agave 2.1's --warp-slot never opens the RPC), so
- * Jupiter's oracle, which compares the clock slot with the slot in the cloned price accounts,
- * rejects operations that need a price (borrow). Deposits do not need one. The borrow step
- * therefore skips itself with a note; it is exercised on Devnet instead.
+ * The fork starts at mainnet's current slot (`--warp-slot`). Jupiter's oracle compares the
+ * clock slot with the slot stored in the cloned price accounts, so a chain that starts at slot
+ * 0 rejects every operation that needs a price (borrow). Agave 2.1's test validator never
+ * opens its RPC after a warp; Agave 4.2 does. Point SOLANA_TEST_VALIDATOR at a 4.2+ binary
+ * (download solana-release-aarch64-apple-darwin.tar.bz2 from github.com/anza-xyz/agave/releases)
+ * to run the borrow step; with the 2.1 binary the runner skips the warp and the borrow step
+ * skips itself with a note.
  *
  *   npm run test:fork            (needs `npx lm build` first; uses ~/.config/solana/id.json)
  */
@@ -32,6 +35,18 @@ const RPC = process.env.RPC_URL_SOLANA_MAINNET || 'https://api.mainnet-beta.sola
 const WALLET = process.env.ANCHOR_WALLET || path.join(os.homedir(), '.config/solana/id.json')
 const LEDGER = path.join(os.tmpdir(), 'lendmirror-fork-ledger')
 
+/** A 4.2+ test validator warps; the 2.1 one hangs after a warp, so it runs unwarped. */
+const VALIDATOR = process.env.SOLANA_TEST_VALIDATOR || 'solana-test-validator'
+const validatorVersion = spawnSync(VALIDATOR, ['--version'], { encoding: 'utf8' }).stdout.trim()
+const canWarp = /^solana-test-validator ([4-9]|[1-9]\d)\./.test(validatorVersion)
+
+function mainnetSlot() {
+    const out = spawnSync('solana', ['slot', '-u', RPC], { encoding: 'utf8' })
+    const slot = out.stdout.trim()
+    if (out.status !== 0 || !/^\d+$/.test(slot)) throw new Error(`cannot read mainnet slot: ${out.stderr}`)
+    return slot
+}
+
 const so = path.join(__dirname, '../../target/deploy/lendmirror.so')
 if (!existsSync(so)) throw new Error(`Missing ${so}. Run: npx lm build -- --features no-log-ix-name`)
 const walletPubkey = spawnSync('solana-keygen', ['pubkey', WALLET], { encoding: 'utf8' }).stdout.trim()
@@ -47,14 +62,15 @@ const args = [
     '--quiet',
     '--ledger', LEDGER,
     '--url', RPC,
+    ...(canWarp ? ['--warp-slot', mainnetSlot()] : []),
     '--upgradeable-program', PROGRAM_ID, so, walletPubkey,
     '--clone-upgradeable-program', LZ_ENDPOINT,
     '--clone', LZ_ENDPOINT_SETTINGS,
     '--clone-upgradeable-program', MPL_TOKEN_METADATA,
     ...cloneFlags,
 ]
-console.log(`starting solana-test-validator with ${cloneFlags.length / 2} cloned Jupiter entries`)
-const validator = spawn('solana-test-validator', args, { stdio: ['ignore', 'inherit', 'inherit'] })
+console.log(`starting ${validatorVersion} with ${cloneFlags.length / 2} cloned Jupiter entries${canWarp ? ', warped to mainnet slot' : ' (no warp: borrow step will skip)'}`)
+const validator = spawn(VALIDATOR, args, { stdio: ['ignore', 'inherit', 'inherit'] })
 let validatorExit = null
 validator.on('exit', (code) => {
     validatorExit = code

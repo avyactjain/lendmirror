@@ -198,7 +198,11 @@ describe('custody on a Jupiter mainnet fork', function () {
     })
 
     it('refresh_wrapper reads the position back into the wrapper', async () => {
-        await waitVisible(toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0]))
+        const position = toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0])
+        await waitVisible(position)
+        // The refresh derives Jupiter's tick account from the position's current tick. umi's
+        // view can trail the borrow by seconds; wait until it matches the confirmed web3 view.
+        await waitPositionSynced(position)
         const store = await instance.getStore(umi.rpc)
         await send(await instance.refreshWrapper(umi.rpc, signer, VAULT_ID, nftId, store!.vaultsProgram))
         const wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
@@ -224,6 +228,19 @@ describe('custody on a Jupiter mainnet fork', function () {
         }
         const viaWeb3 = await connection.getAccountInfo(key, 'confirmed')
         throw new Error(`umi never saw ${key.toBase58()} (web3 sees it: ${viaWeb3 !== null})`)
+    }
+
+    async function waitPositionSynced(position: PublicKey): Promise<void> {
+        const latest = decodeJupiterPositionFields((await connection.getAccountInfo(position, 'confirmed'))!.data)
+        for (let i = 0; i < 40; i++) {
+            const viaUmi = await umi.rpc.getAccount(fromWeb3JsPublicKey(position))
+            if (viaUmi.exists) {
+                const seen = decodeJupiterPositionFields(viaUmi.data)
+                if (seen.tick === latest.tick && seen.supplyAmount === latest.supplyAmount) return
+            }
+            await new Promise((r) => setTimeout(r, 500))
+        }
+        throw new Error('umi never caught up with the position after the borrow')
     }
 
     /** Build and send one operate_position with Jupiter's setup instructions and lookup tables. */

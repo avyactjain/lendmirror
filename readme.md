@@ -161,7 +161,7 @@ Why one transaction needs a lookup table: the send names 27 accounts plus LayerZ
 4. **Borrow.** Admin sets level 2; `operate_position { new_col: 0, new_debt: +5_000_000 }` borrows 5 USDC into the authority's USDC account.
 5. **Refresh** to see the new numbers in the snapshot.
 
-Verified on a local fork of Jupiter mainnet (`npm run test:fork`): create position, custody, level 1 deposit through the CPI, level 1 borrow denied with `LevelDenied`, refresh shows the collateral. The level 2 borrow needs a live price oracle, which the fork cannot provide (it runs at slot 0 and Jupiter's oracle rejects that clock), so that step is left for Devnet. Jupiter Devnet currently does not let this wallet create positions, so it has not been run there yet.
+Verified on a local fork of Jupiter mainnet (`npm run test:fork` with an Agave 4.2+ validator, see Tests): create position, custody, level 1 deposit through the CPI, level 1 borrow denied with `LevelDenied`, level 2 borrow with the USDC landing in the wrapper authority's account, refresh shows the collateral. Jupiter Devnet is an old build the Jupiter SDK cannot decode, so nothing runs there; the first live borrow is a small mainnet position after the mainnet upgrade.
 
 `release_position_nft` (admin) moves the NFT back to the wrapper owner's associated token account; no other destination is possible.
 
@@ -222,7 +222,7 @@ Not enforced, on purpose: wrapping does not verify the Jupiter position exists (
 | Live Jupiter read (ticks, liquidation branches)                                | Built; `crates/jup-tick-parity` and `npm run test:jup-live` compare against Jupiter's SDK                                                 |
 | Snapshot send over LayerZero + Chainlink, once per refresh, newest wins on EVM | **Verified Devnet → Sepolia 2026-09-28**                                                                                                  |
 | Sync every wrapped position                                                    | **Run on Devnet 2026-09-28**                                                                                                              |
-| NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, and the level gate proven on a Jupiter mainnet fork. Level 2 borrow needs a live oracle: Devnet's Jupiter is an old build the SDK cannot decode (checked 2026-09-28), so this runs on mainnet with a dust position after the mainnet upgrade |
+| NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, the level gate, and the level 2 borrow proven on a warped Jupiter mainnet fork. Devnet's Jupiter is an old build the SDK cannot decode (checked 2026-09-28), so the first live borrow is a small mainnet position after the mainnet upgrade |
 | Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury                                                                 |
 | Token bridge, Chainlink CCIP (PST, USDC)                                       | Built, unit-tested; Devnet run pending (CCIP-BnM)                                                                                         |
 | Token bridge, LayerZero OFT (USDT0, USDai, sUSDai)                             | Built, unit-tested; **not tested on any network**                                                                                         |
@@ -313,12 +313,14 @@ npx hardhat compile                           # EVM
 cargo test -p lendmirror                                   # 37 unit tests: codecs, level policy, send guard, CCTP/CCIP/OFT bytes
 forge test                                                 # 21: LendMirror, treasury, codec
 RPC_URL_SOLANA_MAINNET= anchor test --skip-build           # 23: local validator with the LayerZero endpoint cloned from Devnet
-npm run test:fork                                          # local fork of Jupiter Lend mainnet: custody, level 1 deposit, level gate
+SOLANA_TEST_VALIDATOR=/path/to/solana-release/bin/solana-test-validator npm run test:fork   # fork of Jupiter mainnet: custody, deposit, gate, borrow
 cd crates/jup-tick-parity && cargo test                    # tick math vs Jupiter's Rust SDK
 npm run test:jup-live                                      # live read vs Jupiter's read SDK (needs RPC_URL_SOLANA_MAINNET)
 ```
 
 `anchor test` loads the program as upgradeable with the test wallet as authority (`Anchor.toml [[test.genesis]]`), which `init_store` requires. `test:fork` clones Jupiter's programs and one vault's accounts at genesis (read-only); regenerate the clone list with `tests/fork/dump-accounts.ts`.
+
+The fork must start at mainnet's slot or Jupiter's oracle rejects every borrow (it compares the clock slot with the slot stored in the cloned price accounts). The Agave 2.1 validator that ships with the pinned CLI hangs after `--warp-slot`; Agave 4.2 does not. Download `solana-release-aarch64-apple-darwin.tar.bz2` (Apple silicon) from github.com/anza-xyz/agave/releases, unpack it anywhere, and pass its `bin/solana-test-validator` in `SOLANA_TEST_VALIDATOR`. Without it the runner uses the 2.1 binary unwarped and the borrow step skips itself with a note.
 
 ### Deploy or upgrade Devnet
 
@@ -418,5 +420,5 @@ Both sides were read end to end for this readme. What was found, what was fixed 
 | `LendMirror.sol` | Single-step ownership; `lzReceive` is `payable` (LayerZero standard). The decoder accepts any payload of the right length without a version byte. |
 | `LendMirrorTreasury.ccipReceive` | Chainlink does not call the receiver when the route's `gasLimit` is 0; the treasury still receives the tokens, it just does not log the delivery. |
 | `deployments/sepolia/LendMirror_Implementation.json` | Still records the previous implementation. The proxy points at the current one (section 7); the record is informational. |
-| Level 2 borrow on a public network | Not yet run: the fork has no live oracle, and Jupiter Devnet does not let this wallet open a position. |
+| Level 2 borrow on a public network | Proven on the warped fork only. Devnet's Jupiter is an old build the SDK cannot decode; the first live borrow is a small mainnet position after the mainnet upgrade. |
 | LayerZero OFT token path | Not yet run on a public network: no OFT test token on Devnet. |

@@ -107,9 +107,10 @@ npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29             
 
 `--col min` or `--debt min` means "all" (withdraw everything / pay back everything).
 
-Tested on a local copy of Jupiter mainnet (`npm run test:fork`): the NFT goes into custody, a
-level 1 deposit goes through, a level 1 borrow is denied. The level 2 borrow needs a live price
-oracle, which the local copy cannot provide, so that one is checked on Devnet.
+Tested on a local copy of Jupiter mainnet (`npm run test:fork`, started at mainnet's slot so
+Jupiter's price oracle accepts the clock): the NFT goes into custody, a level 1 deposit goes
+through, a level 1 borrow is denied, a level 2 borrow succeeds and the USDC lands in the
+wrapper authority's account.
 
 ---
 
@@ -189,7 +190,7 @@ npm run test:fork                                                      # Node 18
 
 ## 8. Not done yet
 
-- Level 2 borrow (withdraw and borrow through `operate_position`) has not run on a live network. Devnet's Jupiter program is an old build (half the size of mainnet's, deployed 53M slots earlier) that the Jupiter SDK cannot decode, so the first live borrow is a small mainnet position after the mainnet upgrade. Tasks `jupiter-init-position` and `fund-authority-wsol` are ready for that.
+- Level 2 borrow has run only on the local fork of Jupiter mainnet (started at mainnet's slot so Jupiter's oracle accepts the clock; see the readme's Tests section), not on a live network. Devnet's Jupiter program is an old build the Jupiter SDK cannot decode, so the first live borrow is a small mainnet position after the mainnet upgrade. Tasks `jupiter-init-position` and `fund-authority-wsol` are ready for that.
 
 - Nothing has been run on Devnet or mainnet. The readme's "Upgrade Devnet to this version" block is the next step.
 - The Arbitrum (mainnet) contract is still the old format and would reject today's snapshot; it needs a redeploy and `upgradeToAndCall`.
