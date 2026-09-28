@@ -136,43 +136,61 @@ npx hardhat lz:oapp:evm:set-ccip-route
 
 Allows the Sepolia CCIP router and the empty Solana payer (`53Zqmx…`) to call `ccipReceive`.
 
-### 9. Snapshot a Jupiter position
+### 9. Regenerate the TypeScript client
 
 ```bash
-npx hardhat lz:oapp:solana:get-jupiter-position --vault-id 1 --nft-id 29
+npm run gen:api
 ```
 
-Reads the position on-chain and writes `Store.last_position`.
+Reads `target/idl/lendmirror.json` and rewrites `lib/client/generated`. Run it after every program build so the hardhat tasks use the new instruction and account layouts.
 
-### 10. Send on LayerZero
+### 10. Deploy the token treasury on Sepolia
 
 ```bash
-npx hardhat lz:oapp:solana:send-jupiter
+npx hardhat deploy --tags LendMirrorTreasury
 ```
 
-Sends the 257-byte LayerZero frame (length + 225-byte body). Caller pays the LayerZero fee; Store is the recorded sender.
-
-### 11. Send on Chainlink
+UUPS proxy. Copy the printed proxy address into `config/devnet.ts` as `treasury`. Then:
 
 ```bash
-npx hardhat lz:oapp:solana:send-ccip
+npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter
+npx hardhat lz:oapp:evm:treasury:set-ccip-route
+npx hardhat lz:oapp:evm:treasury:set-strategy --token <USDC on Sepolia> --strategy <address>
 ```
 
-Sends the 225-byte body on CCIP. Funds the empty payer, which signs and pays the SOL fee.
-
-### 12. Read Sepolia
+### 11. Wrap and mirror a position
 
 ```bash
-npx hardhat lz:oapp:evm:debug
-```
-
-Prints `lastPosition` from the proxy (LayerZero path).
-
-```bash
+npx hardhat lz:oapp:solana:wrap-position --vault-id 1 --nft-id 29
+npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29
+npx hardhat lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz --vault-id 1 --nft-id 29
 npx hardhat lz:oapp:evm:match --position <POSITION>
 ```
 
-Prints LayerZero vs Chainlink copies and whether `matched` is true. Use the position pubkey printed by step 9.
+The wrapper seed is `LendMirrorWrapperV1`; wrappers created by the previous version are ignored. A second send of the same snapshot fails with `SnapshotAlreadySent` until the next refresh. `sync-all-positions` does refresh + send for every wrapper.
+
+### 12. Custody, levels, operate
+
+```bash
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 1 --nft-id 29
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
+npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col <base units> --debt 0
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 2
+npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 0 --debt <base units>
+```
+
+Collateral must already sit in the wrapper authority's token account (the task prints it). The task tops the authority PDA up to 0.05 SOL because the Jupiter SDK simulates with that PDA as fee payer.
+
+### 13. Bridge tokens
+
+```bash
+npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint usdc --amount 1000000
+npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>
+npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
+```
+
+The route names the treasury as `destination_caller`, so Circle does not auto-deliver; `claim-cctp` fetches the attestation from Circle's sandbox API and calls `receiveMessage` through the treasury.
 
 ## First-time deploy (empty program / no Store)
 
@@ -188,7 +206,7 @@ npx hardhat lz:oapp:solana:set-peer
 npx hardhat lz:oapp:evm:set-peer
 ```
 
-Then continue from step 7 above for Chainlink (Devnet only), then snapshot and send.
+Then continue from step 7 above for Chainlink (Devnet only), then steps 9 to 13.
 
 | Command | One line |
 |---------|----------|
@@ -200,7 +218,7 @@ Then continue from step 7 above for Chainlink (Devnet only), then snapshot and s
 
 ## Mainnet
 
-Set `DEPLOYMENT_TYPE=mainnet` and fill the `*_MAINNET` keys. Same commands. Chainlink tasks stop: mainnet has no CCIP route in the profile yet.
+Set `DEPLOYMENT_TYPE=mainnet` and fill the `*_MAINNET` keys. Same commands. The Arbitrum `LendMirror` implementation is still the old 200-byte-snapshot build: redeploy it (constructor arg `0x1a44076050125825900e736c501f859c50fE728c`) and `upgradeToAndCall` before any mainnet send. Chainlink, CCTP, and the treasury are not in the mainnet profile yet.
 
 ## Do not
 
