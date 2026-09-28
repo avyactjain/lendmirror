@@ -11,7 +11,7 @@ const profile: DeploymentProfile = {
     programId: 'GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1',
     store: 'BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM',
     evmProxy: '0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514',
-    evmImplementation: '0xC722956634AC775A05F78B50BC840d27614916fd',
+    evmImplementation: '0x0011b8DE09Cee9d0eba8afaa26643623e511D93F',
     lzEndpoint: '0x6EDCE65403992e310A62460808c4b910D972f10f',
     ccip: {
         router: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
@@ -34,7 +34,7 @@ const profile: DeploymentProfile = {
         evmMessageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
         attestationApi: 'https://iris-api-sandbox.circle.com',
     },
-    treasury: '',
+    treasury: '0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C',
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_DEVNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_DEVNET',

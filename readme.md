@@ -154,8 +154,8 @@ set -a && source .env && set +a
 | Solana CCIP payer / bridge signer | `53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m` |
 | Solana admin, snapshotter, sender | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo` |
 | Sepolia LendMirror (proxy) | `0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514` |
-| Sepolia implementation | `0xC722956634AC775A05F78B50BC840d27614916fd` (must be redeployed for this version) |
-| Sepolia LendMirrorTreasury | not deployed yet |
+| Sepolia implementation | `0x0011b8DE09Cee9d0eba8afaa26643623e511D93F` (this version; upgraded 2026-09-28) |
+| Sepolia LendMirrorTreasury (proxy) | `0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C` (implementation `0x948297b2DD73D7Fd6D17E8c966705e2f9981F1D6`) |
 | Sepolia owner | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` |
 | Devnet USDC (CCTP) | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
 | Chainlink | Wired for snapshots. Devnet token lanes carry CCIP-BnM `7AC59PVvR64EoMnLX45FHnJAYzPsxdViyYBsaGEQPFvh` |
