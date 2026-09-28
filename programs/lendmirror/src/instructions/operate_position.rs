@@ -11,6 +11,9 @@
 //!     associated token account. Withdrawn collateral and borrowed tokens can only land there.
 //!   - `level_allows(wrapper.level, new_col, new_debt)` must hold. Level 1 can only lower risk.
 //!
+//! Who may call: the wrapper owner or an OnDemand caller of that wrapper. Snapshotters only read
+//! and senders only send; neither may move a position.
+//!
 //! Typical call: hardhat `lz:oapp:solana:operate-position --col 1000000 --debt 0` → the client
 //! asks the Jupiter SDK for the account list with the authority PDA as signer → this instruction.
 //!
@@ -48,7 +51,6 @@ pub struct OperatePosition<'info> {
         bump = wrapper.bump,
         constraint = (
             wrapper.is_owner(&authority.key())
-            || store.is_snapshotter(&authority.key())
             || ondemand.as_ref().is_some_and(|list| list.is_caller(&authority.key()))
         ) @ LendMirrorError::Unauthorized,
         constraint = wrapper.custody @ LendMirrorError::NoCustody,
@@ -181,7 +183,9 @@ pub struct OperatePositionParams {
     /// Debt change in borrow-token base units. Positive borrows, negative pays back,
     /// `i128::MIN` pays back everything.
     pub new_debt: i128,
-    /// Jupiter `TransferType`: `None` or `Some(1)` for a normal transfer, `Some(2)` for claim.
+    /// Jupiter `TransferType`. Only `None` or `Some(1)` (direct transfer) are accepted. `Some(2)`
+    /// (claim) would park withdrawn tokens in a Liquidity "claim" account that nothing here can
+    /// spend, so it is rejected (`LevelDenied`).
     pub transfer_type: Option<u8>,
     /// Jupiter's `remaining_accounts_indices`: how many oracle sources, branches, and tick
     /// debt arrays follow in `remaining_accounts`. The Jupiter SDK computes this.
@@ -195,6 +199,13 @@ impl<'info> OperatePosition<'info> {
         ctx: &mut Context<'_, '_, '_, 'info, OperatePosition<'info>>,
         params: &OperatePositionParams,
     ) -> Result<()> {
+        // Fund safety: every token Jupiter pays out must land in the authority's ATAs, which only
+        // holds for a direct transfer. Claim-type transfers and claim accounts are refused.
+        require!(matches!(params.transfer_type, None | Some(1)), LendMirrorError::LevelDenied);
+        require!(
+            ctx.accounts.supply_token_claim_account.is_none() && ctx.accounts.borrow_token_claim_account.is_none(),
+            LendMirrorError::InvalidTokenAccount
+        );
         check_token_accounts(ctx)?;
         let a = &ctx.accounts;
         let wrapper_key = a.wrapper.key();

@@ -53,7 +53,7 @@ task('lz:oapp:solana:sync-all-positions', 'Refresh and send every PositionWrappe
             return
         }
 
-        const options = Options.newOptions().addExecutorLzReceiveOption(400000, 0).toBytes()
+        const options = Options.newOptions().addExecutorLzReceiveOption(600000, 0).toBytes()
         for (const before of wrappers) {
             const { vaultId, nftId } = before
             const label = `vault ${vaultId} nft ${nftId}`
@@ -134,5 +134,8 @@ function changed(before: Wrapper, after: Wrapper): boolean {
     const a = unwrapOption(before.snapshot)
     const b = unwrapOption(after.snapshot)
     if (!a || !b) return true
+    // The previous snapshot was refreshed but never sent (its time is newer than the last send):
+    // send now even if the numbers did not move. The program's own guard is the final word.
+    if (a.snapshotTime > after.lastSentSnapshotTime) return true
     return a.colRaw !== b.colRaw || a.debtRaw !== b.debtRaw || a.tick !== b.tick || a.isLiquidated !== b.isLiquidated
 }

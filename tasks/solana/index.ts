@@ -119,17 +119,10 @@ export const saveSolanaDeployment = (eid: EndpointId, programId: string, oapp: s
     if (!existsSync(outputDir)) {
         mkdirSync(outputDir, { recursive: true })
     }
-    writeFileSync(
-        `${outputDir}/OApp.json`,
-        JSON.stringify(
-            {
-                programId,
-                oapp,
-            },
-            null,
-            4
-        )
-    )
+    // Merge so fields other tasks wrote (lookupTable) survive a re-run of create.
+    const file = `${outputDir}/OApp.json`
+    const previous = existsSync(file) ? JSON.parse(readFileSync(file, 'utf-8')) : {}
+    writeFileSync(file, JSON.stringify({ ...previous, programId, oapp }, null, 4))
     console.log(`Accounts have been saved to ${outputDir}/OApp.json`)
 }
 

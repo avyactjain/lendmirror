@@ -22,10 +22,11 @@ pub struct Store {
     pub endpoint_program: Pubkey,
     /// Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet).
     pub vaults_program: Pubkey,
-    /// Wallets allowed to call `get_jupiter_position`. Admin updates only.
+    /// Wallets allowed to read: `get_jupiter_position`, `wrap_position` (they become that
+    /// wrapper's owner), `refresh_wrapper`. Admin updates only.
     pub snapshotters: [Pubkey; ALLOWLIST_LEN],
     pub snapshotter_count: u8,
-    /// Wallets allowed to send any wrapper's snapshot. Admin updates only.
+    /// Operators: may send any wrapper's snapshot and bridge from any wrapper. Admin updates only.
     pub senders: [Pubkey; ALLOWLIST_LEN],
     pub sender_count: u8,
     pub last_position: Option<PositionSnapshot>,

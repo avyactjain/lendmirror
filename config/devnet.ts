@@ -21,7 +21,7 @@ const profile: DeploymentProfile = {
         destChainSelector: 16015286601757825753n,
         sourceChainSelector: 16423721717087811551n,
         evmRouter: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
-        gasLimit: 400_000,
+        gasLimit: 600_000,
         payer: '53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m',
     },
     cctp: {

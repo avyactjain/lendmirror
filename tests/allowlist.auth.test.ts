@@ -444,16 +444,18 @@ describe('allowlist auth', function () {
         }
     })
 
-    it('set_bridge_route: admin only, known provider, non-zero receiver', async () => {
+    it('set_bridge_route: admin only, known provider, EVM-shaped receiver', async () => {
         const mint = Keypair.generate().publicKey
         const [route] = bridgeRouteAddress(mint, 11155111n)
+        // An EVM address is 20 bytes, left-padded with 12 zero bytes.
+        const evmReceiver = [...Array(12).fill(0), ...Array(20).fill(1)]
         const params = {
             mint,
             dstChainId: new BN(11155111),
             provider: 1,
             providerProgram: SystemProgram.programId,
             providerAux: PublicKey.default,
-            receiver: Array(32).fill(1),
+            receiver: evmReceiver,
             destinationCaller: Array(32).fill(0),
             domainOrSelector: new BN(0),
             gasLimit: new BN(0),
@@ -488,6 +490,27 @@ describe('allowlist auth', function () {
         } catch (err) {
             assertLogsMatch(err, /InvalidBridgeAccount|6022/)
         }
+        // A receiver whose first 12 bytes are not zero is not an EVM address: CCIP would read
+        // a different address than CCTP or OFT would.
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, receiver: Array(32).fill(1) })
+                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .rpc()
+            expect.fail('expected InvalidBridgeAccount: unpadded receiver')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidBridgeAccount|6022/)
+        }
+        // A CCTP domain must fit a u32.
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, domainOrSelector: new BN('4294967296') })
+                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .rpc()
+            expect.fail('expected InvalidBridgeAccount: domain does not fit u32')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidBridgeAccount|6022/)
+        }
         await program.methods
             .setBridgeRoute(params)
             .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
@@ -495,7 +518,7 @@ describe('allowlist auth', function () {
         const stored = await program.account.bridgeRoute.fetch(route)
         expect(stored.provider).to.equal(1)
         expect(stored.enabled).to.equal(true)
-        expect(Buffer.from(stored.receiver).toString('hex')).to.equal('01'.repeat(32))
+        expect(Buffer.from(stored.receiver).toString('hex')).to.equal('00'.repeat(12) + '01'.repeat(20))
 
         // A LayerZero route must carry the OFT escrow; a Circle route must not.
         const escrow = Keypair.generate().publicKey
@@ -538,7 +561,7 @@ describe('allowlist auth', function () {
                 provider: 1,
                 providerProgram: CCTP_TOKEN_MESSENGER_MINTER,
                 providerAux: PublicKey.default,
-                receiver: Array(32).fill(1),
+                receiver: [...Array(12).fill(0), ...Array(20).fill(1)],
                 destinationCaller: Array(32).fill(0),
                 domainOrSelector: new BN(0),
                 gasLimit: new BN(0),

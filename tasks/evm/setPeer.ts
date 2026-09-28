@@ -49,10 +49,7 @@ task('lz:oapp:evm:set-peer', 'Owner: set Solana Store as peer on the EVM LendMir
             console.log(`setPeer eid ${srcEid} -> Store ${oapp}`)
 
             if (owner === '0x0000000000000000000000000000000000000000') {
-                console.log('owner is unset; calling initialize(signer)')
-                const initTx = await oappContract.initialize(signer.address)
-                await initTx.wait()
-                console.log('initialized')
+                throw new Error('Proxy has no owner: it was deployed without initialize(). Fix the deployment, do not initialize from here.')
             } else if (owner.toLowerCase() !== signer.address.toLowerCase()) {
                 throw new Error(`Signer is not owner. Use EVM_PRIVATE_KEY for the active DEPLOYMENT_TYPE. owner=${owner}`)
             }

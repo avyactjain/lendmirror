@@ -74,7 +74,11 @@ export type OperatePositionInstructionData = {
      * `i128::MIN` pays back everything.
      */
     newDebt: bigint
-    /** Jupiter `TransferType`: `None` or `Some(1)` for a normal transfer, `Some(2)` for claim. */
+    /**
+     * Jupiter `TransferType`. Only `None` or `Some(1)` (direct transfer) are accepted. `Some(2)`
+     * (claim) would park withdrawn tokens in a Liquidity "claim" account that nothing here can
+     * spend, so it is rejected (`LevelDenied`).
+     */
     transferType: Option<number>
     /**
      * Jupiter's `remaining_accounts_indices`: how many oracle sources, branches, and tick
@@ -94,7 +98,11 @@ export type OperatePositionInstructionDataArgs = {
      * `i128::MIN` pays back everything.
      */
     newDebt: number | bigint
-    /** Jupiter `TransferType`: `None` or `Some(1)` for a normal transfer, `Some(2)` for claim. */
+    /**
+     * Jupiter `TransferType`. Only `None` or `Some(1)` (direct transfer) are accepted. `Some(2)`
+     * (claim) would park withdrawn tokens in a Liquidity "claim" account that nothing here can
+     * spend, so it is rejected (`LevelDenied`).
+     */
     transferType: OptionOrNullable<number>
     /**
      * Jupiter's `remaining_accounts_indices`: how many oracle sources, branches, and tick

@@ -197,7 +197,7 @@ export function ccipTokenRemainingAccounts(args: {
     return [
         meta(userTokenAccount, true),
         meta(pda(feeQuoter, [Buffer.from('per_chain_per_token_config'), selector, mintKey.toBuffer()]), false),
-        meta(pda(feeQuoter, [Buffer.from('ccip_tokenpool_chainconfig'), selector, mintKey.toBuffer()]), false),
+        meta(pda(pool, [Buffer.from('ccip_tokenpool_chainconfig'), selector, mintKey.toBuffer()]), false), // under the POOL program
         meta(new PublicKey(args.lookupTable), false),
         meta(pda(router, [Buffer.from('token_admin_registry'), mintKey.toBuffer()]), false),
         meta(pool, false),

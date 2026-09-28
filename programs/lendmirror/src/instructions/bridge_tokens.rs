@@ -14,8 +14,8 @@
 //!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayer`).
 //!     It must hold no data so the System program can debit it for fees.
 //!
-//! Who may call: wrapper owner, a Store snapshotter, an OnDemand caller, or a Store sender, and
-//! the wrapper's level must be at least 1. Bridging only ever sends funds to our own contract,
+//! Who may call: the wrapper owner, an OnDemand caller of that wrapper, or a Store sender
+//! (operator), and the wrapper's level must be 1 or 2. Bridging only ever sends funds to our own contract,
 //! so it is the one "write" a level 1 wrapper may do besides deposit and payback.
 //!
 //! Typical call: hardhat `lz:oapp:solana:bridge-tokens --mint USDC --amount 1000000 --chain 11155111`.
@@ -80,8 +80,14 @@ impl SetBridgeRoute<'_> {
             (p.provider == PROVIDER_LZ_OFT) == (p.provider_aux != Pubkey::default()),
             LendMirrorError::InvalidBridgeAccount
         );
-        // A receiver of all zeros would burn the tokens on the far side.
+        // A receiver of all zeros would burn the tokens on the far side, and an EVM address must
+        // sit in the last 20 bytes: CCIP reads only those, CCTP and OFT read all 32.
         require!(p.receiver != [0u8; 32], LendMirrorError::InvalidBridgeAccount);
+        require!(p.receiver[..12] == [0u8; 12], LendMirrorError::InvalidBridgeAccount);
+        // CCTP domains and LayerZero endpoint ids are u32; refuse anything that would truncate.
+        if p.provider == PROVIDER_CCTP || p.provider == PROVIDER_LZ_OFT {
+            require!(u32::try_from(p.domain_or_selector).is_ok(), LendMirrorError::InvalidBridgeAccount);
+        }
         let r = &mut ctx.accounts.bridge_route;
         r.mint = p.mint;
         r.dst_chain_id = p.dst_chain_id;
@@ -122,11 +128,13 @@ pub struct BridgeCommon<'info> {
         bump = wrapper.bump,
         constraint = (
             wrapper.is_owner(&authority.key())
-            || store.is_snapshotter(&authority.key())
             || store.is_sender(&authority.key())
             || ondemand.as_ref().is_some_and(|list| list.is_caller(&authority.key()))
         ) @ LendMirrorError::Unauthorized,
-        constraint = wrapper.level >= LEVEL_DEPOSIT_PAYBACK @ LendMirrorError::LevelDenied
+        // Levels 1 and 2 may bridge. 0 has no rights; 3 and 4 are reserved and reject everything.
+        constraint = (
+            wrapper.level == LEVEL_DEPOSIT_PAYBACK || wrapper.level == LEVEL_WITHDRAW_BORROW
+        ) @ LendMirrorError::LevelDenied
     )]
     pub wrapper: Box<Account<'info, PositionWrapper>>,
 
@@ -273,6 +281,8 @@ impl<'info> BridgeTokensCctp<'info> {
     pub fn apply(ctx: &mut Context<BridgeTokensCctp>, params: &BridgeTokensParams) -> Result<()> {
         let c = &ctx.accounts.common;
         require!(c.bridge_route.provider == PROVIDER_CCTP, LendMirrorError::WrongProvider);
+        // Circle deducts a fast-transfer fee from the amount. Cap what a caller may offer at 1%.
+        require!(params.max_fee <= params.amount / 100, LendMirrorError::AmountTooLarge);
         c.pull_to_bridge_signer(params.amount)?;
 
         let route = &c.bridge_route;
@@ -404,6 +414,7 @@ impl<'info> BridgeTokensCcip<'info> {
         let c = &ctx.accounts.common;
         let a = &ctx.accounts;
         require!(c.bridge_route.provider == PROVIDER_CCIP, LendMirrorError::WrongProvider);
+        require_keys_eq!(c.bridge_route.provider_program, a.ccip_route.router, LendMirrorError::InvalidBridgeAccount);
         require_keys_eq!(*a.config.owner, a.ccip_route.router, LendMirrorError::InvalidCcipAccount);
         require_keys_eq!(a.fee_token_mint.key(), NATIVE_MINT, LendMirrorError::InvalidCcipAccount);
         require_keys_eq!(a.fee_token_user.key(), Pubkey::default(), LendMirrorError::InvalidCcipAccount);
@@ -541,6 +552,11 @@ impl<'info> BridgeTokensOft<'info> {
         let route = &c.bridge_route;
         require!(route.provider == PROVIDER_LZ_OFT, LendMirrorError::WrongProvider);
         require!(c.bridge_signer.data_is_empty(), LendMirrorError::InvalidBridgeAccount);
+        // The bridge signer is shared by every wrapper. A caller must bring the SOL their send
+        // spends, and may not attach executor options (a native drop to their own EVM address
+        // would turn the shared PDA's SOL into their ETH). The peer's enforced options carry gas.
+        require!(params.fee_lamports >= params.native_fee, LendMirrorError::AmountTooLarge);
+        require!(params.options.is_empty(), LendMirrorError::InvalidBridgeAccount);
         check_oft_pdas(a)?;
 
         c.pull_to_bridge_signer(params.amount)?;

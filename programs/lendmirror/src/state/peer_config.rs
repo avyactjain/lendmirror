@@ -11,7 +11,10 @@ pub struct PeerConfig {
 }
 
 impl PeerConfig {
-    pub const SIZE: usize = 8 + std::mem::size_of::<Self>();
+    /// Discriminator + peer address + the worst-case Borsh size of the option vectors + bump.
+    /// `size_of::<Self>()` would only count the 24-byte `Vec` headers and the account would be
+    /// too small for any real enforced options.
+    pub const SIZE: usize = 8 + 32 + EnforcedOptions::INIT_SPACE + 1;
 }
 
 #[derive(Clone, Default, AnchorSerialize, AnchorDeserialize, InitSpace)]

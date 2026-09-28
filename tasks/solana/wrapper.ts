@@ -169,7 +169,7 @@ task(
         const routeInfo = await connection.getAccountInfo(new PublicKey(ccipRouteAddress(solanaDeployment.programId)))
         if (!routeInfo) throw new Error('No CCIP route. Run lz:oapp:solana:set-ccip-route first.')
         const route = decodeCcipRoute(routeInfo.data)
-        const options = Options.newOptions().addExecutorLzReceiveOption(400000, 0).toBytes()
+        const options = Options.newOptions().addExecutorLzReceiveOption(600000, 0).toBytes()
         const { nativeFee } = await instance.quotePayload(umi.rpc, umiWalletSigner.publicKey, {
             dstEid,
             options,
