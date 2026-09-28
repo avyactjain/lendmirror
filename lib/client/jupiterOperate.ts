@@ -46,7 +46,7 @@ type OperateSdk = {
         signer: PublicKey
         positionOwner?: PublicKey
         recipient?: PublicKey
-        market?: 'main' | 'ethena' | 'galaxy'
+        market?: string
         includeATASetup?: boolean
         includeWrapSol?: boolean
     }) => Promise<OperateSdkResult>
@@ -80,8 +80,8 @@ export async function buildOperatePosition(args: {
     newCol: bigint
     /** Signed base units. Positive borrows, negative pays back. */
     newDebt: bigint
-    /** 'main' unless the vault lives in another Jupiter market. */
-    market?: 'main' | 'ethena' | 'galaxy'
+    /** 'main' unless the vault lives in another Jupiter market; 'devnet' on Devnet (patched SDK). */
+    market?: string
 }): Promise<OperateBuild> {
     const { getOperateIx } = await loadEsm('@jup-ag/lend/borrow')
     const { connection, rpc, instance, authority, vaultId, nftId, market = 'main' } = args

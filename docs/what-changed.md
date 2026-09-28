@@ -189,6 +189,8 @@ npm run test:fork                                                      # Node 18
 
 ## 8. Not done yet
 
+- Level 2 borrow (withdraw and borrow through `operate_position`) has not run on a live network. Devnet's Jupiter program is an old build (half the size of mainnet's, deployed 53M slots earlier) that the Jupiter SDK cannot decode, so the first live borrow is a small mainnet position after the mainnet upgrade. Tasks `jupiter-init-position` and `fund-authority-wsol` are ready for that.
+
 - Nothing has been run on Devnet or mainnet. The readme's "Upgrade Devnet to this version" block is the next step.
 - The Arbitrum (mainnet) contract is still the old format and would reject today's snapshot; it needs a redeploy and `upgradeToAndCall`.
 - Wormhole NTT is a reserved bridge id with no instruction; no in-scope token needs it.

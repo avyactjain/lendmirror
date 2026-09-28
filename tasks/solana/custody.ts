@@ -1,13 +1,20 @@
 import { fetchAddressLookupTable, transferSol } from '@metaplex-foundation/mpl-toolbox'
 import { publicKey, sol, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import { fromWeb3JsPublicKey, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
+import {
+    NATIVE_MINT,
+    createAssociatedTokenAccountIdempotentInstruction,
+    createSyncNativeInstruction,
+    getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
+import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
 import { lendmirror } from '../../lib/client'
 import { buildOperatePosition } from '../../lib/client/jupiterOperate'
 import { resolveSolanaEid } from '../common/deployment'
-import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
+import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment, useWeb3Js } from '.'
 
 /**
  * Custody and access-level tasks. Order of use for one position:
@@ -139,3 +146,50 @@ function parseSigned(value: string): bigint {
     if (value.trim().toLowerCase() === 'min') return -(1n << 127n)
     return BigInt(value)
 }
+
+/** ESM-only Jupiter SDK, loaded the way tests/fork does it. */
+const loadJupiterBorrow = new Function('s', 'return import(s)') as (s: string) => Promise<{
+    getInitPositionIx: (p: { vaultId: number; connection: Connection; signer: PublicKey; market?: string }) => Promise<{ ix: TransactionInstruction; nftId: number }>
+}>
+
+task('lz:oapp:solana:jupiter-init-position', 'Open a new Jupiter position in a vault; the wallet receives the position NFT')
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
+    .addOptionalParam('market', 'Jupiter market: main, ethena, galaxy', 'main', types.string)
+    .setAction(async ({ eid: eidArg, vaultId, market }) => {
+        const eid = resolveSolanaEid(eidArg)
+        const { connection } = await deriveConnection(eid)
+        const { web3JsKeypair } = await useWeb3Js()
+        const { getInitPositionIx } = await loadJupiterBorrow('@jup-ag/lend/borrow')
+        const { ix, nftId } = await getInitPositionIx({
+            vaultId,
+            connection,
+            signer: web3JsKeypair.publicKey,
+            market,
+        })
+        const sig = await sendAndConfirmTransaction(connection, new Transaction().add(ix), [web3JsKeypair])
+        console.log(`initPosition: ${getExplorerTxLink(sig, eid === 40168)}`)
+        console.log(`vault ${vaultId} nft ${nftId}. Next: wrap-position --nft-id ${nftId}, then deposit-position-nft.`)
+    })
+
+task('lz:oapp:solana:fund-authority-wsol', 'Wrap SOL into the wrapper authority\'s WSOL account, as collateral to deposit')
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
+    .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
+    .addParam('lamports', 'Lamports of SOL to wrap', undefined, types.string)
+    .setAction(async ({ eid: eidArg, vaultId, nftId, lamports }) => {
+        const eid = resolveSolanaEid(eidArg)
+        const { connection } = await deriveConnection(eid)
+        const { web3JsKeypair } = await useWeb3Js()
+        const instance = new lendmirror.LendMirror(publicKey(getSolanaDeployment(eid).programId))
+        const authority = toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(vaultId, nftId)[0])[0])
+        const ata = getAssociatedTokenAddressSync(NATIVE_MINT, authority, true)
+        const tx = new Transaction()
+            .add(createAssociatedTokenAccountIdempotentInstruction(web3JsKeypair.publicKey, ata, authority, NATIVE_MINT))
+            .add(SystemProgram.transfer({ fromPubkey: web3JsKeypair.publicKey, toPubkey: ata, lamports: BigInt(lamports) }))
+            .add(createSyncNativeInstruction(ata))
+        const sig = await sendAndConfirmTransaction(connection, tx, [web3JsKeypair])
+        console.log(`fundAuthorityWsol: ${getExplorerTxLink(sig, eid === 40168)}`)
+        const bal = await connection.getTokenAccountBalance(ata)
+        console.log(`authority WSOL ATA ${ata.toBase58()} balance ${bal.value.amount}`)
+    })
