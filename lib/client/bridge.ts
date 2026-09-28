@@ -75,7 +75,7 @@ export function setBridgeRoute(instance: LendMirror, admin: Signer, args: SetBri
             dstChainId: args.dstChainId,
             provider: args.provider,
             providerProgram: publicKey(args.providerProgram),
-            providerAux: publicKey(args.providerAux ?? '11111111111111111111111111111111'),
+            providerAux: publicKey(args.providerAux || '11111111111111111111111111111111'),
             receiver: evmAddressTo32(args.receiver),
             destinationCaller: args.destinationCaller ? evmAddressTo32(args.destinationCaller) : new Uint8Array(32),
             domainOrSelector: args.domainOrSelector,
