@@ -9,6 +9,7 @@
 export * from './attachOndemand'
 export * from './bridgeTokensCcip'
 export * from './bridgeTokensCctp'
+export * from './bridgeTokensOft'
 export * from './depositPositionNft'
 export * from './getJupiterPosition'
 export * from './initStore'

@@ -119,11 +119,18 @@ oracle, which the local copy cannot provide, so that one is checked on Devnet.
 Not possible.
 
 **After:**
-The admin writes a `BridgeRoute` for each (token, destination chain): which bridge to use,
-which Ethereum address receives, and a per-transaction cap. Then anyone with level 1 or higher
-runs `bridge_tokens_cctp` (USDC through Circle CCTP) or `bridge_tokens_ccip` (any Chainlink-listed
-token). Those instructions take an **amount only**. The destination comes from the route, so a
-caller cannot redirect funds.
+The admin writes a `BridgeRoute` for each (token, destination chain): which bridge company
+carries it, which Ethereum address receives, and a per-transaction cap. Then anyone with level 1
+or higher runs one of three send routines, one per bridge company. Those instructions take an
+**amount only**. The destination comes from the route, so a caller cannot redirect funds.
+
+| Token | Bridge company | Instruction |
+|---|---|---|
+| USDC | Circle (CCTP) | `bridge_tokens_cctp` |
+| PST | Chainlink (CCIP) | `bridge_tokens_ccip` |
+| USDT (as USDT0), USDai, sUSDai | LayerZero (the issuer registered the token there; such a token is called an "OFT") | `bridge_tokens_oft` |
+
+Only these five tokens are in scope.
 
 On Ethereum, a new contract `LendMirrorTreasury` receives the tokens. It can only pass them on
 to the strategy address its owner set for that token. Anyone can trigger the pass-on.
@@ -140,9 +147,9 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # a
 npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
 ```
 
-Token status: USDC is built (CCTP and CCIP). USDT, USDA, sDAI, PST are researched in
-`docs/bridge-providers.md`; USDA, sDAI, and PST have no Solana deployment we could find and need
-a mint address from the team.
+For a LayerZero token the route also needs the token's OFT program id and escrow account:
+`set-bridge-route --mint <mint> --provider oft --oft-program <id> --escrow <account> --dst-eid 30110`.
+`docs/bridge-providers.md` has every token's mint, bridge, and destinations.
 
 ---
 
@@ -184,4 +191,4 @@ npm run test:fork                                                      # Node 18
 
 - Nothing has been run on Devnet or mainnet. The readme's "Upgrade Devnet to this version" block is the next step.
 - The Arbitrum (mainnet) contract is still the old format and would reject today's snapshot; it needs a redeploy and `upgradeToAndCall`.
-- LayerZero OFT and Wormhole NTT are reserved bridge ids with no instruction yet.
+- Wormhole NTT is a reserved bridge id with no instruction; no in-scope token needs it.

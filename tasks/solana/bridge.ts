@@ -8,9 +8,11 @@ import {
     CCTP_TOKEN_MESSENGER_MINTER_V2,
     PROVIDER_CCIP,
     PROVIDER_CCTP,
+    PROVIDER_LZ_OFT,
     bridgeRouteAddress,
     bridgeTokensCcip,
     bridgeTokensCctp,
+    bridgeTokensOft,
     setBridgeRoute,
 } from '../../lib/client/bridge'
 import { getProfile, requireCcip, resolveSolanaEid } from '../common/deployment'
@@ -25,7 +27,10 @@ import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplo
 task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM treasury for a token and chain')
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addParam('mint', 'Token mint (base58). "usdc" = profile CCTP USDC mint', undefined, types.string)
-    .addParam('provider', 'cctp or ccip', undefined, types.string)
+    .addParam('provider', 'cctp, ccip, or oft (LayerZero)', undefined, types.string)
+    .addOptionalParam('oftProgram', 'oft only: the token\'s OFT program id', '', types.string)
+    .addOptionalParam('escrow', 'oft only: the OFT token escrow account', '', types.string)
+    .addOptionalParam('dstEid', 'oft only: LayerZero endpoint id of the destination (Arbitrum 30110, Ethereum 30101)', undefined, types.int)
     .addOptionalParam('chainId', 'EVM chain id. Default: Sepolia 11155111 on devnet', undefined, types.int)
     .addOptionalParam('receiver', 'EVM treasury address. Default: profile.treasury', '', types.string)
     .addOptionalParam('destinationCaller', 'CCTP only: EVM address allowed to claim. Default: receiver. "any" = anyone', '', types.string)
@@ -45,8 +50,17 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
 
         let provider: number
         let providerProgram: string
+        let providerAux = ''
         let domainOrSelector: bigint
-        if (args.provider === 'cctp') {
+        if (args.provider === 'oft') {
+            if (!args.oftProgram || !args.escrow || args.dstEid === undefined) {
+                throw new Error('--provider oft needs --oft-program, --escrow, and --dst-eid')
+            }
+            provider = PROVIDER_LZ_OFT
+            providerProgram = args.oftProgram
+            providerAux = args.escrow
+            domainOrSelector = BigInt(args.dstEid)
+        } else if (args.provider === 'cctp') {
             if (!profile.cctp) throw new Error('No CCTP config in the profile.')
             provider = PROVIDER_CCTP
             providerProgram = CCTP_TOKEN_MESSENGER_MINTER_V2
@@ -57,7 +71,7 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
             providerProgram = ccip.router
             domainOrSelector = ccip.destChainSelector
         } else {
-            throw new Error('--provider must be cctp or ccip')
+            throw new Error('--provider must be cctp, ccip, or oft')
         }
         const destinationCaller = args.destinationCaller === 'any' ? '' : args.destinationCaller || receiver
 
@@ -67,6 +81,7 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
                 dstChainId: chainId,
                 provider,
                 providerProgram,
+                providerAux,
                 receiver,
                 destinationCaller,
                 domainOrSelector,
@@ -148,8 +163,25 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
                     ondemand
                 )
             )
+        } else if (route.provider === PROVIDER_LZ_OFT) {
+            const receiver = '0x' + Buffer.from(route.receiver).subarray(12).toString('hex')
+            const built = await bridgeTokensOft(
+                instance,
+                umi.rpc,
+                umiWalletSigner,
+                {
+                    ...common,
+                    oftProgram: String(route.providerProgram),
+                    tokenEscrow: String(route.providerAux),
+                    dstEid: Number(route.domainOrSelector),
+                    receiver,
+                },
+                ondemand
+            )
+            console.log('LayerZero fee:', built.nativeFee.toString(), 'lamports; amount arriving:', built.amountReceived.toString())
+            txBuilder = txBuilder.add(built.instruction)
         } else {
-            throw new Error(`Route provider ${route.provider} has no instruction yet (LayerZero OFT / Wormhole NTT are reserved).`)
+            throw new Error(`Route provider ${route.provider} has no instruction (Wormhole NTT is reserved).`)
         }
         txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, args.computeUnitPriceScaleFactor, TransactionType.SendMessage)
         const tx = await txBuilder.sendAndConfirm(umi)
@@ -157,5 +189,9 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
         console.log(`bridgeTokens: ${getExplorerTxLink(sig, eid === 40168)}`)
         if (route.provider === PROVIDER_CCTP) {
             console.log('Next: wait for Circle attestation, then `npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash', sig + '`')
+        }
+        if (route.provider === PROVIDER_LZ_OFT) {
+            const { getLayerZeroScanLink } = await import('../utils')
+            console.log('LayerZero:', getLayerZeroScanLink(sig, profile.type === 'devnet'))
         }
     })

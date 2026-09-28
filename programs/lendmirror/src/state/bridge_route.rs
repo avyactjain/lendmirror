@@ -20,8 +20,7 @@ use anchor_lang::prelude::*;
 pub const PROVIDER_CCTP: u8 = 1;
 /// Chainlink CCIP token transfer (`ccip_send` with `token_amounts`).
 pub const PROVIDER_CCIP: u8 = 2;
-/// LayerZero OFT (USDT0, PYUSD, USDa). Reserved: no instruction implements it yet.
-#[allow(dead_code)]
+/// LayerZero OFT: a token whose issuer registered it with LayerZero (USDT0, USDai, sUSDai).
 pub const PROVIDER_LZ_OFT: u8 = 3;
 /// Wormhole NTT (USDS, sUSDS). Reserved: no instruction implements it yet.
 #[allow(dead_code)]
@@ -36,8 +35,12 @@ pub struct BridgeRoute {
     pub dst_chain_id: u64,
     /// One of the `PROVIDER_*` constants.
     pub provider: u8,
-    /// The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router).
+    /// The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router,
+    /// or the token's own LayerZero OFT program).
     pub provider_program: Pubkey,
+    /// Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
+    /// peer addresses derive. Zero for CCTP and CCIP.
+    pub provider_aux: Pubkey,
     /// Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32.
     pub receiver: [u8; 32],
     /// CCTP only: who may call `receiveMessage` on the destination. Zero means anyone
@@ -78,6 +81,7 @@ mod tests {
             dst_chain_id: 11155111,
             provider: PROVIDER_CCTP,
             provider_program: Pubkey::default(),
+            provider_aux: Pubkey::default(),
             receiver,
             destination_caller: [0; 32],
             domain_or_selector: 0,

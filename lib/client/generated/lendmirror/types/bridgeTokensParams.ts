@@ -6,7 +6,7 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
-import { Serializer, struct, u32, u64 } from '@metaplex-foundation/umi/serializers'
+import { Serializer, bytes, struct, u32, u64 } from '@metaplex-foundation/umi/serializers'
 
 export type BridgeTokensParams = {
     /** Token base units to bridge. */
@@ -17,8 +17,17 @@ export type BridgeTokensParams = {
     maxFee: bigint
     /** CCTP only: 1000 fast, 2000 standard. Ignored by CCIP. */
     minFinalityThreshold: number
-    /** CCIP only: SOL moved onto the bridge signer to pay the CCIP fee. Ignored by CCTP. */
+    /** CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP. */
     feeLamports: bigint
+    /** OFT only: least amount that may arrive (the OFT drops dust below its shared decimals). */
+    minAmount: bigint
+    /**
+     * OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
+     * plus whatever the bridge signer already holds.
+     */
+    nativeFee: bigint
+    /** OFT only: executor options (destination gas). Empty means "use the peer's enforced options". */
+    options: Uint8Array
 }
 
 export type BridgeTokensParamsArgs = {
@@ -30,8 +39,17 @@ export type BridgeTokensParamsArgs = {
     maxFee: number | bigint
     /** CCTP only: 1000 fast, 2000 standard. Ignored by CCIP. */
     minFinalityThreshold: number
-    /** CCIP only: SOL moved onto the bridge signer to pay the CCIP fee. Ignored by CCTP. */
+    /** CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP. */
     feeLamports: number | bigint
+    /** OFT only: least amount that may arrive (the OFT drops dust below its shared decimals). */
+    minAmount: number | bigint
+    /**
+     * OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
+     * plus whatever the bridge signer already holds.
+     */
+    nativeFee: number | bigint
+    /** OFT only: executor options (destination gas). Empty means "use the peer's enforced options". */
+    options: Uint8Array
 }
 
 export function getBridgeTokensParamsSerializer(): Serializer<BridgeTokensParamsArgs, BridgeTokensParams> {
@@ -42,6 +60,9 @@ export function getBridgeTokensParamsSerializer(): Serializer<BridgeTokensParams
             ['maxFee', u64()],
             ['minFinalityThreshold', u32()],
             ['feeLamports', u64()],
+            ['minAmount', u64()],
+            ['nativeFee', u64()],
+            ['options', bytes({ size: u32() })],
         ],
         { description: 'BridgeTokensParams' }
     ) as Serializer<BridgeTokensParamsArgs, BridgeTokensParams>

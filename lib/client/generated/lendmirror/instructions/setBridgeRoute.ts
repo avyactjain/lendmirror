@@ -34,6 +34,8 @@ export type SetBridgeRouteInstructionData = {
     dstChainId: bigint
     provider: number
     providerProgram: PublicKey
+    /** LayerZero: the OFT token escrow. Zero otherwise. */
+    providerAux: PublicKey
     receiver: Uint8Array
     destinationCaller: Uint8Array
     domainOrSelector: bigint
@@ -47,6 +49,8 @@ export type SetBridgeRouteInstructionDataArgs = {
     dstChainId: number | bigint
     provider: number
     providerProgram: PublicKey
+    /** LayerZero: the OFT token escrow. Zero otherwise. */
+    providerAux: PublicKey
     receiver: Uint8Array
     destinationCaller: Uint8Array
     domainOrSelector: number | bigint
@@ -67,6 +71,7 @@ export function getSetBridgeRouteInstructionDataSerializer(): Serializer<
                 ['dstChainId', u64()],
                 ['provider', u8()],
                 ['providerProgram', publicKeySerializer()],
+                ['providerAux', publicKeySerializer()],
                 ['receiver', bytes({ size: 32 })],
                 ['destinationCaller', bytes({ size: 32 })],
                 ['domainOrSelector', u64()],

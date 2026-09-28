@@ -1,5 +1,6 @@
-//! Token bridging out of a wrapper: `set_bridge_route` (admin) and the two provider
-//! instructions `bridge_tokens_cctp` and `bridge_tokens_ccip`.
+//! Token bridging out of a wrapper: `set_bridge_route` (admin) and the three provider
+//! instructions `bridge_tokens_cctp` (Circle), `bridge_tokens_ccip` (Chainlink), and
+//! `bridge_tokens_oft` (LayerZero).
 //!
 //! Owns: who may bridge, the amount cap, the move from the wrapper authority's token account to
 //! the bridge signer's token account, and the provider CPIs. Does NOT own: the instruction bytes
@@ -19,7 +20,7 @@
 //!
 //! Typical call: hardhat `lz:oapp:solana:bridge-tokens --mint USDC --amount 1000000 --chain 11155111`.
 
-use crate::bridges::cctp_deposit_for_burn_data;
+use crate::bridges::{cctp_deposit_for_burn_data, oft_send_data};
 use crate::errors::LendMirrorError;
 use crate::instructions::send_ccip::{ccip_send_instruction_data, CcipTokenAmount};
 use crate::*;
@@ -58,6 +59,8 @@ pub struct SetBridgeRouteParams {
     pub dst_chain_id: u64,
     pub provider: u8,
     pub provider_program: Pubkey,
+    /// LayerZero: the OFT token escrow. Zero otherwise.
+    pub provider_aux: Pubkey,
     pub receiver: [u8; 32],
     pub destination_caller: [u8; 32],
     pub domain_or_selector: u64,
@@ -69,8 +72,13 @@ pub struct SetBridgeRouteParams {
 impl SetBridgeRoute<'_> {
     pub fn apply(ctx: &mut Context<SetBridgeRoute>, p: &SetBridgeRouteParams) -> Result<()> {
         require!(
-            p.provider == PROVIDER_CCTP || p.provider == PROVIDER_CCIP,
+            p.provider == PROVIDER_CCTP || p.provider == PROVIDER_CCIP || p.provider == PROVIDER_LZ_OFT,
             LendMirrorError::WrongProvider
+        );
+        // LayerZero needs the escrow to derive the OFT store; the other two must not carry one.
+        require!(
+            (p.provider == PROVIDER_LZ_OFT) == (p.provider_aux != Pubkey::default()),
+            LendMirrorError::InvalidBridgeAccount
         );
         // A receiver of all zeros would burn the tokens on the far side.
         require!(p.receiver != [0u8; 32], LendMirrorError::InvalidBridgeAccount);
@@ -79,6 +87,7 @@ impl SetBridgeRoute<'_> {
         r.dst_chain_id = p.dst_chain_id;
         r.provider = p.provider;
         r.provider_program = p.provider_program;
+        r.provider_aux = p.provider_aux;
         r.receiver = p.receiver;
         r.destination_caller = p.destination_caller;
         r.domain_or_selector = p.domain_or_selector;
@@ -182,8 +191,15 @@ pub struct BridgeTokensParams {
     pub max_fee: u64,
     /// CCTP only: 1000 fast, 2000 standard. Ignored by CCIP.
     pub min_finality_threshold: u32,
-    /// CCIP only: SOL moved onto the bridge signer to pay the CCIP fee. Ignored by CCTP.
+    /// CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP.
     pub fee_lamports: u64,
+    /// OFT only: least amount that may arrive (the OFT drops dust below its shared decimals).
+    pub min_amount: u64,
+    /// OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
+    /// plus whatever the bridge signer already holds.
+    pub native_fee: u64,
+    /// OFT only: executor options (destination gas). Empty means "use the peer's enforced options".
+    pub options: Vec<u8>,
 }
 
 impl BridgeCommon<'_> {
@@ -481,4 +497,126 @@ impl<'info> BridgeTokensCcip<'info> {
         )?;
         Ok(())
     }
+}
+
+// ----------------------------------------------------------------------------------------
+// LayerZero OFT (USDT0, USDai, sUSDai)
+// ----------------------------------------------------------------------------------------
+
+/// Send an OFT token to `route.receiver` through the token's own LayerZero OFT program.
+///
+/// Account names and order follow LayerZero's OFT program (`send`): signer, peer, oft_store,
+/// token_source, token_escrow, token_mint, token_program, event_authority, program, then the
+/// LayerZero Endpoint accounts in `remaining_accounts` (the OFT SDK assembles them with the OFT
+/// store as sender). The bridge signer is the OFT `signer`: it owns `token_source` and pays the
+/// LayerZero fee in SOL, so `fee_lamports` must cover `native_fee`.
+// `params` is declared on `BridgeCommon` only; see the note on `BridgeTokensCctp`.
+#[derive(Accounts)]
+pub struct BridgeTokensOft<'info> {
+    pub common: BridgeCommon<'info>,
+
+    /// CHECK: the token's OFT program. Must be the route's provider program.
+    #[account(address = common.bridge_route.provider_program)]
+    pub oft_program: UncheckedAccount<'info>,
+    /// CHECK: OFT peer PDA ["Peer", oft_store, dst_eid be] under the OFT program (checked in apply).
+    #[account(mut)]
+    pub peer: UncheckedAccount<'info>,
+    /// CHECK: OFT store PDA ["OFT", token_escrow] under the OFT program (checked in apply).
+    #[account(mut)]
+    pub oft_store: UncheckedAccount<'info>,
+    /// CHECK: the OFT's escrow token account. Must be the route's `provider_aux`.
+    #[account(mut, address = common.bridge_route.provider_aux)]
+    pub token_escrow: UncheckedAccount<'info>,
+    /// CHECK: OFT program's event authority PDA ["__event_authority"].
+    pub event_authority: UncheckedAccount<'info>,
+}
+
+impl<'info> BridgeTokensOft<'info> {
+    pub fn apply(
+        ctx: &mut Context<'_, '_, '_, 'info, BridgeTokensOft<'info>>,
+        params: &BridgeTokensParams,
+    ) -> Result<()> {
+        let c = &ctx.accounts.common;
+        let a = &ctx.accounts;
+        let route = &c.bridge_route;
+        require!(route.provider == PROVIDER_LZ_OFT, LendMirrorError::WrongProvider);
+        require!(c.bridge_signer.data_is_empty(), LendMirrorError::InvalidBridgeAccount);
+        check_oft_pdas(a)?;
+
+        c.pull_to_bridge_signer(params.amount)?;
+        if params.fee_lamports > 0 {
+            anchor_lang::solana_program::program::invoke(
+                &anchor_lang::solana_program::system_instruction::transfer(
+                    &c.authority.key(),
+                    &c.bridge_signer.key(),
+                    params.fee_lamports,
+                ),
+                &[
+                    c.authority.to_account_info(),
+                    c.bridge_signer.to_account_info(),
+                    c.system_program.to_account_info(),
+                ],
+            )?;
+        }
+
+        let data = oft_send_data(
+            route.domain_or_selector as u32,
+            route.receiver,
+            params.amount,
+            params.min_amount,
+            &params.options,
+            params.native_fee,
+        );
+        let mut metas = vec![
+            AccountMeta::new(c.bridge_signer.key(), true), // signer: owns token_source, pays the fee
+            AccountMeta::new(a.peer.key(), false),
+            AccountMeta::new(a.oft_store.key(), false),
+            AccountMeta::new(c.bridge_ata.key(), false), // token_source
+            AccountMeta::new(a.token_escrow.key(), false),
+            AccountMeta::new(c.mint.key(), false), // token_mint
+            AccountMeta::new_readonly(c.token_program.key(), false),
+            AccountMeta::new_readonly(a.event_authority.key(), false),
+            AccountMeta::new_readonly(a.oft_program.key(), false), // program (event CPI)
+        ];
+        metas.extend(ctx.remaining_accounts.iter().map(|info| AccountMeta {
+            pubkey: info.key(),
+            is_signer: false,
+            is_writable: info.is_writable,
+        }));
+        let mut infos = vec![
+            c.bridge_signer.to_account_info(),
+            a.peer.to_account_info(),
+            a.oft_store.to_account_info(),
+            c.bridge_ata.to_account_info(),
+            a.token_escrow.to_account_info(),
+            c.mint.to_account_info(),
+            c.token_program.to_account_info(),
+            a.event_authority.to_account_info(),
+            a.oft_program.to_account_info(),
+        ];
+        infos.extend_from_slice(ctx.remaining_accounts);
+        let signer_seeds: &[&[u8]] = &[CCIP_PAYER_SEED, &[ctx.bumps.common.bridge_signer]];
+        invoke_signed(
+            &Instruction { program_id: route.provider_program, accounts: metas, data },
+            &infos,
+            &[signer_seeds],
+        )?;
+        Ok(())
+    }
+}
+
+/// The store and peer must be the OFT program's PDAs for this escrow and destination, so a
+/// caller cannot point the send at a different OFT deployment or lane.
+fn check_oft_pdas(a: &BridgeTokensOft) -> Result<()> {
+    let route = &a.common.bridge_route;
+    let (expected_store, _) =
+        Pubkey::find_program_address(&[b"OFT", route.provider_aux.as_ref()], &route.provider_program);
+    require_keys_eq!(a.oft_store.key(), expected_store, LendMirrorError::InvalidBridgeAccount);
+    let dst_eid = route.domain_or_selector as u32;
+    let (expected_peer, _) = Pubkey::find_program_address(
+        &[b"Peer", expected_store.as_ref(), &dst_eid.to_be_bytes()],
+        &route.provider_program,
+    );
+    require_keys_eq!(a.peer.key(), expected_peer, LendMirrorError::InvalidBridgeAccount);
+    Ok(())
 }

@@ -190,4 +190,12 @@ pub mod lendmirror {
     ) -> Result<()> {
         BridgeTokensCcip::apply(&mut ctx, &params)
     }
+
+    // Level >= 1. Send a LayerZero OFT token (USDT0, USDai, sUSDai) to the route's receiver.
+    pub fn bridge_tokens_oft<'info>(
+        mut ctx: Context<'_, '_, '_, 'info, BridgeTokensOft<'info>>,
+        params: BridgeTokensParams,
+    ) -> Result<()> {
+        BridgeTokensOft::apply(&mut ctx, &params)
+    }
 }

@@ -98,7 +98,15 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>  # afte
 npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
 ```
 
-`bridge_tokens_cctp` burns USDC through Circle CCTP v2. `bridge_tokens_ccip` sends any CCIP-listed token (route `--provider ccip`, plus `--pool-program` and `--lookup-table` from Chainlink's token admin registry). LayerZero OFT and Wormhole NTT are reserved provider ids with no instruction yet. `docs/bridge-providers.md` has the token by token matrix.
+**Only these five tokens are in scope: USDC, USDT, USDai, sUSDai, PST.** Each token's issuer decided which bridge company carries it, so the program has one send routine per bridge:
+
+| Token | Bridge | Instruction |
+|---|---|---|
+| USDC | Circle CCTP (or Chainlink, which uses Circle underneath) | `bridge_tokens_cctp` / `bridge_tokens_ccip` |
+| PST | Chainlink CCIP | `bridge_tokens_ccip` |
+| USDT (as USDT0), USDai, sUSDai | LayerZero (the issuer registered the token with LayerZero; such a token is called an "OFT") | `bridge_tokens_oft` |
+
+Wormhole NTT is a reserved provider id with no instruction and no token that needs it. `docs/bridge-providers.md` has the token by token matrix with mints, lanes, and status.
 
 ## What is built
 
@@ -108,11 +116,11 @@ npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
 | LayerZero + Chainlink send in one instruction, once per refresh, newest wins on EVM | Built, Devnet |
 | Sync every wrapped position | Built |
 | NFT custody, access levels, Jupiter `operate` CPI | Built. On a local fork of Jupiter mainnet (`npm run test:fork`): NFT custody, level 1 deposit through the CPI, level 1 borrow denied. Level 2 borrow needs a live oracle, so it is exercised on Devnet. |
-| Token bridge: CCTP v2 (USDC), CCIP token transfer | Built, unit-tested; Devnet run pending |
+| Token bridge: Circle CCTP v2 (USDC), Chainlink CCIP (PST, USDC), LayerZero OFT (USDT0, USDai, sUSDai) | Built, unit-tested; Devnet run pending |
 | EVM treasury with owner-set strategies | Built, Foundry-tested; not deployed yet |
 | Mainnet (Arbitrum) upgrade | Pending: the Arbitrum contract still expects the old 200-byte snapshot |
 
-Solana instructions: `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `set_ccip_route`, `get_jupiter_position` (legacy), `wrap_position`, `attach_ondemand`, `set_ondemand_callers`, `refresh_wrapper`, `send_position_snapshot_via_chainlink_and_lz`, `set_wrapper_level`, `deposit_position_nft`, `release_position_nft`, `operate_position`, `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`.
+Solana instructions: `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `set_ccip_route`, `get_jupiter_position` (legacy), `wrap_position`, `attach_ondemand`, `set_ondemand_callers`, `refresh_wrapper`, `send_position_snapshot_via_chainlink_and_lz`, `set_wrapper_level`, `deposit_position_nft`, `release_position_nft`, `operate_position`, `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_oft`.
 
 EVM: `LendMirror` (UUPS proxy, snapshot store) and `LendMirrorTreasury` (UUPS proxy, token receiver and forwarder). Peer address is the `LendMirror` **proxy**.
 

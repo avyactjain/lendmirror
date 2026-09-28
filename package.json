@@ -36,6 +36,7 @@
     "@kinobi-so/nodes-from-anchor": "^0.21.2",
     "@kinobi-so/renderers": "^0.21.3",
     "@kinobi-so/renderers-js-umi": "^0.21.6",
+    "@layerzerolabs/oft-v2-solana-sdk": "^3.0.168",
     "@solana/spl-token": "^0.4.13",
     "kinobi": "^0.21.4"
   },

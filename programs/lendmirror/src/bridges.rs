@@ -1,8 +1,9 @@
 //! Byte-level builders for the bridge providers' Solana instructions.
 //!
-//! Owns: instruction DATA (discriminator + Borsh args) for Circle CCTP v2 `deposit_for_burn`.
-//! The Chainlink `ccip_send` builder lives in `instructions/send_ccip.rs` because the data-only
-//! send already used it. Does NOT own: account lists (see `instructions/bridge_tokens.rs`).
+//! Owns: instruction DATA (discriminator + Borsh args) for Circle CCTP v2 `deposit_for_burn` and
+//! for a LayerZero OFT `send`. The Chainlink `ccip_send` builder lives in
+//! `instructions/send_ccip.rs` because the data-only send already used it. Does NOT own: account
+//! lists (see `instructions/bridge_tokens.rs`).
 //!
 //! Everything here is a pure function over plain values, so it is unit-tested byte by byte.
 
@@ -56,9 +57,77 @@ pub fn cctp_deposit_for_burn_data(
     data
 }
 
+/// `sha256("global:send")[..8]`: the `send` instruction of LayerZero's OFT program.
+pub const OFT_SEND_DISCRIMINATOR: [u8; 8] = [102, 251, 20, 187, 65, 75, 12, 69];
+
+/// LayerZero OFT `SendParams`, in the order the OFT program declares them.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct OftSendParams {
+    /// LayerZero endpoint id of the destination (Arbitrum 30110, Ethereum 30101).
+    pub dst_eid: u32,
+    /// Receiver on the destination, 32 bytes (EVM address left-padded).
+    pub to: [u8; 32],
+    /// Amount in local decimals ("ld").
+    pub amount_ld: u64,
+    /// Least amount that may arrive after the OFT drops dust below its shared decimals.
+    pub min_amount_ld: u64,
+    /// Executor options (gas on the destination). Combined with the peer's enforced options.
+    pub options: Vec<u8>,
+    /// We never compose: the treasury has no `lzCompose`.
+    pub compose_msg: Option<Vec<u8>>,
+    /// LayerZero fee in lamports, from the OFT's `quote_send`.
+    pub native_fee: u64,
+    pub lz_token_fee: u64,
+}
+
+/// Instruction bytes for an OFT `send` with no compose message.
+///
+/// `oft_send_data(30110, r, 1_000_000, 1_000_000, &[], 5_000_000)` → discriminator, then
+/// `30110u32` LE, `r`, two `u64`s, an empty vec (`0u32`), `0` (None), the fee, and `0u64`.
+pub fn oft_send_data(
+    dst_eid: u32,
+    to: [u8; 32],
+    amount_ld: u64,
+    min_amount_ld: u64,
+    options: &[u8],
+    native_fee: u64,
+) -> Vec<u8> {
+    let params = OftSendParams {
+        dst_eid,
+        to,
+        amount_ld,
+        min_amount_ld,
+        options: options.to_vec(),
+        compose_msg: None,
+        native_fee,
+        lz_token_fee: 0,
+    };
+    let mut data = Vec::with_capacity(8 + 4 + 32 + 8 + 8 + 4 + options.len() + 1 + 8 + 8);
+    data.extend_from_slice(&OFT_SEND_DISCRIMINATOR);
+    params.serialize(&mut data).expect("Vec<u8> writer cannot fail");
+    data
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oft_send_bytes_follow_the_oft_program_order() {
+        let to = [0xCCu8; 32];
+        let data = oft_send_data(30110, to, 1_000_000, 999_000, &[1, 2, 3], 5_000_000);
+        assert_eq!(&data[..8], &OFT_SEND_DISCRIMINATOR);
+        assert_eq!(&data[8..12], &30110u32.to_le_bytes(), "dst_eid");
+        assert_eq!(&data[12..44], &to);
+        assert_eq!(&data[44..52], &1_000_000u64.to_le_bytes(), "amount_ld");
+        assert_eq!(&data[52..60], &999_000u64.to_le_bytes(), "min_amount_ld");
+        assert_eq!(&data[60..64], &3u32.to_le_bytes(), "options length");
+        assert_eq!(&data[64..67], &[1, 2, 3]);
+        assert_eq!(data[67], 0, "compose_msg = None");
+        assert_eq!(&data[68..76], &5_000_000u64.to_le_bytes(), "native_fee");
+        assert_eq!(&data[76..84], &0u64.to_le_bytes(), "lz_token_fee");
+        assert_eq!(data.len(), 84);
+    }
 
     #[test]
     fn deposit_for_burn_bytes_follow_the_idl_order() {

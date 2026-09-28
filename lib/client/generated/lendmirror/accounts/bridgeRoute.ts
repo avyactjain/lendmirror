@@ -39,8 +39,16 @@ export type BridgeRouteAccountData = {
     dstChainId: bigint
     /** One of the `PROVIDER_*` constants. */
     provider: number
-    /** The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router). */
+    /**
+     * The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router,
+     * or the token's own LayerZero OFT program).
+     */
     providerProgram: PublicKey
+    /**
+     * Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
+     * peer addresses derive. Zero for CCTP and CCIP.
+     */
+    providerAux: PublicKey
     /** Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32. */
     receiver: Uint8Array
     /**
@@ -67,8 +75,16 @@ export type BridgeRouteAccountDataArgs = {
     dstChainId: number | bigint
     /** One of the `PROVIDER_*` constants. */
     provider: number
-    /** The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router). */
+    /**
+     * The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router,
+     * or the token's own LayerZero OFT program).
+     */
     providerProgram: PublicKey
+    /**
+     * Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
+     * peer addresses derive. Zero for CCTP and CCIP.
+     */
+    providerAux: PublicKey
     /** Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32. */
     receiver: Uint8Array
     /**
@@ -98,6 +114,7 @@ export function getBridgeRouteAccountDataSerializer(): Serializer<BridgeRouteAcc
                 ['dstChainId', u64()],
                 ['provider', u8()],
                 ['providerProgram', publicKeySerializer()],
+                ['providerAux', publicKeySerializer()],
                 ['receiver', bytes({ size: 32 })],
                 ['destinationCaller', bytes({ size: 32 })],
                 ['domainOrSelector', u64()],
@@ -173,6 +190,7 @@ export function getBridgeRouteGpaBuilder(context: Pick<Context, 'rpc' | 'program
             dstChainId: number | bigint
             provider: number
             providerProgram: PublicKey
+            providerAux: PublicKey
             receiver: Uint8Array
             destinationCaller: Uint8Array
             domainOrSelector: number | bigint
@@ -186,18 +204,19 @@ export function getBridgeRouteGpaBuilder(context: Pick<Context, 'rpc' | 'program
             dstChainId: [40, u64()],
             provider: [48, u8()],
             providerProgram: [49, publicKeySerializer()],
-            receiver: [81, bytes({ size: 32 })],
-            destinationCaller: [113, bytes({ size: 32 })],
-            domainOrSelector: [145, u64()],
-            gasLimit: [153, u64()],
-            enabled: [161, bool()],
-            maxAmountPerTx: [162, u64()],
-            bump: [170, u8()],
+            providerAux: [81, publicKeySerializer()],
+            receiver: [113, bytes({ size: 32 })],
+            destinationCaller: [145, bytes({ size: 32 })],
+            domainOrSelector: [177, u64()],
+            gasLimit: [185, u64()],
+            enabled: [193, bool()],
+            maxAmountPerTx: [194, u64()],
+            bump: [202, u8()],
         })
         .deserializeUsing<BridgeRoute>((account) => deserializeBridgeRoute(account))
         .whereField('discriminator', new Uint8Array([77, 85, 110, 3, 253, 67, 52, 25]))
 }
 
 export function getBridgeRouteSize(): number {
-    return 171
+    return 203
 }

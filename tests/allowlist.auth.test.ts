@@ -452,6 +452,7 @@ describe('allowlist auth', function () {
             dstChainId: new BN(11155111),
             provider: 1,
             providerProgram: SystemProgram.programId,
+            providerAux: PublicKey.default,
             receiver: Array(32).fill(1),
             destinationCaller: Array(32).fill(0),
             domainOrSelector: new BN(0),
@@ -495,6 +496,25 @@ describe('allowlist auth', function () {
         expect(stored.provider).to.equal(1)
         expect(stored.enabled).to.equal(true)
         expect(Buffer.from(stored.receiver).toString('hex')).to.equal('01'.repeat(32))
+
+        // A LayerZero route must carry the OFT escrow; a Circle route must not.
+        const escrow = Keypair.generate().publicKey
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, provider: 3 })
+                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .rpc()
+            expect.fail('expected InvalidBridgeAccount: OFT route without escrow')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidBridgeAccount|6022/)
+        }
+        await program.methods
+            .setBridgeRoute({ ...params, provider: 3, providerAux: escrow, domainOrSelector: new BN(30110) })
+            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .rpc()
+        const oftRoute = await program.account.bridgeRoute.fetch(route)
+        expect(oftRoute.provider).to.equal(3)
+        expect(oftRoute.providerAux.toBase58()).to.equal(escrow.toBase58())
     })
 
     it('bridge_tokens_cctp: level 0 is denied, level 2 reaches the Circle CPI', async () => {
@@ -517,6 +537,7 @@ describe('allowlist auth', function () {
                 dstChainId: new BN(11155111),
                 provider: 1,
                 providerProgram: CCTP_TOKEN_MESSENGER_MINTER,
+                providerAux: PublicKey.default,
                 receiver: Array(32).fill(1),
                 destinationCaller: Array(32).fill(0),
                 domainOrSelector: new BN(0),
@@ -565,6 +586,9 @@ describe('allowlist auth', function () {
             maxFee: new BN(0),
             minFinalityThreshold: 2000,
             feeLamports: new BN(0),
+            minAmount: new BN(0),
+            nativeFee: new BN(0),
+            options: Buffer.alloc(0),
         })
 
         // Level 0 (set it back from 2): the wrapper constraint rejects before anything moves.
