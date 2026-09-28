@@ -16,7 +16,7 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 tests/**/*.test.ts"
+test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 tests/*.test.ts"
 
 # Load our program as UPGRADEABLE with the test wallet as upgrade authority.
 # `init_store` only accepts the upgrade authority, and the default `--bpf-program`

@@ -245,9 +245,13 @@ pub fn jupiter_operate_data(params: &OperatePositionParams) -> Vec<u8> {
 }
 
 /// Optional Jupiter accounts that are absent are passed as the Vaults program id (Anchor's
-/// convention for `Option<Account>` on the callee side).
-fn key_or_program(opt: &Option<UncheckedAccount>, program: &UncheckedAccount) -> Pubkey {
-    opt.as_ref().map(|acc| acc.key()).unwrap_or_else(|| program.key())
+/// convention for `Option<Account>` on the callee side). The placeholder must be read-only:
+/// a CPI may not mark an account writable that the outer transaction did not.
+fn meta_or_program(opt: &Option<UncheckedAccount>, program: &UncheckedAccount) -> AccountMeta {
+    match opt {
+        Some(acc) => AccountMeta::new(acc.key(), false),
+        None => AccountMeta::new_readonly(program.key(), false),
+    }
 }
 
 fn info_or_program<'info>(
@@ -289,8 +293,8 @@ fn jupiter_operate_metas(a: &OperatePosition, remaining: &[AccountInfo]) -> Vec<
         AccountMeta::new_readonly(a.borrow_rate_model.key(), false),
         AccountMeta::new(a.vault_supply_token_account.key(), false),
         AccountMeta::new(a.vault_borrow_token_account.key(), false),
-        AccountMeta::new(key_or_program(&a.supply_token_claim_account, &a.vaults_program), false),
-        AccountMeta::new(key_or_program(&a.borrow_token_claim_account, &a.vaults_program), false),
+        meta_or_program(&a.supply_token_claim_account, &a.vaults_program),
+        meta_or_program(&a.borrow_token_claim_account, &a.vaults_program),
         AccountMeta::new_readonly(a.liquidity.key(), false),
         AccountMeta::new_readonly(a.liquidity_program.key(), false),
         AccountMeta::new_readonly(a.oracle_program.key(), false),

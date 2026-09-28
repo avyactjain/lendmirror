@@ -23,7 +23,8 @@
     "test:anchor": "anchor test",
     "test:forge": "forge test",
     "test:hardhat": "hardhat test",
-    "test:jup-live": "mocha --timeout 300000 tests/run-jup-live.cjs"
+    "test:jup-live": "mocha --timeout 300000 tests/run-jup-live.cjs",
+    "test:fork": "node tests/fork/run.cjs"
   },
   "resolutions": {
     "ethers": "^5.7.2",

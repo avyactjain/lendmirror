@@ -1,6 +1,6 @@
-import { fetchAddressLookupTable } from '@metaplex-foundation/mpl-toolbox'
-import { publicKey, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
-import { fromWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
+import { fetchAddressLookupTable, transferSol } from '@metaplex-foundation/mpl-toolbox'
+import { publicKey, sol, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
+import { fromWeb3JsPublicKey, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
@@ -90,6 +90,17 @@ task('lz:oapp:solana:operate-position', 'Deposit / withdraw / borrow / payback o
         const wrapper = await instance.getWrapper(umi.rpc, vaultId, nftId)
         if (!wrapper) throw new Error('No wrapper. Run wrap-position first.')
         if (!wrapper.custody) throw new Error('NFT not in custody. Run deposit-position-nft first.')
+
+        // The Jupiter SDK simulates a price read with the operate signer (our authority PDA) as
+        // fee payer, and Jupiter may create accounts paid by that signer. Keep 0.05 SOL on it.
+        const authorityPda = toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(vaultId, nftId)[0])[0])
+        const pdaBalance = await connection.getBalance(authorityPda)
+        if (pdaBalance < 50_000_000) {
+            const fund = await transactionBuilder()
+                .add(transferSol(umi, { source: umiWalletSigner, destination: fromWeb3JsPublicKey(authorityPda), amount: sol(0.05) }))
+                .sendAndConfirm(umi)
+            console.log(`funded authority PDA ${authorityPda.toBase58()}: ${getExplorerTxLink(bs58.encode(fund.signature), eid === 40168)}`)
+        }
 
         const build = await buildOperatePosition({
             connection,

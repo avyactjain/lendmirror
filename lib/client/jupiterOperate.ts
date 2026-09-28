@@ -93,7 +93,7 @@ export async function buildOperatePosition(args: {
     const debtAmount = new BN(args.newDebt.toString())
 
     // 1. Setup instructions with the wallet as payer. Drop the last one: the SDK's own operate.
-    const forWallet = await getOperateIx({
+    const forWallet = await withSimulationDetails('wallet', () => getOperateIx({
         vaultId,
         positionId: nftId,
         colAmount,
@@ -103,11 +103,12 @@ export async function buildOperatePosition(args: {
         market,
         includeATASetup: false,
         includeWrapSol: false,
-    })
+    }))
     const jupiterSetup = forWallet.ixs.slice(0, -1)
 
-    // 2. Accounts with the PDA as signer, owner, and recipient.
-    const forPda = await getOperateIx({
+    // 2. Accounts with the PDA as signer, owner, and recipient. The SDK simulates a price read
+    //    with `signer` as fee payer, so the PDA must hold a little SOL (the task funds it).
+    const forPda = await withSimulationDetails('authority PDA', () => getOperateIx({
         vaultId,
         positionId: nftId,
         colAmount,
@@ -119,7 +120,7 @@ export async function buildOperatePosition(args: {
         market,
         includeATASetup: false,
         includeWrapSol: false,
-    })
+    }))
     const a = forPda.accounts
 
     // 3. The PDA's token accounts, created by the wallet if missing.
@@ -198,5 +199,18 @@ export async function buildOperatePosition(args: {
         operateIx,
         lookupTables: forPda.addressLookupTableAccounts,
         authorityAtas: { supply: a.signerSupplyTokenAccount, borrow: a.signerBorrowTokenAccount, nft: nftAta },
+    }
+}
+
+/** The SDK hides simulation failures behind "No return data found in logs"; show the details. */
+async function withSimulationDetails<T>(label: string, run: () => Promise<T>): Promise<T> {
+    try {
+        return await run()
+    } catch (err) {
+        const sim = (err as { simulation?: { err?: unknown; logs?: string[] } }).simulation
+        if (!sim) throw err
+        throw new Error(
+            `Jupiter SDK simulation failed (signer = ${label}): ${JSON.stringify(sim.err)}\n${(sim.logs ?? []).join('\n')}`
+        )
     }
 }
