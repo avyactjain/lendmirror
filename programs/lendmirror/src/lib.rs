@@ -1,3 +1,4 @@
+mod bridges;
 mod errors;
 mod instructions;
 mod live_position;
@@ -42,6 +43,8 @@ const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
 /// Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`.
 /// Seeds: this + wrapper pubkey. See `state/wrapper.rs` for why it is separate from the wrapper.
 const WRAPPER_AUTH_SEED: &[u8] = b"LendMirrorWrapperAuth";
+/// One admin-set bridge destination per (mint, EVM chain id). Seeds: this + mint + chain id le.
+const BRIDGE_ROUTE_SEED: &[u8] = b"LendMirrorBridgeRoute";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///
@@ -168,5 +171,23 @@ pub mod lendmirror {
         params: OperatePositionParams,
     ) -> Result<()> {
         OperatePosition::apply(&mut ctx, &params)
+    }
+
+    // Admin only. Fix the EVM receiver and bridge provider for one (mint, chain id).
+    pub fn set_bridge_route(mut ctx: Context<SetBridgeRoute>, params: SetBridgeRouteParams) -> Result<()> {
+        SetBridgeRoute::apply(&mut ctx, &params)
+    }
+
+    // Level >= 1. Burn tokens through Circle CCTP v2 to the route's receiver.
+    pub fn bridge_tokens_cctp(mut ctx: Context<BridgeTokensCctp>, params: BridgeTokensParams) -> Result<()> {
+        BridgeTokensCctp::apply(&mut ctx, &params)
+    }
+
+    // Level >= 1. Send tokens through Chainlink CCIP to the route's receiver.
+    pub fn bridge_tokens_ccip<'info>(
+        mut ctx: Context<'_, '_, '_, 'info, BridgeTokensCcip<'info>>,
+        params: BridgeTokensParams,
+    ) -> Result<()> {
+        BridgeTokensCcip::apply(&mut ctx, &params)
     }
 }

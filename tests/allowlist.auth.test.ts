@@ -20,6 +20,7 @@ const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const NATIVE_MINT = new PublicKey('So11111111111111111111111111111111111111112')
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+const CCTP_TOKEN_MESSENGER_MINTER = new PublicKey('CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe')
 /** BPFLoaderUpgradeab1e11111111111111111111111 */
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 /** Sepolia V2 testnet eid */
@@ -442,6 +443,167 @@ describe('allowlist auth', function () {
             expect(names).to.include(name)
         }
     })
+
+    it('set_bridge_route: admin only, known provider, non-zero receiver', async () => {
+        const mint = Keypair.generate().publicKey
+        const [route] = bridgeRouteAddress(mint, 11155111n)
+        const params = {
+            mint,
+            dstChainId: new BN(11155111),
+            provider: 1,
+            providerProgram: SystemProgram.programId,
+            receiver: Array(32).fill(1),
+            destinationCaller: Array(32).fill(0),
+            domainOrSelector: new BN(0),
+            gasLimit: new BN(0),
+            enabled: true,
+            maxAmountPerTx: new BN(1_000_000),
+        }
+        try {
+            await program.methods
+                .setBridgeRoute(params)
+                .accounts({ admin: stranger.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .signers([stranger])
+                .rpc()
+            expect.fail('expected ConstraintAddress')
+        } catch (err) {
+            assertLogsMatch(err, /ConstraintAddress|2012/)
+        }
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, provider: 9 })
+                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .rpc()
+            expect.fail('expected WrongProvider')
+        } catch (err) {
+            assertLogsMatch(err, /WrongProvider|6021/)
+        }
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, receiver: Array(32).fill(0) })
+                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .rpc()
+            expect.fail('expected InvalidBridgeAccount')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidBridgeAccount|6022/)
+        }
+        await program.methods
+            .setBridgeRoute(params)
+            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .rpc()
+        const stored = await program.account.bridgeRoute.fetch(route)
+        expect(stored.provider).to.equal(1)
+        expect(stored.enabled).to.equal(true)
+        expect(Buffer.from(stored.receiver).toString('hex')).to.equal('01'.repeat(32))
+    })
+
+    it('bridge_tokens_cctp: level 0 is denied, level 2 reaches the Circle CPI', async () => {
+        // A real SPL mint on the local validator, with the wrapper authority holding 10 units.
+        const { createMint, getOrCreateAssociatedTokenAccount, mintTo, getAssociatedTokenAddressSync } = await import('@solana/spl-token')
+        const mint = await createMint(provider.connection, admin, admin.publicKey, null, 6)
+        const [wrapperPda] = wrapperAddress(1, 8002)
+        const [wrapperAuthority] = PublicKey.findProgramAddressSync(
+            [Buffer.from('LendMirrorWrapperAuth'), wrapperPda.toBuffer()],
+            PROGRAM_ID
+        )
+        const [bridgeSigner] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayer')], PROGRAM_ID)
+        const wrapperAta = await getOrCreateAssociatedTokenAccount(provider.connection, admin, mint, wrapperAuthority, true)
+        await mintTo(provider.connection, admin, mint, wrapperAta.address, admin, 10)
+        const bridgeAta = getAssociatedTokenAddressSync(mint, bridgeSigner, true)
+        const [route] = bridgeRouteAddress(mint, 11155111n)
+        await program.methods
+            .setBridgeRoute({
+                mint,
+                dstChainId: new BN(11155111),
+                provider: 1,
+                providerProgram: CCTP_TOKEN_MESSENGER_MINTER,
+                receiver: Array(32).fill(1),
+                destinationCaller: Array(32).fill(0),
+                domainOrSelector: new BN(0),
+                gasLimit: new BN(0),
+                enabled: true,
+                maxAmountPerTx: new BN(5),
+            })
+            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .rpc()
+
+        const eventData = Keypair.generate()
+        const placeholder = Keypair.generate().publicKey
+        // The instruction embeds a `BridgeCommon` accounts struct. Anchor's TS client wants it
+        // nested under its field name; the Kinobi client (lib/client/bridge.ts) flattens it.
+        const accounts = {
+            common: {
+                authority: admin.publicKey,
+                store: storePda,
+                wrapper: wrapperPda,
+                ondemand: null,
+                wrapperAuthority,
+                bridgeSigner,
+                bridgeRoute: route,
+                mint,
+                wrapperAta: wrapperAta.address,
+                bridgeAta,
+                tokenProgram: TOKEN_PROGRAM,
+                associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM,
+                systemProgram: SystemProgram.programId,
+            },
+            senderAuthorityPda: placeholder,
+            denylistAccount: placeholder,
+            messageTransmitter: placeholder,
+            tokenMessenger: placeholder,
+            remoteTokenMessenger: placeholder,
+            tokenMinter: placeholder,
+            localToken: placeholder,
+            messageSentEventData: eventData.publicKey,
+            messageTransmitterProgram: placeholder,
+            tokenMessengerMinterProgram: CCTP_TOKEN_MESSENGER_MINTER,
+            eventAuthority: placeholder,
+        }
+        const params = (amount: number) => ({
+            amount: new BN(amount),
+            dstChainId: new BN(11155111),
+            maxFee: new BN(0),
+            minFinalityThreshold: 2000,
+            feeLamports: new BN(0),
+        })
+
+        // Level 0 (set it back from 2): the wrapper constraint rejects before anything moves.
+        await program.methods.setWrapperLevel(0).accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda }).rpc()
+        try {
+            await program.methods.bridgeTokensCctp(params(3)).accounts(accounts).signers([eventData]).rpc()
+            expect.fail('expected LevelDenied')
+        } catch (err) {
+            assertLogsMatch(err, /LevelDenied|6014/)
+        }
+
+        // Over the route cap.
+        await program.methods.setWrapperLevel(2).accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda }).rpc()
+        try {
+            await program.methods.bridgeTokensCctp(params(6)).accounts(accounts).signers([eventData]).rpc()
+            expect.fail('expected AmountTooLarge')
+        } catch (err) {
+            assertLogsMatch(err, /AmountTooLarge|6020/)
+        }
+
+        // Allowed: the tokens move to the bridge signer's ATA, then the CPI into Circle fails
+        // because Circle's program is not on this validator. The whole transaction reverts, so
+        // the wrapper keeps its 10 units. This proves everything up to the provider call.
+        try {
+            await program.methods.bridgeTokensCctp(params(3)).accounts(accounts).signers([eventData]).rpc()
+            expect.fail('expected the CCTP program to be missing')
+        } catch (err) {
+            assertLogsMatch(err, /Program is not deployed|ProgramAccountNotFound|invalid account data|not executable|UnsupportedProgramId|Unsupported program id|An account required by the instruction is missing/)
+        }
+        const balance = await provider.connection.getTokenAccountBalance(wrapperAta.address)
+        expect(balance.value.amount).to.equal('10')
+    })
+
+    /** BridgeRoute PDA: ["LendMirrorBridgeRoute", mint, dst_chain_id le]. */
+    function bridgeRouteAddress(mint: PublicKey, dstChainId: bigint): [PublicKey, number] {
+        const chain = Buffer.alloc(8)
+        chain.writeBigUInt64LE(dstChainId)
+        return PublicKey.findProgramAddressSync([Buffer.from('LendMirrorBridgeRoute'), mint.toBuffer(), chain], PROGRAM_ID)
+    }
 
     /** Wrapper PDA under the V1 seed. */
     function wrapperAddress(vaultId: number, nftId: number): [PublicKey, number] {

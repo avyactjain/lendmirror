@@ -7,6 +7,8 @@
  */
 
 export * from './attachOndemand'
+export * from './bridgeTokensCcip'
+export * from './bridgeTokensCctp'
 export * from './depositPositionNft'
 export * from './getJupiterPosition'
 export * from './initStore'
@@ -15,6 +17,7 @@ export * from './quoteSend'
 export * from './refreshWrapper'
 export * from './releasePositionNft'
 export * from './sendPositionSnapshotViaChainlinkAndLz'
+export * from './setBridgeRoute'
 export * from './setCcipRoute'
 export * from './setOndemandCallers'
 export * from './setPeerConfig'

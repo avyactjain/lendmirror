@@ -27,4 +27,12 @@ pub enum LendMirrorError {
     AlreadyInCustody,
     /// A token account is not the associated token account the program expects.
     InvalidTokenAccount,
+    /// The bridge route is disabled by the admin.
+    RouteDisabled,
+    /// Amount exceeds the route's per-transaction cap.
+    AmountTooLarge,
+    /// The route is for a different bridge provider than this instruction.
+    WrongProvider,
+    /// A provider account does not match what the route or the provider program expects.
+    InvalidBridgeAccount,
 }

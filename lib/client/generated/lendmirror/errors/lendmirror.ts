@@ -259,6 +259,58 @@ export class InvalidTokenAccountError extends ProgramError {
 codeToErrorMap.set(0x1782, InvalidTokenAccountError)
 nameToErrorMap.set('InvalidTokenAccount', InvalidTokenAccountError)
 
+/** RouteDisabled:  */
+export class RouteDisabledError extends ProgramError {
+    override readonly name: string = 'RouteDisabled'
+
+    readonly code: number = 0x1783 // 6019
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1783, RouteDisabledError)
+nameToErrorMap.set('RouteDisabled', RouteDisabledError)
+
+/** AmountTooLarge:  */
+export class AmountTooLargeError extends ProgramError {
+    override readonly name: string = 'AmountTooLarge'
+
+    readonly code: number = 0x1784 // 6020
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1784, AmountTooLargeError)
+nameToErrorMap.set('AmountTooLarge', AmountTooLargeError)
+
+/** WrongProvider:  */
+export class WrongProviderError extends ProgramError {
+    override readonly name: string = 'WrongProvider'
+
+    readonly code: number = 0x1785 // 6021
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1785, WrongProviderError)
+nameToErrorMap.set('WrongProvider', WrongProviderError)
+
+/** InvalidBridgeAccount:  */
+export class InvalidBridgeAccountError extends ProgramError {
+    override readonly name: string = 'InvalidBridgeAccount'
+
+    readonly code: number = 0x1786 // 6022
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1786, InvalidBridgeAccountError)
+nameToErrorMap.set('InvalidBridgeAccount', InvalidBridgeAccountError)
+
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

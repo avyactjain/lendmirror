@@ -1,3 +1,4 @@
+pub mod bridge_tokens;
 pub mod custody;
 pub mod get_jupiter_position;
 pub mod init_store;
@@ -11,6 +12,7 @@ pub mod set_ccip_route;
 pub mod set_peer_config;
 pub mod wrap_position;
 
+pub use bridge_tokens::*;
 pub use custody::*;
 pub use get_jupiter_position::*;
 pub use init_store::*;

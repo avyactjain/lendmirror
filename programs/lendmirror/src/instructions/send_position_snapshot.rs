@@ -252,7 +252,7 @@ fn send_layerzero(
 fn send_chainlink(ctx: &Context<SendPositionSnapshotViaChainlinkAndLz>, body: &[u8]) -> Result<()> {
     let a = &ctx.accounts;
     let route = &a.ccip_route;
-    let data = ccip_send_instruction_data(route.dest_chain_selector, &route.receiver, body, route.gas_limit);
+    let data = ccip_send_instruction_data(route.dest_chain_selector, &route.receiver, body, route.gas_limit, &[], &[]);
     let metas = vec![
         AccountMeta::new_readonly(a.config.key(), false),
         AccountMeta::new(a.dest_chain_state.key(), false),
