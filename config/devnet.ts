@@ -24,6 +24,17 @@ const profile: DeploymentProfile = {
         gasLimit: 400_000,
         payer: '53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m',
     },
+    cctp: {
+        tokenMessengerMinter: 'CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe',
+        messageTransmitter: 'CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC',
+        usdcMint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        evmDomain: 0,
+        solanaDomain: 5,
+        // Sepolia MessageTransmitterV2. Verify at developers.circle.com/cctp/evm-smart-contracts before use.
+        evmMessageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+        attestationApi: 'https://iris-api-sandbox.circle.com',
+    },
+    treasury: '',
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_DEVNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_DEVNET',

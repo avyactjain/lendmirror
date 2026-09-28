@@ -14,6 +14,8 @@ const profile: DeploymentProfile = {
     evmImplementation: '0xdAAE65Df8B96e9eE45eb756441B7942e5E128924',
     lzEndpoint: '0x1a44076050125825900e736c501f859c50fE728c',
     ccip: null,
+    cctp: null,
+    treasury: '',
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_MAINNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_MAINNET',
