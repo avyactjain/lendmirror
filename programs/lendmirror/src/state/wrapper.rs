@@ -45,7 +45,8 @@ pub const LEVEL_MAX: u8 = 4;
 
 /// One PDA per Jupiter position. Seeds: `["LendMirrorWrapperV1", vault_id le, nft_id le]`.
 ///
-/// `owner` is the wallet that called `wrap_position`, not the program id.
+/// `owner` is the wallet that called `wrap_position`, replaced by whoever deposits the position
+/// NFT (`deposit_position_nft`). Never the program id.
 #[account]
 #[derive(InitSpace)]
 pub struct PositionWrapper {

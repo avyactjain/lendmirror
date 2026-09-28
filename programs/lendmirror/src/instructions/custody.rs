@@ -7,8 +7,9 @@
 //! Invariants:
 //!   - The NFT lives in the associated token account of the wrapper AUTHORITY PDA, never in a
 //!     wallet, while `wrapper.custody` is true.
-//!   - Only the wrapper owner can deposit. Only the Store admin can release, and release always
-//!     returns the NFT to the wrapper owner, never to a caller-chosen address.
+//!   - Whoever holds the NFT can deposit it, and that wallet becomes the wrapper owner. Only the
+//!     Store admin can release, and release always returns the NFT to the wrapper owner, never
+//!     to a caller-chosen address. So the NFT always goes back to the wallet that put it in.
 //!
 //! Typical call: `wrap_position` → `deposit_position_nft` → admin `set_wrapper_level 1` →
 //! `operate_position` (deposit / payback) → admin `set_wrapper_level 2` → withdraw / borrow.
@@ -57,10 +58,15 @@ impl SetWrapperLevel<'_> {
     }
 }
 
-/// Wrapper owner hands the position NFT to the wrapper authority.
+/// The NFT holder hands the position NFT to the wrapper authority and becomes the wrapper owner.
+///
+/// The wrapper may have been created by an ops wallet (a snapshotter). Requiring that wallet to
+/// also hold the NFT would make custody impossible for any position it does not own itself. So
+/// the only check on the signer is the one the token program enforces anyway: they must own the
+/// token account the NFT leaves from.
 #[derive(Accounts)]
 pub struct DepositPositionNft<'info> {
-    /// Wrapper owner. Holds the NFT now and pays for the authority's token account.
+    /// Holds the NFT now and pays for the authority's token account. Becomes `wrapper.owner`.
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -75,7 +81,6 @@ pub struct DepositPositionNft<'info> {
             &wrapper.nft_id.to_le_bytes()
         ],
         bump = wrapper.bump,
-        constraint = wrapper.is_owner(&authority.key()) @ LendMirrorError::Unauthorized,
         constraint = !wrapper.custody @ LendMirrorError::AlreadyInCustody
     )]
     pub wrapper: Box<Account<'info, PositionWrapper>>,
@@ -103,7 +108,8 @@ pub struct DepositPositionNft<'info> {
     )]
     pub position_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    /// Owner's token account holding the single NFT.
+    /// The signer's token account holding the single NFT. `token::authority = authority` is the
+    /// ownership proof: only the wallet that owns this account can sign the transfer out of it.
     #[account(
         mut,
         token::mint = position_mint,
@@ -147,6 +153,9 @@ impl DepositPositionNft<'_> {
         let wrapper = &mut ctx.accounts.wrapper;
         wrapper.custody = true;
         wrapper.position_mint = ctx.accounts.position_mint.key();
+        // The depositor owns the wrapper from now on: `release_position_nft` returns the NFT to
+        // `wrapper.owner`, so this is what guarantees it goes back to the wallet that put it in.
+        wrapper.owner = ctx.accounts.authority.key();
         Ok(())
     }
 }

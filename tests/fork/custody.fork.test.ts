@@ -3,9 +3,11 @@
  * Started by tests/fork/run.cjs. Read-only against mainnet; every transaction here hits
  * the local validator.
  *
- * Flow: init_store → Jupiter init_position (wallet gets the NFT) → wrap → deposit NFT →
- * level 1 → deposit collateral (allowed) → borrow (denied) → level 2 → borrow (allowed,
- * USDC lands in the wrapper authority's ATA) → refresh shows the debt.
+ * Flow: init_store → Jupiter init_position (wallet gets the NFT) → wallet hands the NFT to a
+ * second wallet, the "holder" → wallet (a snapshotter) wraps → holder deposits the NFT and
+ * becomes the wrapper owner → holder puts the wallet on the OnDemand list → level 1 → deposit
+ * collateral (allowed) → borrow (denied) → level 2 → borrow (allowed, USDC lands in the wrapper
+ * authority's ATA) → refresh shows the debt.
  */
 import { expect } from 'chai'
 import { readFileSync } from 'node:fs'
@@ -17,6 +19,7 @@ import {
     NATIVE_MINT,
     createAssociatedTokenAccountIdempotentInstruction,
     createSyncNativeInstruction,
+    createTransferCheckedInstruction,
     getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
 import {
@@ -54,6 +57,10 @@ describe('custody on a Jupiter mainnet fork', function () {
     const umi = createUmi(url).use(mplToolbox())
     const signer = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(wallet.secretKey))
     umi.use(signerIdentity(signer))
+    // A second wallet that holds the position NFT but is on no allowlist. It must be able to
+    // deposit the NFT into a wrapper the ops wallet created, and then own that wrapper.
+    const holder = Keypair.generate()
+    const holderSigner = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(holder.secretKey))
     const instance = new lendmirror.LendMirror(publicKey(PROGRAM_ID))
     const vaultsProgram = lendmirror.JUPITER_VAULTS_MAINNET
     let nftId = 0
@@ -63,6 +70,8 @@ describe('custody on a Jupiter mainnet fork', function () {
     before(async () => {
         const sig = await connection.requestAirdrop(wallet.publicKey, 20 * LAMPORTS_PER_SOL)
         await connection.confirmTransaction(sig, 'confirmed')
+        const sig2 = await connection.requestAirdrop(holder.publicKey, 2 * LAMPORTS_PER_SOL)
+        await connection.confirmTransaction(sig2, 'confirmed')
         const balance = await connection.getBalance(wallet.publicKey, 'confirmed')
         expect(balance).to.be.greaterThan(10 * LAMPORTS_PER_SOL)
         expect(String(signer.publicKey)).to.equal(wallet.publicKey.toBase58(), 'umi signer is the wallet')
@@ -85,12 +94,45 @@ describe('custody on a Jupiter mainnet fork', function () {
         expect(bal.value.amount).to.equal('1')
     })
 
-    it('wrap, deposit the NFT, level 1', async () => {
+    it('the NFT holder, not the wrapper creator, deposits the NFT and becomes owner', async () => {
+        // Hand the NFT to the holder with a plain token transfer.
+        const holderAta = getAssociatedTokenAddressSync(positionMint, holder.publicKey)
+        await sendAndConfirmTransaction(
+            connection,
+            new Transaction()
+                .add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, holderAta, holder.publicKey, positionMint))
+                .add(createTransferCheckedInstruction(getAssociatedTokenAddressSync(positionMint, wallet.publicKey), positionMint, holderAta, wallet.publicKey, 1, 0)),
+            [wallet]
+        )
+        // The ops wallet (a snapshotter) creates the wrapper. It is the owner for now.
         await send(instance.wrapPosition(signer, VAULT_ID, nftId))
-        await send(instance.depositPositionNft(signer, VAULT_ID, nftId, vaultsProgram))
-        await send(instance.setWrapperLevel(signer, VAULT_ID, nftId, 1))
-
         await waitVisible(toWeb3JsPublicKey(instance.pda.wrapper(VAULT_ID, nftId)[0]))
+        expect(String((await instance.getWrapper(umi.rpc, VAULT_ID, nftId))?.owner)).to.equal(wallet.publicKey.toBase58())
+
+        // The ops wallet cannot deposit: it does not hold the NFT.
+        try {
+            await send(instance.depositPositionNft(signer, VAULT_ID, nftId, vaultsProgram))
+            expect.fail('expected a token account failure')
+        } catch (err) {
+            // Its ATA for the mint may exist with balance 0 (InvalidTokenAccount) or not at all.
+            expect(String(err)).to.match(/InvalidTokenAccount|AccountNotInitialized|3012|ConstraintTokenOwner|2015/, String(err).slice(0, 2000))
+        }
+
+        // The holder deposits and takes ownership.
+        await send(instance.depositPositionNft(holderSigner, VAULT_ID, nftId, vaultsProgram), [], 400_000, [holder])
+        await waitVisible(getAssociatedTokenAddressSync(positionMint, toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(VAULT_ID, nftId)[0])[0]), true))
+        let wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
+        expect(wrapper?.custody).to.equal(true)
+        expect(String(wrapper?.owner)).to.equal(holder.publicKey.toBase58(), 'depositor owns the wrapper')
+
+        // The holder lets the ops wallet operate this one wrapper through the OnDemand list.
+        await send(instance.attachOndemand(holderSigner, VAULT_ID, nftId), [], 400_000, [holder])
+        await send(instance.setOndemandCallers(holderSigner, VAULT_ID, nftId, [holderSigner.publicKey, signer.publicKey]), [], 400_000, [holder])
+        await waitVisible(toWeb3JsPublicKey(instance.pda.ondemand(instance.pda.wrapper(VAULT_ID, nftId)[0])[0]))
+    })
+
+    it('admin sets level 1', async () => {
+        await send(instance.setWrapperLevel(signer, VAULT_ID, nftId, 1))
         const wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
         expect(wrapper?.custody).to.equal(true)
         expect(wrapper?.level).to.equal(1)
@@ -209,7 +251,8 @@ describe('custody on a Jupiter mainnet fork', function () {
     async function send(
         ixs: WrappedInstruction | WrappedInstruction[],
         tables: AddressLookupTableAccount[] = [],
-        computeUnits = 400_000
+        computeUnits = 400_000,
+        extraSigners: Keypair[] = []
     ): Promise<string> {
         const list = Array.isArray(ixs) ? ixs : [ixs]
         const instructions = [
@@ -219,7 +262,7 @@ describe('custody on a Jupiter mainnet fork', function () {
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
         const message = new TransactionMessage({ payerKey: wallet.publicKey, recentBlockhash: blockhash, instructions })
         const tx = new VersionedTransaction(message.compileToV0Message(tables))
-        tx.sign([wallet])
+        tx.sign([wallet, ...extraSigners])
         try {
             const signature = await connection.sendTransaction(tx, { skipPreflight: false })
             await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')

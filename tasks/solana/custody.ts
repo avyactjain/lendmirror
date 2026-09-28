@@ -33,7 +33,7 @@ task('lz:oapp:solana:set-wrapper-level', 'Admin: set a wrapper access level (0 m
         console.log({ level: wrapper?.level, custody: wrapper?.custody })
     })
 
-task('lz:oapp:solana:deposit-position-nft', 'Wrapper owner: move the Jupiter position NFT into the wrapper authority')
+task('lz:oapp:solana:deposit-position-nft', 'NFT holder: move the Jupiter position NFT into the wrapper authority and become the wrapper owner')
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
     .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
