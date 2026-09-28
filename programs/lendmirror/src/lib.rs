@@ -78,7 +78,8 @@ pub mod lendmirror {
         SetPeerConfig::apply(&mut ctx, &params)
     }
 
-    // Admin only. Replace wallets allowed to call get_jupiter_position.
+    // Admin only. Replace wallets allowed to read Jupiter and create wrappers
+    // (get_jupiter_position, wrap_position, refresh_wrapper).
     pub fn set_snapshotters(
         mut ctx: Context<SetSnapshotters>,
         params: SetAllowlistParams,
@@ -86,7 +87,8 @@ pub mod lendmirror {
         SetSnapshotters::apply(&mut ctx, &params)
     }
 
-    // Admin only. Replace wallets allowed to send any wrapper's snapshot.
+    // Admin only. Replace the operator wallets: they may send any wrapper's snapshot
+    // and bridge from any level 1 or 2 wrapper.
     pub fn set_senders(mut ctx: Context<SetSenders>, params: SetAllowlistParams) -> Result<()> {
         SetSenders::apply(&mut ctx, &params)
     }
@@ -163,9 +165,9 @@ pub mod lendmirror {
         ReleasePositionNft::apply(&mut ctx)
     }
 
-    // Owner, snapshotter, or OnDemand caller: deposit / withdraw / borrow / payback on the
-    // custodied Jupiter position, within the wrapper's level. Tokens only move between
-    // Jupiter and the wrapper authority's own token accounts.
+    // Owner or OnDemand caller: deposit / withdraw / borrow / payback on the custodied
+    // Jupiter position, within the wrapper's level. Tokens only move between Jupiter and
+    // the wrapper authority's own token accounts. Claim-type transfers are refused.
     pub fn operate_position<'info>(
         mut ctx: Context<'_, '_, '_, 'info, OperatePosition<'info>>,
         params: OperatePositionParams,
@@ -178,12 +180,14 @@ pub mod lendmirror {
         SetBridgeRoute::apply(&mut ctx, &params)
     }
 
-    // Level >= 1. Burn tokens through Circle CCTP v2 to the route's receiver.
+    // Owner, OnDemand caller, or sender; level 1 or 2. Burn tokens through Circle CCTP v2
+    // to the route's receiver.
     pub fn bridge_tokens_cctp(mut ctx: Context<BridgeTokensCctp>, params: BridgeTokensParams) -> Result<()> {
         BridgeTokensCctp::apply(&mut ctx, &params)
     }
 
-    // Level >= 1. Send tokens through Chainlink CCIP to the route's receiver.
+    // Owner, OnDemand caller, or sender; level 1 or 2. Send tokens through Chainlink CCIP
+    // to the route's receiver.
     pub fn bridge_tokens_ccip<'info>(
         mut ctx: Context<'_, '_, '_, 'info, BridgeTokensCcip<'info>>,
         params: BridgeTokensParams,
@@ -191,7 +195,8 @@ pub mod lendmirror {
         BridgeTokensCcip::apply(&mut ctx, &params)
     }
 
-    // Level >= 1. Send a LayerZero OFT token (USDT0, USDai, sUSDai) to the route's receiver.
+    // Owner, OnDemand caller, or sender; level 1 or 2. Send a LayerZero OFT token
+    // (USDT0, USDai, sUSDai) to the route's receiver.
     pub fn bridge_tokens_oft<'info>(
         mut ctx: Context<'_, '_, '_, 'info, BridgeTokensOft<'info>>,
         params: BridgeTokensParams,

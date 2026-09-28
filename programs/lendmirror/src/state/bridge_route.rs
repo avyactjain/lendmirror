@@ -11,7 +11,7 @@
 //!   - A route's address is fixed by `[BRIDGE_ROUTE_SEED, mint, dst_chain_id le]`, so there is
 //!     exactly one route per (token, chain).
 //!
-//! Typical call: admin `set_bridge_route` once per token and chain → any level >= 1 caller
+//! Typical call: admin `set_bridge_route` once per token and chain → an allowed caller on a level 1 or 2 wrapper
 //! runs `bridge_tokens_cctp` / `bridge_tokens_ccip` with just an amount.
 
 use anchor_lang::prelude::*;
