@@ -8,7 +8,7 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 | file | responsibility | called by |
 |---|---|---|
 | `src/lib.rs` | program id, PDA seeds, the `#[program]` entry points (one line each) | Solana runtime |
-| `src/state/store.rs` | `Store` PDA: admin, allowlists (snapshotters read, senders operate), Jupiter program id | every instruction |
+| `src/state/store.rs` | `Store` PDA: admin, allowlists (snapshotters read and wrap, senders send and bridge), Jupiter program id | every instruction |
 | `src/state/wrapper.rs` | `PositionWrapper` per position, `OnDemandStrategy` caller list, `level_allows`, send guard | wrap, refresh, send, custody, operate, bridge |
 | `src/state/jupiter_position.rs` | decoders for Jupiter accounts, the 225-byte `PositionSnapshot` and its wire codec | refresh, send, EVM codec (mirror) |
 | `src/state/ccip_route.rs`, `src/state/bridge_route.rs` | admin-set destinations: where snapshots go (CCIP) and where tokens go (per mint + chain) | send, bridge |
@@ -19,8 +19,8 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 | `src/instructions/send_position_snapshot.rs` | LayerZero CPI (Store signs) + Chainlink CPI (payer PDA signs), once per refresh | tasks, `sync-all-positions` |
 | `src/instructions/custody.rs` | `set_wrapper_level`, `deposit_position_nft`, `release_position_nft` | tasks |
 | `src/instructions/operate_position.rs` | Jupiter `operate` CPI signed by the wrapper authority PDA, gated by level | task `operate-position` |
-| `src/instructions/bridge_tokens.rs` | `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip` | task `bridge-tokens` |
-| `src/instructions/send_ccip.rs`, `src/bridges.rs` | pure byte builders for Chainlink `ccip_send` and Circle `deposit_for_burn` | send, bridge |
+| `src/instructions/bridge_tokens.rs` | `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_oft` | task `bridge-tokens` |
+| `src/instructions/send_ccip.rs`, `src/bridges.rs` | pure byte builders for Chainlink `ccip_send`, Circle `deposit_for_burn`, LayerZero OFT `send` | send, bridge |
 | `src/live_position.rs`, `src/tick_math.rs` | liquidation branch walk and tick ratio math | `compute_position_snapshot` |
 | `src/msg_codec.rs` | 32-byte LayerZero length header around the snapshot body | snapshot codec |
 
@@ -32,7 +32,7 @@ deposit_position_nft ─► NFT in ATA(wrapper authority PDA)      admin: set_wr
 operate_position ─► Jupiter operate, signer = wrapper authority PDA, recipient = same PDA
 refresh_wrapper ─► wrapper.snapshot (clock-stamped)
 send_position_snapshot_via_chainlink_and_lz ─► Endpoint (LayerZero) + Router (CCIP) ─► EVM LendMirror
-bridge_tokens_* ─► ATA(wrapper authority) → ATA(bridge signer PDA) → CCTP / CCIP ─► EVM LendMirrorTreasury
+bridge_tokens_* ─► ATA(wrapper authority) → ATA(bridge signer PDA) → CCTP / CCIP / OFT ─► EVM LendMirrorTreasury
 ```
 
 ## To change X, touch Y

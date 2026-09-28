@@ -87,7 +87,7 @@ Four new instructions.
 | `set_wrapper_level` | admin | 0 = mirror only. 1 = deposit and pay back. 2 = also withdraw and borrow. 3 and 4 = stored but everything is rejected until defined. |
 | `deposit_position_nft` | wrapper owner | moves the Jupiter position NFT from the owner's wallet into the authority PDA's token account |
 | `release_position_nft` | admin | moves it back to the wrapper owner (escape hatch; never to anyone else) |
-| `operate_position` | owner, snapshotter, or OnDemand caller | calls Jupiter `operate` with the authority PDA as signer **and** recipient, after checking the level |
+| `operate_position` | owner or OnDemand caller | calls Jupiter `operate` with the authority PDA as signer **and** recipient, after checking the level |
 
 Why this is safe: Jupiter sends withdrawn collateral and borrowed tokens to the `recipient`.
 The program always passes its own PDA there, so those tokens can only land in a program-owned
@@ -163,8 +163,8 @@ Admin set lists. Snapshotters read Jupiter. OnDemand callers armed sends. Sender
 | Role | Can do |
 |---|---|
 | Admin | set peers, lists, Chainlink route, bridge routes, wrapper levels; release an NFT to its owner |
-| Snapshotter | wrap, refresh, operate, bridge |
-| Sender (operator) | send any wrapper's snapshot, bridge |
+| Snapshotter | wrap (becomes owner), refresh |
+| Sender (operator) | send any wrapper's snapshot, bridge from any level 1 or 2 wrapper |
 | Wrapper owner | attach OnDemand, deposit the NFT, refresh, operate, bridge |
 | OnDemand caller | refresh, send, operate, bridge for that wrapper |
 | Ethereum owner | peers and upgrades on `LendMirror`; strategies, allowed senders, upgrades on `LendMirrorTreasury` |
