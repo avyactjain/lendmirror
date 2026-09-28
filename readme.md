@@ -180,6 +180,9 @@ nvm use 18
 set -a && source .env && set +a
 
 npx lm build -- --features no-log-ix-name
+# The program grew (token code): the on-chain account holds ~528 KB, the new binary is ~724 KB.
+# Extend once (upgrade authority signs), then deploy as usual.
+npx lm solana program extend GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 250000
 npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json target/deploy/lendmirror.so \
   --use-rpc --max-sign-attempts 20 --with-compute-unit-price 50000
 npm run gen:api

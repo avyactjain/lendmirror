@@ -74,6 +74,15 @@ Builds the program with `LENDMIRROR_ID` set to the profile program id.
 
 ### 2. Upgrade Solana bytecode
 
+If the new `.so` is bigger than the on-chain program account (`solana program show <id>` prints the
+data length; the deploy fails with "account data too small" otherwise), extend the account first.
+The upgrade authority signs; the cost is rent for the extra bytes.
+
+```bash
+npx lm solana program extend GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 250000
+```
+
+
 ```bash
 npx lm solana program deploy \
   --program-id target/deploy/lendmirror-keypair.json \
