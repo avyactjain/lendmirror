@@ -42,10 +42,13 @@ export type StoreAccountData = {
     endpointProgram: PublicKey
     /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
     vaultsProgram: PublicKey
-    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    /**
+     * Wallets allowed to read: `get_jupiter_position`, `wrap_position` (they become that
+     * wrapper's owner), `refresh_wrapper`. Admin updates only.
+     */
     snapshotters: Array<PublicKey>
     snapshotterCount: number
-    /** Wallets allowed to call `send`. Admin updates only. */
+    /** Operators: may send any wrapper's snapshot and bridge from any wrapper. Admin updates only. */
     senders: Array<PublicKey>
     senderCount: number
     lastPosition: Option<PositionSnapshot>
@@ -57,10 +60,13 @@ export type StoreAccountDataArgs = {
     endpointProgram: PublicKey
     /** Jupiter Lend Vaults program. Set once in init_store (Devnet vs mainnet). */
     vaultsProgram: PublicKey
-    /** Wallets allowed to call `get_jupiter_position`. Admin updates only. */
+    /**
+     * Wallets allowed to read: `get_jupiter_position`, `wrap_position` (they become that
+     * wrapper's owner), `refresh_wrapper`. Admin updates only.
+     */
     snapshotters: Array<PublicKey>
     snapshotterCount: number
-    /** Wallets allowed to call `send`. Admin updates only. */
+    /** Operators: may send any wrapper's snapshot and bridge from any wrapper. Admin updates only. */
     senders: Array<PublicKey>
     senderCount: number
     lastPosition: OptionOrNullable<PositionSnapshotArgs>

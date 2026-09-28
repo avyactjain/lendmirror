@@ -18,6 +18,11 @@ export class LendMirrorPDA extends OmniAppPDA {
     static PEER_SEED = 'LendMirrorPeer'
     static JUP_POSITION_SEED = 'JupPosition'
     static NONCE_SEED = 'Nonce'
+    /** V1: layout grew (level, custody, send guard). Old `LendMirrorWrapper` accounts are abandoned. */
+    static WRAPPER_SEED = 'LendMirrorWrapperV1'
+    static ONDEMAND_SEED = 'LendMirrorOnDemand'
+    /** Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`. */
+    static WRAPPER_AUTH_SEED = 'LendMirrorWrapperAuth'
 
     constructor(public readonly programId: PublicKey) {
         super(programId)
@@ -65,6 +70,31 @@ export class LendMirrorPDA extends OmniAppPDA {
             Buffer.from(LendMirrorPDA.JUP_POSITION_SEED, 'utf8'),
             u16Le(vaultId),
             u32Le(nftId),
+        ])
+    }
+
+    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]  (WRAPPER_SEED = LendMirrorWrapperV1)
+    wrapper(vaultId: number, nftId: number): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.WRAPPER_SEED, 'utf8'),
+            u16Le(vaultId),
+            u32Le(nftId),
+        ])
+    }
+
+    // seeds = [ONDEMAND_SEED, wrapper.key()]
+    ondemand(wrapper: PublicKey): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.ONDEMAND_SEED, 'utf8'),
+            publicKeyBytes(wrapper),
+        ])
+    }
+
+    // seeds = [WRAPPER_AUTH_SEED, wrapper.key()]. Never created as an account; it only signs.
+    wrapperAuthority(wrapper: PublicKey): Pda {
+        return eddsa.findPda(this.programId, [
+            Buffer.from(LendMirrorPDA.WRAPPER_AUTH_SEED, 'utf8'),
+            publicKeyBytes(wrapper),
         ])
     }
 }

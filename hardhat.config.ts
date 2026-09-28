@@ -5,11 +5,6 @@ process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({
     esModuleInterop: true,
 })
 
-// Get the environment configuration from .env file
-//
-// To make use of automatic environment setup:
-// - Duplicate .env.example file and name it .env
-// - Fill in the environment variables
 import 'dotenv/config'
 
 import 'hardhat-deploy'
@@ -22,27 +17,25 @@ import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
+import { getProfile } from './lib/deployment'
+
 import './tasks/index'
 
-// Set your preferred authentication method
-//
-// If you prefer using a mnemonic, set a MNEMONIC environment variable
-// to a valid mnemonic
-const MNEMONIC = process.env.MNEMONIC
+const profile = getProfile()
 
-// If you prefer to be authenticated using a private key, set a PRIVATE_KEY environment variable
-const PRIVATE_KEY = process.env.PRIVATE_KEY
+function accountsFor(envName: string): HttpNetworkAccountsUserConfig | undefined {
+    const key = process.env[envName]?.trim()
+    if (!key) {
+        console.warn(`Missing ${envName}. EVM writes for DEPLOYMENT_TYPE=${profile.type} will fail.`)
+        return undefined
+    }
+    return [key]
+}
 
-const accounts: HttpNetworkAccountsUserConfig | undefined = MNEMONIC
-    ? { mnemonic: MNEMONIC }
-    : PRIVATE_KEY
-        ? [PRIVATE_KEY]
-        : undefined
-
-if (accounts == null) {
-    console.warn(
-        'Could not find MNEMONIC or PRIVATE_KEY environment variables. It will not be possible to execute transactions in your example.'
-    )
+const activeAccounts = accountsFor(profile.env.evmPrivateKey)
+const activeEvmRpc = process.env[profile.env.evmRpc]?.trim()
+if (!activeEvmRpc) {
+    console.warn(`Missing ${profile.env.evmRpc}. EVM writes for DEPLOYMENT_TYPE=${profile.type} will fail.`)
 }
 
 const config: HardhatUserConfig = {
@@ -62,26 +55,25 @@ const config: HardhatUserConfig = {
             },
         ],
     },
+    defaultNetwork: profile.evmNetwork,
     networks: {
-        // LendMirror destination. eid 40161 = Ethereum Sepolia (not Arbitrum Sepolia 40231).
         sepolia: {
             eid: EndpointId.SEPOLIA_V2_TESTNET,
-            url: process.env.RPC_URL_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
-            accounts,
+            url: profile.type === 'devnet' ? activeEvmRpc : process.env.RPC_URL_EVM_DEVNET,
+            accounts: profile.type === 'devnet' ? activeAccounts : undefined,
         },
         arbitrum: {
-            eid: EndpointId.ARBITRUM_V2_MAINNET, // 30110
-            url: process.env.RPC_URL_ARBITRUM,
-            accounts,
+            eid: EndpointId.ARBITRUM_V2_MAINNET,
+            url: profile.type === 'mainnet' ? activeEvmRpc : process.env.RPC_URL_EVM_MAINNET,
+            accounts: profile.type === 'mainnet' ? activeAccounts : undefined,
         },
         hardhat: {
-            // Need this for testing because TestHelperOz5.sol is exceeding the compiled contract size limit
             allowUnlimitedContractSize: true,
         },
     },
     namedAccounts: {
         deployer: {
-            default: 0, // wallet address of index[0], of the mnemonic in .env
+            default: 0,
         },
     },
 }

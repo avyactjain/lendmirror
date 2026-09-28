@@ -5,10 +5,9 @@ import { publicKey, transactionBuilder } from '@metaplex-foundation/umi'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
-import { denormalizePeer } from '@layerzerolabs/devtools'
-
 import { lendmirror } from '../../lib/client'
 import { initOAppNonce } from '../../lib/client/lendmirror'
+import { resolveEvmEid, resolveEvmNetwork, resolveSolanaEid } from '../common/deployment'
 
 import {
     TransactionType,
@@ -38,28 +37,24 @@ function evmAddressFromDeployments(network: string, contractName: string): strin
 }
 
 task('lz:oapp:solana:set-peer', 'Admin: set EVM peer on Solana and init LayerZero nonce for that address')
-    .addParam('eid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
-    .addParam('dstEid', 'Destination endpoint ID (40161 = Sepolia)', undefined, types.int)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('dstEid', 'Destination endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('peer', 'EVM proxy address. Default: deployments/<evm-network>/LendMirror.json', undefined, types.string)
-    .addOptionalParam('evmNetwork', 'Hardhat network folder under deployments/', 'sepolia', types.string)
+    .addOptionalParam('evmNetwork', 'Hardhat network folder under deployments/. Default: profile.', undefined, types.string)
     .addOptionalParam('contractName', 'EVM deployment JSON name', 'LendMirror', types.string)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(
         async ({
-            eid,
-            dstEid,
+            eid: eidArg,
+            dstEid: dstArg,
             peer,
-            evmNetwork,
+            evmNetwork: networkArg,
             contractName,
             computeUnitPriceScaleFactor,
-        }: {
-            eid: number
-            dstEid: number
-            peer?: string
-            evmNetwork: string
-            contractName: string
-            computeUnitPriceScaleFactor: number
         }) => {
+            const eid = resolveSolanaEid(eidArg)
+            const dstEid = resolveEvmEid(dstArg)
+            const evmNetwork = resolveEvmNetwork(networkArg)
             const evm = peer ?? evmAddressFromDeployments(evmNetwork, contractName)
             const remote = evmAddressToBytes32(evm)
             const solanaDeployment = getSolanaDeployment(eid)
@@ -109,14 +104,16 @@ task('lz:oapp:solana:set-peer', 'Admin: set EVM peer on Solana and init LayerZer
     )
 
 task('lz:oapp:solana:get-peer', 'Print the EVM address stored as peer on Solana (does not read DVNs)')
-    .addParam('eid', 'Solana endpoint ID', undefined, types.int)
-    .addParam('dstEid', 'Destination endpoint ID', undefined, types.int)
-    .setAction(async ({ eid, dstEid }: { eid: number; dstEid: number }) => {
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('dstEid', 'Destination endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .setAction(async ({ eid: eidArg, dstEid: dstArg }) => {
+        const eid = resolveSolanaEid(eidArg)
+        const dstEid = resolveEvmEid(dstArg)
         const solanaDeployment = getSolanaDeployment(eid)
         const { umi } = await deriveConnection(eid, true)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))
         const [peerPda] = instance.pda.peer(dstEid)
         const info = await lendmirror.accounts.fetchPeerConfig(umi, peerPda)
         console.log('peer pda', peerPda)
-        console.log('evm peer', denormalizePeer(info.peerAddress, dstEid))
+        console.log('peer address', Buffer.from(info.peerAddress).toString('hex'))
     })

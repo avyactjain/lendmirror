@@ -15,7 +15,13 @@ import { PeerConfigParam, PeerConfigParamArgs, getPeerConfigParamSerializer } fr
 export type SetPeerConfigInstructionAccounts = {
     /** Admin of the OApp store */
     admin: Signer
-    /** Peer configuration PDA for a specific remote chain */
+    /**
+     * Peer configuration PDA for a specific remote chain.
+     *
+     * Peers created by an older build are 81 bytes; `SIZE` is now 1601. `init_if_needed`
+     * leaves an existing account alone, so `apply` grows it before writing long options.
+     */
+
     peer: PublicKey | Pda
     /** Store PDA of this OApp */
     store: PublicKey | Pda

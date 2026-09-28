@@ -18,7 +18,10 @@ pub struct SetPeerConfig<'info> {
         seeds = [PEER_SEED, &store.key().to_bytes(), &params.remote_eid.to_be_bytes()],
         bump
     )]
-    /// Peer configuration PDA for a specific remote chain
+    /// Peer configuration PDA for a specific remote chain.
+    ///
+    /// Peers created by an older build are 81 bytes; `SIZE` is now 1601. `init_if_needed`
+    /// leaves an existing account alone, so `apply` grows it before writing long options.
     pub peer: Account<'info, PeerConfig>,
     #[account(seeds = [STORE_SEED], bump = store.bump)]
     /// Store PDA of this OApp
@@ -28,6 +31,25 @@ pub struct SetPeerConfig<'info> {
 
 impl SetPeerConfig<'_> {
     pub fn apply(ctx: &mut Context<SetPeerConfig>, params: &SetPeerConfigParams) -> Result<()> {
+        // Grow a peer account created with the old, too-small size (admin pays the rent gap).
+        let peer_info = ctx.accounts.peer.to_account_info();
+        if peer_info.data_len() < PeerConfig::SIZE {
+            let rent = Rent::get()?.minimum_balance(PeerConfig::SIZE);
+            let missing = rent.saturating_sub(peer_info.lamports());
+            if missing > 0 {
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        ctx.accounts.system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: ctx.accounts.admin.to_account_info(),
+                            to: peer_info.clone(),
+                        },
+                    ),
+                    missing,
+                )?;
+            }
+            peer_info.realloc(PeerConfig::SIZE, false)?;
+        }
         // Update or create the peer config PDA
         match params.config.clone() {
             PeerConfigParam::PeerAddress(peer_address) => {

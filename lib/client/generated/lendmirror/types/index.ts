@@ -6,6 +6,7 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
+export * from './bridgeTokensParams'
 export * from './enforcedOptions'
 export * from './messagingFee'
 export * from './peerConfigParam'

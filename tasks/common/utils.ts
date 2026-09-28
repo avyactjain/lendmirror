@@ -30,14 +30,23 @@ import {
 } from '@layerzerolabs/ua-devtools-evm-hardhat'
 
 import { createSimpleOAppFactory } from '../../lib/factory'
+import { getProfile } from '../../lib/deployment'
 
-export const createSolanaConnectionFactory = () =>
-    createConnectionFactory(
+export const createSolanaConnectionFactory = () => {
+    const profile = getProfile()
+    const rpc = process.env[profile.env.solanaRpc]?.trim()
+    if (!rpc) {
+        throw new Error(`Missing ${profile.env.solanaRpc}. Set it in .env for DEPLOYMENT_TYPE=${profile.type}.`)
+    }
+    return createConnectionFactory(
         createRpcUrlFactory({
-            [EndpointId.SOLANA_V2_MAINNET]: process.env.RPC_URL_SOLANA,
-            [EndpointId.SOLANA_V2_TESTNET]: process.env.RPC_URL_SOLANA_TESTNET,
+            [EndpointId.SOLANA_V2_MAINNET]:
+                profile.type === 'mainnet' ? rpc : process.env.RPC_URL_SOLANA_MAINNET,
+            [EndpointId.SOLANA_V2_TESTNET]:
+                profile.type === 'devnet' ? rpc : process.env.RPC_URL_SOLANA_DEVNET,
         })
     )
+}
 
 export const createSdkFactory = (
     userAccount: PublicKey,

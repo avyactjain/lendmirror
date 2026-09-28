@@ -5,21 +5,16 @@ import { task, types } from 'hardhat/config'
 import { EndpointId } from '@layerzerolabs/lz-definitions'
 
 import { lendmirror } from '../../lib/client'
+import { resolveSolanaEid } from '../common/deployment'
 import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
 
-interface Args {
-    eid: EndpointId
-    vaultId: number
-    nftId: number
-    computeUnitPriceScaleFactor: number
-}
-
 task('lz:oapp:solana:get-jupiter-position', 'Reads a Jupiter Vaults position into Store.last_position')
-    .addParam('eid', 'Solana endpoint ID (40168 = Devnet)', undefined, types.int)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
     .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid, vaultId, nftId, computeUnitPriceScaleFactor }: Args) => {
+    .setAction(async ({ eid: eidArg, vaultId, nftId, computeUnitPriceScaleFactor }) => {
+        const eid = resolveSolanaEid(eidArg) as EndpointId
         const isTestnet = eid == EndpointId.SOLANA_V2_TESTNET
         const solanaDeployment = getSolanaDeployment(eid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)

@@ -16,7 +16,15 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 tests/**/*.test.ts"
+test = "yarn run ts-mocha -b -p ./tsconfig.json -t 10000000 tests/*.test.ts"
+
+# Load our program as UPGRADEABLE with the test wallet as upgrade authority.
+# `init_store` only accepts the upgrade authority, and the default `--bpf-program`
+# load disables upgrades (no authority at all), which makes that test fail.
+[[test.genesis]]
+address = "GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1"
+program = "target/deploy/lendmirror.so"
+upgradeable = true
 
 # Clone LayerZero Endpoint so init_store can register_oapp on the test validator.
 [test.validator]

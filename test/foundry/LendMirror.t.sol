@@ -166,6 +166,66 @@ contract LendMirrorReceiveTest is Test {
         app.ccipReceive(wrongChain);
     }
 
+    function testOlderDeliveryIsIgnoredAndNewerWins() public {
+        bytes32 position = hex"0101010101010101010101010101010101010101010101010101010101010101";
+        bytes memory newer = _payloadAt(1_700_000_010);
+        bytes memory older = _payloadAt(1_700_000_000);
+        Origin memory origin = Origin({ srcEid: 40168, sender: bytes32(uint256(1)), nonce: 1 });
+
+        app.exposeLzReceive(origin, bytes32(0), newer);
+        assertEq(app.fromLayerZero(position).snapshot.snapshotTime, 1_700_000_010);
+
+        // The older snapshot arrives late: acknowledged, dropped, storage unchanged.
+        vm.expectEmit(true, false, false, true, address(app));
+        emit LendMirror.StaleDeliveryIgnored(position, false, 1_700_000_000, 1_700_000_010);
+        app.exposeLzReceive(origin, bytes32(0), older);
+        assertEq(app.fromLayerZero(position).snapshot.snapshotTime, 1_700_000_010);
+        assertEq(app.lastPosition().snapshotTime, 1_700_000_010);
+
+        // Same time overwrites (idempotent retry).
+        app.exposeLzReceive(origin, bytes32(0), newer);
+        assertEq(app.fromLayerZero(position).snapshot.snapshotTime, 1_700_000_010);
+    }
+
+    function testStaleChainlinkDeliveryDoesNotUnmatch() public {
+        bytes32 position = hex"0101010101010101010101010101010101010101010101010101010101010101";
+        bytes memory frame = _payloadAt(1_700_000_010);
+        app.exposeLzReceive(Origin({ srcEid: 40168, sender: bytes32(uint256(1)), nonce: 1 }), bytes32(0), frame);
+        _allowCcip();
+        app.ccipReceive(_ccip(_body(frame)));
+        assertTrue(app.matched(position));
+
+        app.ccipReceive(_ccip(_body(_payloadAt(1_700_000_000))));
+        assertTrue(app.matched(position), "an old Chainlink copy must not undo a match");
+    }
+
+    function testPositionsListedOnceInFirstSeenOrder() public {
+        bytes memory frame = _payload();
+        Origin memory origin = Origin({ srcEid: 40168, sender: bytes32(uint256(1)), nonce: 1 });
+        assertEq(app.positionCount(), 0);
+
+        app.exposeLzReceive(origin, bytes32(0), frame);
+        _allowCcip();
+        app.ccipReceive(_ccip(_body(frame)));
+        assertEq(app.positionCount(), 1, "both routers, same position, listed once");
+        assertEq(app.positions(0), hex"0101010101010101010101010101010101010101010101010101010101010101");
+
+        bytes memory other = _payload();
+        other[32] = hex"02"; // first byte of `position`
+        app.exposeLzReceive(origin, bytes32(0), other);
+        assertEq(app.positionCount(), 2);
+        assertEq(app.positions(1), hex"0201010101010101010101010101010101010101010101010101010101010101");
+    }
+
+    /// `_payload()` with a different `snapshotTime` (the last 8 body bytes).
+    function _payloadAt(int64 snapshotTime) internal pure returns (bytes memory frame) {
+        frame = _payload();
+        bytes8 t = bytes8(uint64(snapshotTime));
+        for (uint256 i = 0; i < 8; i++) {
+            frame[32 + 217 + i] = t[i];
+        }
+    }
+
     function _body(bytes memory frame) internal pure returns (bytes memory body) {
         body = new bytes(225);
         for (uint256 i = 0; i < 225; i++) {

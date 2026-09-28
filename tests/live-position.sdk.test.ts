@@ -2,7 +2,7 @@
  * Jupiter side: `getPositionByVaultIdV2`.
  * Our side: the Rust program (`cargo run --bin live-position`).
  *
- * Needs `RPC_URL_SOLANA`. Optional: `JUP_VAULT_ID` (default 1), `JUP_NFT_ID` (default 1).
+ * Needs `RPC_URL_SOLANA_MAINNET`. Optional: `JUP_VAULT_ID` (default 1), `JUP_NFT_ID` (default 1).
  *
  *   npm run test:jup-live
  */
@@ -12,7 +12,7 @@ import { execFileSync } from 'child_process'
 import path from 'path'
 import { expect } from 'chai'
 
-const rpcUrl = process.env.RPC_URL_SOLANA
+const rpcUrl = process.env.RPC_URL_SOLANA_MAINNET
 const vaultId = Number(process.env.JUP_VAULT_ID ?? 1)
 const nftId = Number(process.env.JUP_NFT_ID ?? 1)
 

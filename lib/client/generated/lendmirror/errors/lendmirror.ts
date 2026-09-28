@@ -168,6 +168,149 @@ export class MissingLiquidationRecordError extends ProgramError {
 codeToErrorMap.set(0x177b, MissingLiquidationRecordError)
 nameToErrorMap.set('MissingLiquidationRecord', MissingLiquidationRecordError)
 
+/** InvalidCcipAccount:  */
+export class InvalidCcipAccountError extends ProgramError {
+    override readonly name: string = 'InvalidCcipAccount'
+
+    readonly code: number = 0x177c // 6012
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177c, InvalidCcipAccountError)
+nameToErrorMap.set('InvalidCcipAccount', InvalidCcipAccountError)
+
+/** SnapshotAlreadySent:  */
+export class SnapshotAlreadySentError extends ProgramError {
+    override readonly name: string = 'SnapshotAlreadySent'
+
+    readonly code: number = 0x177d // 6013
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177d, SnapshotAlreadySentError)
+nameToErrorMap.set('SnapshotAlreadySent', SnapshotAlreadySentError)
+
+/** LevelDenied:  */
+export class LevelDeniedError extends ProgramError {
+    override readonly name: string = 'LevelDenied'
+
+    readonly code: number = 0x177e // 6014
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177e, LevelDeniedError)
+nameToErrorMap.set('LevelDenied', LevelDeniedError)
+
+/** InvalidLevel:  */
+export class InvalidLevelError extends ProgramError {
+    override readonly name: string = 'InvalidLevel'
+
+    readonly code: number = 0x177f // 6015
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x177f, InvalidLevelError)
+nameToErrorMap.set('InvalidLevel', InvalidLevelError)
+
+/** NoCustody:  */
+export class NoCustodyError extends ProgramError {
+    override readonly name: string = 'NoCustody'
+
+    readonly code: number = 0x1780 // 6016
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1780, NoCustodyError)
+nameToErrorMap.set('NoCustody', NoCustodyError)
+
+/** AlreadyInCustody:  */
+export class AlreadyInCustodyError extends ProgramError {
+    override readonly name: string = 'AlreadyInCustody'
+
+    readonly code: number = 0x1781 // 6017
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1781, AlreadyInCustodyError)
+nameToErrorMap.set('AlreadyInCustody', AlreadyInCustodyError)
+
+/** InvalidTokenAccount:  */
+export class InvalidTokenAccountError extends ProgramError {
+    override readonly name: string = 'InvalidTokenAccount'
+
+    readonly code: number = 0x1782 // 6018
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1782, InvalidTokenAccountError)
+nameToErrorMap.set('InvalidTokenAccount', InvalidTokenAccountError)
+
+/** RouteDisabled:  */
+export class RouteDisabledError extends ProgramError {
+    override readonly name: string = 'RouteDisabled'
+
+    readonly code: number = 0x1783 // 6019
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1783, RouteDisabledError)
+nameToErrorMap.set('RouteDisabled', RouteDisabledError)
+
+/** AmountTooLarge:  */
+export class AmountTooLargeError extends ProgramError {
+    override readonly name: string = 'AmountTooLarge'
+
+    readonly code: number = 0x1784 // 6020
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1784, AmountTooLargeError)
+nameToErrorMap.set('AmountTooLarge', AmountTooLargeError)
+
+/** WrongProvider:  */
+export class WrongProviderError extends ProgramError {
+    override readonly name: string = 'WrongProvider'
+
+    readonly code: number = 0x1785 // 6021
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1785, WrongProviderError)
+nameToErrorMap.set('WrongProvider', WrongProviderError)
+
+/** InvalidBridgeAccount:  */
+export class InvalidBridgeAccountError extends ProgramError {
+    override readonly name: string = 'InvalidBridgeAccount'
+
+    readonly code: number = 0x1786 // 6022
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1786, InvalidBridgeAccountError)
+nameToErrorMap.set('InvalidBridgeAccount', InvalidBridgeAccountError)
+
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

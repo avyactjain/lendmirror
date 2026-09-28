@@ -13,6 +13,7 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 // Accounts.
 export type QuoteSendInstructionAccounts = {
     store: PublicKey | Pda
+    wrapper: PublicKey | Pda
     peer: PublicKey | Pda
     endpoint: PublicKey | Pda
 }
@@ -66,8 +67,9 @@ export function quoteSend(
     // Accounts.
     const resolvedAccounts = {
         store: { index: 0, isWritable: false as boolean, value: input.store ?? null },
-        peer: { index: 1, isWritable: false as boolean, value: input.peer ?? null },
-        endpoint: { index: 2, isWritable: false as boolean, value: input.endpoint ?? null },
+        wrapper: { index: 1, isWritable: false as boolean, value: input.wrapper ?? null },
+        peer: { index: 2, isWritable: false as boolean, value: input.peer ?? null },
+        endpoint: { index: 3, isWritable: false as boolean, value: input.endpoint ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

@@ -44,8 +44,9 @@ interface IAny2EVMMessageReceiver {
     function ccipReceive(Any2EVMMessage calldata message) external;
 }
 
-/// Ethereum receiver for LendMirror. Solana `send` is the LayerZero sender.
-/// Solana `send_ccip` is the Chainlink sender. Both carry the same 225-byte body.
+/// Ethereum receiver for LendMirror. The Solana Store PDA is the LayerZero sender and the
+/// Solana CCIP payer PDA is the Chainlink sender; one Solana instruction drives both. Both
+/// carry the same 225-byte body.
 /// Deployed behind a UUPS proxy. Address stays the same when you upgrade logic.
 /// Owner upgrades (`upgradeToAndCall`) and sets peers.
 contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOAppCore, IOAppReceiver, IOAppOptionsType3 {
@@ -67,6 +68,10 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
     /// Emitted when both routers have delivered the same body for this position.
     event PositionsMatched(bytes32 indexed position, bytes32 bodyHash);
 
+    /// A router delivered a snapshot older than the one already stored for this position.
+    /// The delivery is acknowledged and dropped. `fromChainlink` is false for LayerZero.
+    event StaleDeliveryIgnored(bytes32 indexed position, bool fromChainlink, int64 snapshotTime, int64 storedTime);
+
     /// LayerZero Endpoint on this chain. Fixed per implementation; set in constructor.
     ILayerZeroEndpointV2 public immutable endpoint;
 
@@ -87,6 +92,11 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
 
     mapping(bytes32 position => Delivery) private layerZeroDelivery;
     mapping(bytes32 position => Delivery) private chainlinkDelivery;
+
+    /// Every position that has been delivered at least once, by either router, in first-seen order.
+    /// Lets an EVM reader or the `lz:oapp:evm:match --all` task walk all mirrored positions.
+    bytes32[] public positions;
+    mapping(bytes32 position => bool) private known;
 
     error OnlyEndpoint(address addr);
     error OnlyCcipRouter(address addr);
@@ -130,6 +140,10 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
 
     function fromChainlink(bytes32 position) external view returns (Delivery memory) {
         return chainlinkDelivery[position];
+    }
+
+    function positionCount() external view returns (uint256) {
+        return positions.length;
     }
 
     /// True only when both routers have delivered this position and the bodies are equal.
@@ -213,15 +227,21 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
         bytes calldata /*_extraData*/
     ) internal virtual {
         if (payload.length < 32) revert LzPayloadTooShort();
-        lastPosition_ = _writeDelivery(layerZeroDelivery, payload);
+        (PositionSnapshotMsgCodec.Snapshot memory snapshot, bool written) = _writeDelivery(
+            layerZeroDelivery,
+            false,
+            payload
+        );
+        if (!written) return;
+        lastPosition_ = snapshot;
         lastUpdatedTs = uint64(block.timestamp);
         lastUpdatedBlock = uint64(block.number);
         emit PositionReceived(
             _origin.srcEid,
             _guid,
-            lastPosition_.vaultId,
-            lastPosition_.nftId,
-            lastPosition_.snapshotTime,
+            snapshot.vaultId,
+            snapshot.nftId,
+            snapshot.snapshotTime,
             lastUpdatedTs,
             lastUpdatedBlock
         );
@@ -239,19 +259,42 @@ contract LendMirror is Initializable, OwnableUpgradeable, UUPSUpgradeable, IOApp
             revert UnexpectedCcipSource(message.sourceChainSelector);
         }
         if (keccak256(message.sender) != keccak256(ccipSender)) revert UnexpectedCcipSender();
-        PositionSnapshotMsgCodec.Snapshot memory snapshot = _writeDelivery(chainlinkDelivery, message.data);
+        (PositionSnapshotMsgCodec.Snapshot memory snapshot, bool written) = _writeDelivery(
+            chainlinkDelivery,
+            true,
+            message.data
+        );
+        if (!written) return;
         emit ChainlinkPositionReceived(message.messageId, snapshot.position, snapshot.vaultId, snapshot.nftId);
     }
 
+    /// Store one router's copy, newest snapshot wins.
+    ///
+    /// Solana sends each snapshot at most once, but the two routers deliver at different
+    /// speeds and a slow delivery can land after a newer one. An older `snapshotTime` is
+    /// dropped without reverting: a LayerZero revert only parks the packet for a retry, and
+    /// a CCIP revert leaves the message waiting for manual execution. Equal times overwrite
+    /// (same bytes, harmless). Returns `written = false` for a dropped delivery.
     function _writeDelivery(
         mapping(bytes32 => Delivery) storage slot,
+        bool fromChainlink,
         bytes calldata payload
-    ) internal returns (PositionSnapshotMsgCodec.Snapshot memory snapshot) {
+    ) internal returns (PositionSnapshotMsgCodec.Snapshot memory snapshot, bool written) {
         bytes calldata body = PositionSnapshotMsgCodec.snapshotBody(payload);
         snapshot = PositionSnapshotMsgCodec.decodeBody(body);
+        Delivery storage current = slot[snapshot.position];
+        if (current.received && snapshot.snapshotTime < current.snapshot.snapshotTime) {
+            emit StaleDeliveryIgnored(snapshot.position, fromChainlink, snapshot.snapshotTime, current.snapshot.snapshotTime);
+            return (snapshot, false);
+        }
         bytes32 bodyHash = keccak256(body);
         slot[snapshot.position] = Delivery({ snapshot: snapshot, bodyHash: bodyHash, received: true });
+        if (!known[snapshot.position]) {
+            known[snapshot.position] = true;
+            positions.push(snapshot.position);
+        }
         if (matched(snapshot.position)) emit PositionsMatched(snapshot.position, bodyHash);
+        written = true;
     }
 
     function _assertOptionsType3(bytes memory _options) internal pure {

@@ -4,7 +4,11 @@
   "private": true,
   "license": "MIT",
   "type": "commonjs",
+  "bin": {
+    "lm": "./bin/lm.js"
+  },
   "scripts": {
+    "lm": "node ./bin/lm.js",
     "clean": "rm -rf artifacts cache out",
     "compile": "concurrently -c auto --names forge,hardhat '$npm_execpath run compile:forge' '$npm_execpath run compile:hardhat' '$npm_execpath run compile:anchor'",
     "compile:anchor": "anchor build",
@@ -19,17 +23,21 @@
     "test:anchor": "anchor test",
     "test:forge": "forge test",
     "test:hardhat": "hardhat test",
-    "test:jup-live": "mocha --timeout 300000 tests/run-jup-live.cjs"
+    "test:jup-live": "mocha --timeout 300000 tests/run-jup-live.cjs",
+    "test:fork": "node tests/fork/run.cjs"
   },
   "resolutions": {
     "ethers": "^5.7.2",
     "hardhat-deploy": "^0.12.1"
   },
   "dependencies": {
+    "@jup-ag/lend": "^0.3.0",
     "@kinobi-so/nodes": "^0.21.4",
     "@kinobi-so/nodes-from-anchor": "^0.21.2",
     "@kinobi-so/renderers": "^0.21.3",
     "@kinobi-so/renderers-js-umi": "^0.21.6",
+    "@layerzerolabs/oft-v2-solana-sdk": "^3.0.168",
+    "@solana/spl-token": "^0.4.13",
     "kinobi": "^0.21.4"
   },
   "devDependencies": {

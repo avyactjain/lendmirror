@@ -71,7 +71,7 @@ task(TASK_LZ_OAPP_WIRE)
         //
         //
 
-        // construct the user's keypair via the SOLANA_PRIVATE_KEY env var
+        // construct the user's keypair via SOLANA_KEYPAIR_PATH_<DEPLOYMENT_TYPE>
         const keypair = (await useWeb3Js()).web3JsKeypair // note: this can be replaced with getSolanaKeypair() if we are okay to export that
         const userAccount = keypair.publicKey
 
@@ -96,7 +96,7 @@ task(TASK_LZ_OAPP_WIRE)
 
         // We'll need a connection factory to be able to query the Solana network
         //
-        // If you haven't set RPC_URL_SOLANA and/or RPC_URL_SOLANA_TESTNET environment variables,
+        // If you haven't set RPC_URL_SOLANA_DEVNET and/or RPC_URL_SOLANA_MAINNET,
         // the factory will use the default public RPC URLs
         const connectionFactory = createSolanaConnectionFactory()
 

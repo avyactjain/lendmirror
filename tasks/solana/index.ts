@@ -25,7 +25,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 import { toWeb3JsInstruction, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import { AddressLookupTableAccount, Connection, Keypair } from '@solana/web3.js'
-import { getKeypairFromEnvironment, getKeypairFromFile, getSimulationComputeUnits } from '@solana-developers/helpers'
+import { getSimulationComputeUnits } from '@solana-developers/helpers'
 import { backOff } from 'exponential-backoff'
 
 import { formatEid } from '@layerzerolabs/devtools'
@@ -41,19 +41,6 @@ const LOOKUP_TABLE_ADDRESS: Partial<Record<EndpointId, PublicKey>> = {
     [EndpointId.SOLANA_V2_TESTNET]: publicKey('9thqPdbR27A1yLWw2spwJLySemiGMXxPnEvfmXVk4KuK'),
 }
 
-// create a safe version of getKeypairFromFile that returns undefined if the file does not exist, for checking the default keypair
-async function safeGetKeypairDefaultPath(filePath?: string) {
-    try {
-        return await getKeypairFromFile(filePath)
-    } catch (error) {
-        // If the error is due to the file not existing, return undefined
-        if (error instanceof Error && error.message.includes('Could not read keypair')) {
-            return undefined
-        }
-        throw error // Rethrow if it's a different error
-    }
-}
-
 // TODO in another PR: consider moving keypair related functions to tasks/solana/utils.ts
 async function getSolanaKeypair(readOnly = false): Promise<Keypair> {
     const logger = createLogger()
@@ -64,60 +51,13 @@ async function getSolanaKeypair(readOnly = false): Promise<Keypair> {
         return Keypair.generate()
     }
 
-    // Attempt to load from each source
-    const keypairEnvPrivate = process.env.SOLANA_PRIVATE_KEY
-        ? getKeypairFromEnvironment('SOLANA_PRIVATE_KEY')
-        : undefined // #1 SOLANA_PRIVATE_KEY
-    const keypairEnvPath = process.env.SOLANA_KEYPAIR_PATH
-        ? await getKeypairFromFile(process.env.SOLANA_KEYPAIR_PATH)
-        : undefined // #2 SOLANA_KEYPAIR_PATH
-    const keypairDefaultPath = await safeGetKeypairDefaultPath() // #3 ~/.config/solana/id.json
-
-    // Throw if no keypair is found via all 3 methods
-    if (!keypairEnvPrivate && !keypairEnvPath && !keypairDefaultPath) {
-        throw new Error(
-            'No Solana keypair found. Provide SOLANA_PRIVATE_KEY, ' +
-                'SOLANA_KEYPAIR_PATH, or place a valid keypair at ~/.config/solana/id.json.'
-        )
-    }
-
-    // If both environment-based keys exist, ensure they match
-    if (keypairEnvPrivate && keypairEnvPath) {
-        if (keypairEnvPrivate.publicKey.equals(keypairEnvPath.publicKey)) {
-            logger.info('Both SOLANA_PRIVATE_KEY and SOLANA_KEYPAIR_PATH match. Using environment-based keypair.')
-            return keypairEnvPrivate
-        } else {
-            throw new Error(
-                `Conflict: SOLANA_PRIVATE_KEY and SOLANA_KEYPAIR_PATH are different keypairs.\n` +
-                    `Path: ${process.env.SOLANA_KEYPAIR_PATH} => ${keypairEnvPath.publicKey.toBase58()}\n` +
-                    `Env : ${keypairEnvPrivate.publicKey.toBase58()}`
-            )
-        }
-    }
-
-    // If exactly one environment-based keypair is found, use it immediately
-    if (keypairEnvPrivate) {
-        logger.info(`Using Solana keypair from SOLANA_PRIVATE_KEY => ${keypairEnvPrivate.publicKey.toBase58()}`)
-        return keypairEnvPrivate
-    }
-
-    if (keypairEnvPath) {
-        logger.info(
-            `Using Solana keypair from SOLANA_KEYPAIR_PATH (${process.env.SOLANA_KEYPAIR_PATH}) => ${keypairEnvPath.publicKey.toBase58()}`
-        )
-        return keypairEnvPath
-    }
-
-    // Otherwise, default path is the last fallback
+    const { resolveDeployment, printDeploymentBanner } = await import('../../lib/deployment')
+    const resolved = resolveDeployment()
+    printDeploymentBanner(resolved)
     logger.info(
-        `No environment-based keypair found. Found keypair at default path => ${keypairDefaultPath.publicKey.toBase58()}`
+        `Using Solana keypair from ${resolved.profile.env.solanaKeypairPath} => ${resolved.solanaKeypair.publicKey.toBase58()}`
     )
-    const doContinue = await promptToContinue(
-        `Defaulting to ~/.config/solana/id.json with address ${keypairDefaultPath.publicKey.toBase58()}. Use this keypair?`
-    )
-    if (!doContinue) process.exit(1)
-
-    return keypairDefaultPath
+    return resolved.solanaKeypair
 }
 
 /**
@@ -179,17 +119,10 @@ export const saveSolanaDeployment = (eid: EndpointId, programId: string, oapp: s
     if (!existsSync(outputDir)) {
         mkdirSync(outputDir, { recursive: true })
     }
-    writeFileSync(
-        `${outputDir}/OApp.json`,
-        JSON.stringify(
-            {
-                programId,
-                oapp,
-            },
-            null,
-            4
-        )
-    )
+    // Merge so fields other tasks wrote (lookupTable) survive a re-run of create.
+    const file = `${outputDir}/OApp.json`
+    const previous = existsSync(file) ? JSON.parse(readFileSync(file, 'utf-8')) : {}
+    writeFileSync(file, JSON.stringify({ ...previous, programId, oapp }, null, 4))
     console.log(`Accounts have been saved to ${outputDir}/OApp.json`)
 }
 
@@ -203,6 +136,8 @@ export const getSolanaDeployment = (
 ): {
     programId: string
     oapp: string
+    /** Our address lookup table. Set by lz:oapp:solana:create-lookup-table. */
+    lookupTable?: string
 } => {
     if (!eid) {
         throw new Error('eid is required')
@@ -234,23 +169,36 @@ export const getLayerZeroScanLink = (hash: string, isTestnet = false) =>
 export const getExplorerTxLink = (hash: string, isTestnet = false) =>
     `https://solscan.io/tx/${hash}?cluster=${isTestnet ? 'devnet' : 'mainnet-beta'}`
 
+/**
+ * Lookup tables every transaction may reference: LayerZero's (endpoint accounts) plus ours
+ * (Chainlink, Circle, and program accounts; see `lz:oapp:solana:create-lookup-table`).
+ * A lookup table lets a transaction name an account with a 1-byte index instead of 32 bytes,
+ * which is what keeps the combined LayerZero + Chainlink send under Solana's 1232-byte limit.
+ */
+export const getAddressLookupTables = async (connection: Connection, umi: Umi, fromEid: EndpointId) => {
+    const addresses: PublicKey[] = []
+    const lz = LOOKUP_TABLE_ADDRESS[fromEid]
+    assert(lz != null, `No lookup table found for ${formatEid(fromEid)}`)
+    addresses.push(lz)
+    const ours = getSolanaDeployment(fromEid).lookupTable
+    if (ours) addresses.push(publicKey(ours))
+
+    const inputs: AddressLookupTableInput[] = []
+    const accounts: AddressLookupTableAccount[] = []
+    for (const address of addresses) {
+        const input = await fetchAddressLookupTable(umi, address)
+        const { value: account } = await connection.getAddressLookupTable(toWeb3JsPublicKey(address))
+        if (!input || !account) throw new Error(`No address lookup table account found for ${address}`)
+        inputs.push(input)
+        accounts.push(account)
+    }
+    return { addresses, inputs, accounts }
+}
+
+/** Kept for callers that only want LayerZero's table. */
 export const getAddressLookupTable = async (connection: Connection, umi: Umi, fromEid: EndpointId) => {
-    // Lookup Table Address and Priority Fee Calculation
-    const lookupTableAddress = LOOKUP_TABLE_ADDRESS[fromEid]
-    assert(lookupTableAddress != null, `No lookup table found for ${formatEid(fromEid)}`)
-    const addressLookupTableInput: AddressLookupTableInput = await fetchAddressLookupTable(umi, lookupTableAddress)
-    if (!addressLookupTableInput) {
-        throw new Error(`No address lookup table found for ${lookupTableAddress}`)
-    }
-    const { value: lookupTableAccount } = await connection.getAddressLookupTable(toWeb3JsPublicKey(lookupTableAddress))
-    if (!lookupTableAccount) {
-        throw new Error(`No address lookup table account found for ${lookupTableAddress}`)
-    }
-    return {
-        lookupTableAddress,
-        addressLookupTableInput,
-        lookupTableAccount,
-    }
+    const { addresses, inputs, accounts } = await getAddressLookupTables(connection, umi, fromEid)
+    return { lookupTableAddress: addresses[0], addressLookupTableInput: inputs[0], lookupTableAccount: accounts[0] }
 }
 
 export enum TransactionType {
@@ -278,7 +226,7 @@ export const getComputeUnitPriceAndLimit = async (
     connection: Connection,
     ixs: Instruction[],
     wallet: KeypairSigner,
-    lookupTableAccount: AddressLookupTableAccount,
+    lookupTableAccounts: AddressLookupTableAccount | AddressLookupTableAccount[],
     transactionType: TransactionType
 ) => {
     const { averageFeeExcludingZeros } = await getPrioritizationFees(connection)
@@ -295,7 +243,7 @@ export const getComputeUnitPriceAndLimit = async (
                     connection,
                     ixs.map((ix) => toWeb3JsInstruction(ix)),
                     toWeb3JsPublicKey(wallet.publicKey),
-                    [lookupTableAccount]
+                    Array.isArray(lookupTableAccounts) ? lookupTableAccounts : [lookupTableAccounts]
                 ),
             {
                 maxDelay: 10000,
@@ -338,12 +286,12 @@ export const addComputeUnitInstructions = async (
     transactionType: TransactionType
 ) => {
     const computeUnitLimitScaleFactor = 1.1 // hardcoded to 1.1 as the estimations are not perfect and can fall slightly short of the actual CU usage on-chain
-    const { addressLookupTableInput, lookupTableAccount } = await getAddressLookupTable(connection, umi, eid)
+    const { inputs, accounts } = await getAddressLookupTables(connection, umi, eid)
     const { computeUnitPrice, computeUnits } = await getComputeUnitPriceAndLimit(
         connection,
         txBuilder.getInstructions(),
         umiWalletSigner,
-        lookupTableAccount,
+        accounts,
         transactionType
     )
     // Since transaction builders are immutable, we must be careful to always assign the result of the add and prepend
@@ -355,7 +303,7 @@ export const addComputeUnitInstructions = async (
             })
         )
         .add(setComputeUnitLimit(umi, { units: computeUnits * computeUnitLimitScaleFactor }))
-        .setAddressLookupTables([addressLookupTableInput])
+        .setAddressLookupTables([...inputs, ...(txBuilder.options.addressLookupTables ?? [])])
         .add(txBuilder)
     return newTxBuilder
 }
