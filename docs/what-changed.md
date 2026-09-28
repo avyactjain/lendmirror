@@ -148,6 +148,10 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # a
 npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
 ```
 
+Proven on Devnet → Sepolia on 2026-09-28: 1 USDC over Circle and 0.5 CCIP-BnM (Chainlink's test
+token) over Chainlink, both landing in the treasury and forwarded to the strategy address. The
+LayerZero path is built but has no test token on Devnet.
+
 For a LayerZero token the route also needs the token's OFT program id and escrow account:
 `set-bridge-route --mint <mint> --provider oft --oft-program <id> --escrow <account> --dst-eid 30110`.
 `docs/bridge-providers.md` has every token's mint, bridge, and destinations.

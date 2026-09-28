@@ -177,7 +177,14 @@ Verified on a local fork of Jupiter mainnet (`npm run test:fork` with an Agave 4
 
 ### E. Bridge a Chainlink-listed token (PST, or USDC)
 
-Same shape with `provider: 2` and `bridge_tokens_ccip`: the program reuses the Chainlink router accounts of the snapshot path, appends the per-token accounts (user token account = bridge signer's, billing configs, pool program and PDAs, token admin registry, lookup table) as remaining accounts with `token_indexes = [0]`, sends an empty data payload with gas limit 0, and pays the fee in SOL from the bridge signer. The treasury's `ccipReceive` checks router, source selector, and sender. Built and unit-tested; not run on Devnet (needs Chainlink's CCIP-BnM test token there rather than USDC).
+Same shape with `provider: 2` and `bridge_tokens_ccip`: the program reuses the Chainlink router accounts of the snapshot path, appends the per-token accounts (user token account = bridge signer's, billing configs, pool program and PDAs, token admin registry, lookup table) as remaining accounts with `token_indexes = [0]`, sends an empty data payload with gas limit 0, and pays the fee in SOL from the bridge signer. Before the CPI the bridge signer approves the router's `fee_billing_signer` PDA for exactly `amount`; that PDA is what the router uses to pull the tokens into the pool. The treasury's `ccipReceive` checks router, source selector, and sender.
+
+Verified on Devnet with Chainlink's test token CCIP-BnM (the only burn-mint token with a Devnet → Sepolia lane):
+
+1. **Route.** `set-bridge-route --mint 3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6 --provider ccip` (receiver = treasury, selector 16015286601757825753).
+2. **Bridge.** `bridge-tokens --vault-id 1 --nft-id 29 --mint 3Pjy… --amount 500000000`. Devnet tx `5zWd7upw…`: authority 0.5 → 0 BnM; the pool burned the tokens. CCIP message `0xa4ab447e…`, sender = bridge signer, receiver = treasury.
+3. **Deliver.** Chainlink delivered to Sepolia about 80 seconds later (tx `0xfbedfc3f…`). Treasury 0.5 BnM.
+4. **Forward.** `lz:oapp:evm:treasury:forward --token 0xFd57b4dd…` sent the whole balance to `strategy[BnM]`. Treasury 0, strategy 0.5.
 
 ### F. Bridge a LayerZero token (USDT0, USDai, sUSDai)
 
@@ -224,7 +231,7 @@ Not enforced, on purpose: wrapping does not verify the Jupiter position exists (
 | Sync every wrapped position                                                    | **Run on Devnet 2026-09-28**                                                                                                              |
 | NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, the level gate, and the level 2 borrow proven on a warped Jupiter mainnet fork. Devnet's Jupiter is an old build the SDK cannot decode (checked 2026-09-28), so the first live borrow is a small mainnet position after the mainnet upgrade |
 | Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury                                                                 |
-| Token bridge, Chainlink CCIP (PST, USDC)                                       | Built, unit-tested; Devnet run pending (CCIP-BnM)                                                                                         |
+| Token bridge, Chainlink CCIP (PST, USDC)                                       | **Verified Devnet → Sepolia 2026-09-28** with CCIP-BnM, end to end through the treasury                                                   |
 | Token bridge, LayerZero OFT (USDT0, USDai, sUSDai)                             | Built, unit-tested; **not tested on any network**                                                                                         |
 | EVM treasury                                                                   | Deployed on Sepolia, used in the Devnet run                                                                                               |
 | Mainnet                                                                        | Not upgraded; see Addresses                                                                                                               |
@@ -405,7 +412,8 @@ Both sides were read end to end for this readme. What was found, what was fixed 
 | `bridge_tokens_cctp` | `max_fee` (the Circle fast-transfer fee) had no bound. | Capped at 1% of the amount. |
 | `set_bridge_route` | A 32-byte receiver that is not a left-padded EVM address would be read differently by CCIP (last 20 bytes) than by CCTP and OFT (all 32). A CCTP domain or LayerZero eid larger than `u32` was silently truncated. | Receiver must have 12 zero bytes in front. Domains and eids must fit a `u32`. |
 | `PeerConfig::SIZE` | Sized with `size_of::<Self>()`, which counts the two `Vec` headers, not the up to 1536 bytes of enforced options Borsh writes. Any real enforced options overflowed the 81-byte account. | Sized from `EnforcedOptions::INIT_SPACE`; `set_peer_config` grows an old peer account before writing. |
-| `lib/client/bridge.ts` | The CCIP pool chain-config PDA was derived under the wrong program. | Derived under the pool program. |
+| `lib/client/bridge.ts` | The CCIP pool chain-config PDA was derived under the wrong program and passed read-only; the pool writes its rate-limit bucket there. | Derived under the pool program, marked writable. |
+| `bridge_tokens_ccip` | The router was given a `token_pools_signer` account it does not list, and nothing let the router pull the tokens: its on-chain transfer failed with `owner does not match`. | The router's `ccip_send` names 18 accounts. The pull is signed by the router's `fee_billing_signer` PDA, so the bridge signer approves that PDA for exactly `amount` before the CPI. |
 | `tasks/solana/syncAll.ts` | A refresh whose numbers did not change was reported as "unchanged" and skipped, even though `snapshot_time` moved and the send would go through. | "Changed" now also means a newer snapshot time. |
 | `tasks/evm/setPeer.ts` | An uninitialised proxy would be initialised by whichever key ran `set-peer`. | The task now refuses and tells you to fix the deployment. |
 | Gas for the Chainlink snapshot | `400 000` was the Devnet setting; the Sepolia `lzReceive` / `ccipReceive` path needs more headroom. | `600 000` in `config/devnet.ts` and the LayerZero executor option. **The on-chain `CcipRoute` still holds 400 000 until `set-ccip-route` is run again on Devnet.** |
