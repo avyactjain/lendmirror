@@ -38,6 +38,11 @@ export type BridgeTokensCcipInstructionAccounts = {
     feeTokenMint: PublicKey | Pda
     feeTokenUser: PublicKey | Pda
     feeTokenReceiver: PublicKey | Pda
+    /**
+     * tokens as this delegate (see `transfer_token` in its onramp), so the bridge signer approves
+     * it for `amount` before the CPI.
+     */
+
     feeBillingSigner: PublicKey | Pda
     feeQuoter: PublicKey | Pda
     feeQuoterConfig: PublicKey | Pda
@@ -47,7 +52,6 @@ export type BridgeTokensCcipInstructionAccounts = {
     rmnRemote: PublicKey | Pda
     rmnRemoteCurses: PublicKey | Pda
     rmnRemoteConfig: PublicKey | Pda
-    tokenPoolsSigner: PublicKey | Pda
     ccipRouter: PublicKey | Pda
 }
 
@@ -127,8 +131,7 @@ export function bridgeTokensCcip(
         rmnRemote: { index: 27, isWritable: false as boolean, value: input.rmnRemote ?? null },
         rmnRemoteCurses: { index: 28, isWritable: false as boolean, value: input.rmnRemoteCurses ?? null },
         rmnRemoteConfig: { index: 29, isWritable: false as boolean, value: input.rmnRemoteConfig ?? null },
-        tokenPoolsSigner: { index: 30, isWritable: true as boolean, value: input.tokenPoolsSigner ?? null },
-        ccipRouter: { index: 31, isWritable: false as boolean, value: input.ccipRouter ?? null },
+        ccipRouter: { index: 30, isWritable: false as boolean, value: input.ccipRouter ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.

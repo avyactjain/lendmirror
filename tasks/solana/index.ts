@@ -283,10 +283,19 @@ export const addComputeUnitInstructions = async (
     txBuilder: TransactionBuilder,
     umiWalletSigner: KeypairSigner,
     computeUnitPriceScaleFactor: number,
-    transactionType: TransactionType
+    transactionType: TransactionType,
+    /** Extra lookup tables for this transaction, e.g. Chainlink's per-token table for a token bridge. */
+    extraLookupTables: PublicKey[] = []
 ) => {
     const computeUnitLimitScaleFactor = 1.1 // hardcoded to 1.1 as the estimations are not perfect and can fall slightly short of the actual CU usage on-chain
     const { inputs, accounts } = await getAddressLookupTables(connection, umi, eid)
+    for (const address of extraLookupTables) {
+        const input = await fetchAddressLookupTable(umi, address)
+        const { value: account } = await connection.getAddressLookupTable(toWeb3JsPublicKey(address))
+        if (!input || !account) throw new Error(`No address lookup table account found for ${address}`)
+        inputs.push(input)
+        accounts.push(account)
+    }
     const { computeUnitPrice, computeUnits } = await getComputeUnitPriceAndLimit(
         connection,
         txBuilder.getInstructions(),
