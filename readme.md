@@ -1,461 +1,580 @@
 # LendMirror
 
-LendMirror lets an EVM-side strategy run a Jupiter Lend borrow position that lives on Solana.
+LendMirror lets a team on Arbitrum run a Jupiter Lend borrow position that lives on Solana.
 
-A Solana program **holds** the position NFT, **operates** the position (deposit, pay back, withdraw, borrow) within an access level the admin sets, **mirrors** the position's collateral and debt to an EVM chain over two independent messaging networks (LayerZero and Chainlink), and **bridges tokens** back to one fixed EVM contract. Money is either inside a program-owned account on Solana or on its way to that one EVM contract. No caller can point it anywhere else.
+A Solana program holds the position, adds or removes collateral and debt within limits the admin sets, reports the position's numbers to Arbitrum, and sends tokens to one fixed contract on Arbitrum. Money is always either in an account the program controls on Solana, or on its way to that one contract. Nobody can point it anywhere else.
 
-- **Testnet path (live):** Solana Devnet → Ethereum Sepolia.
-- **Mainnet path:** Solana → Arbitrum. Not upgraded to this version yet (see Addresses).
+> **Status, 29 September 2026 (UTC):** live on **Solana mainnet → Arbitrum One**. Every main flow ran on mainnet with real funds: mirroring a position, holding the position NFT, supply / borrow / pay back / withdraw through a Jupiter smart vault, and bridging USDC to Arbitrum. See the [Test Run](#3-test-run).
 
-Everything in this file is backed by code; file references are relative to the repo root. `programs/lendmirror/ARCHITECTURE.md` maps every source file and has a primer on Anchor for Rust developers new to Solana. `docs/what-changed.md` is the before/after story. `docs/bridge-providers.md` is the token-by-token bridge matrix.
+Tokens in scope, and only these: **USDC, USDT, USDai, sUSDai, PST**.
+
+**Contents**
+
+1. [How it works](#1-how-it-works)
+2. [Mainnet addresses](#2-mainnet-addresses)
+3. [Test Run](#3-test-run)
+4. [Who can do what](#4-who-can-do-what)
+5. [Safety rules](#5-safety-rules)
+6. [Tokens and bridges](#6-tokens-and-bridges)
+7. [What is proven where](#7-what-is-proven-where)
+8. [Commands](#8-commands)
+9. [Reference: program accounts and the snapshot](#9-reference-program-accounts-and-the-snapshot)
+10. [Devnet and Sepolia](#10-devnet-and-sepolia)
+11. [Known limits](#11-known-limits)
+12. [Repo map](#12-repo-map)
 
 ---
 
+## 1. How it works
 
-
-## 1. The idea in one picture
+- **A Jupiter borrow position is an NFT.** Whoever holds the NFT controls the position.
+- **The owner hands the NFT to our program.** The program keeps it in an account only the program can move. The owner can get it back through the admin.
+- **The program can then act on the position:** supply collateral, borrow, pay back, withdraw. How far it may go is the wrapper's **level**, set by the admin. Level 1 may only lower the risk (supply, pay back). Level 2 may also raise it (withdraw, borrow).
+- **Everything the position pays out lands in the program's own accounts.** Borrowed tokens and withdrawn collateral never go to a wallet.
+- **The program mirrors the position to Arbitrum.** It reads collateral and debt from Jupiter and sends them over two independent networks, LayerZero and Chainlink. The Arbitrum contract keeps both copies and says whether they match.
+- **Tokens leave only along a fixed path.** A caller asks the program to bridge an amount. The destination is not a parameter: the admin fixed it in advance, and it is our treasury contract on Arbitrum. The treasury can only forward to the address its owner set for that token.
 
 ```mermaid
 flowchart LR
-    subgraph EVM["EVM chain (Sepolia / Arbitrum)"]
-        STRAT[Strategy wallet or contract]
-        LM["LendMirror proxy<br/>stores snapshot per position<br/>matched(position)"]
-        TR["LendMirrorTreasury proxy<br/>receives tokens<br/>forward() only to strategy[token]"]
-    end
     subgraph SOL["Solana"]
-        STORE["Store PDA<br/>admin, snapshotters, senders"]
-        W["PositionWrapper PDA<br/>level, custody, snapshot,<br/>send guard"]
-        AUTH["Wrapper authority PDA (empty)<br/>owns: NFT ATA, collateral ATA, debt ATA<br/>signs Jupiter operate"]
-        BS["Bridge signer PDA (empty)<br/>signs Chainlink / Circle / LayerZero sends"]
-        ROUTE["BridgeRoute PDA<br/>per token + chain:<br/>provider, EVM receiver, cap"]
-        JUP["Jupiter Lend vault"]
+        OWNER["Position owner<br/>(holds the NFT at first)"]
+        W["Wrapper<br/>level, custody, last snapshot"]
+        AUTH["Wrapper authority<br/>holds the NFT and the tokens<br/>signs for Jupiter"]
+        JUP["Jupiter Lend position"]
+        BS["Bridge signer<br/>signs every send"]
     end
-    STRAT -- "1. capital bridged to Solana (existing leg)" --> AUTH
-    AUTH -- "2. operate_position: deposit / borrow" --> JUP
-    JUP -- "withdrawn collateral, borrowed tokens" --> AUTH
-    W -- "3. refresh_wrapper reads Jupiter" --> JUP
-    W -- "4. send snapshot (LayerZero + Chainlink)" --> LM
-    AUTH -- "5. bridge_tokens_*: amount only" --> BS
-    ROUTE -. "destination comes from here, never from the caller" .-> BS
-    BS -- "Circle CCTP / Chainlink CCIP / LayerZero OFT" --> TR
-    TR -- "6. forward()" --> STRAT
+    subgraph ARB["Arbitrum"]
+        LM["LendMirror<br/>both copies of the snapshot"]
+        TR["Treasury<br/>forwards only to the owner-set strategy"]
+        STRAT["Strategy address"]
+    end
+    OWNER -- "1. hands over the NFT" --> AUTH
+    AUTH -- "2. supply / borrow / pay back / withdraw" --> JUP
+    JUP -- "payouts land here" --> AUTH
+    W -- "3. read the position" --> JUP
+    W -- "4. snapshot over LayerZero + Chainlink" --> LM
+    AUTH -- "5. bridge an amount" --> BS
+    BS -- "Circle, Chainlink or LayerZero" --> TR
+    TR -- "6. forward" --> STRAT
 ```
 
+**The money path:** Jupiter position → the wrapper's own token account on Solana → a bridge (Circle, Chainlink or LayerZero) → the treasury on Arbitrum → the strategy address its owner set.
 
-
-**Money flow, in words.** Capital arrives in the wrapper authority's token account (step 1, handled outside this repo). The program deposits it as collateral (level 1) and borrows against it (level 2). Borrowed tokens land in the authority's own token account, never in a wallet. The position's numbers are mirrored to EVM so the strategy can watch its risk. When the strategy wants the borrowed tokens back on EVM, any allowed caller says "bridge X"; the program sends X to the EVM treasury, whose owner has fixed where it may go next.
-
----
-
-
-
-## 2. What lives on chain
-
-
-
-### Solana accounts
-
-Every account is a PDA: an address derived from fixed seeds and this program's id, so there is exactly one of each kind per key.
-
-
-Every seed lives in `src/seeds.rs` (Rust) and `lib/client/seeds.ts` (TypeScript), and every one ends in `V1`. The mainnet upgrade starts from empty state: each account below is created again under these seeds, so nothing the old program wrote can be read by mistake. Changing a layout later means a new seed (`V2`), never an edit.
-
-| Account                        | Seeds                                              | Holds                                                                                                                                                                                                            | Source                                                               |
-| ------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| **Store**                      | `["LendMirrorStoreV1"]`                            | admin, LayerZero endpoint, Jupiter vaults program id, `snapshotters` (8 max), `senders` (8 max), legacy `last_position`                                                                                          | `src/state/store.rs`                                                 |
-| **PeerConfig**                 | `["LendMirrorPeerV1", store, eid be]`                | the EVM `LendMirror` proxy address per LayerZero endpoint id, enforced options                                                                                                                                   | `src/state/peer_config.rs`                                           |
-| **CcipRoute**                  | `["LendMirrorCcipRouteV1"]`                               | Chainlink router, fee quoter, RMN, LINK mint, destination selector, EVM receiver (20 bytes), gas limit for snapshot messages                                                                                     | `src/state/ccip_route.rs`                                            |
-| **CCIP payer / bridge signer** | `["LendMirrorCcipPayerV1"]`, **no data**             | signs Chainlink sends and every token bridge; holds SOL for their fees; owns one token account per bridged mint                                                                                                  | `src/seeds.rs`                                                       |
-| **PositionWrapper**            | `["LendMirrorPositionWrapperV1", vault_id le, nft_id le]`  | owner, vault/nft ids, `snapshot`, `version`, `level` (0..4), `custody`, `position_mint`, `last_sent_snapshot_time`, `send_count`, `authority_bump`, 64 reserved bytes                                            | `src/state/wrapper.rs`                                               |
-| **Wrapper authority**          | `["LendMirrorWrapperAuthV1", wrapper]`, **no data**  | owns the position NFT account, the collateral token account, and the debt token account of that wrapper; is Jupiter's `signer` and `recipient`                                                                   | `src/state/wrapper.rs` (doc), `src/instructions/operate_position.rs` |
-| **OnDemandStrategy**           | `["LendMirrorOnDemandV1", wrapper]`                  | up to 8 wallets allowed to act on one wrapper                                                                                                                                                                    | `src/state/wrapper.rs`                                               |
-| **BridgeRoute**                | `["LendMirrorBridgeRouteV1", mint, dst_chain_id le]` | provider (1 Circle, 2 Chainlink, 3 LayerZero), provider program, provider aux (LayerZero escrow), EVM receiver (32 bytes), CCTP destination caller, domain/selector/eid, gas limit, enabled, per-transaction cap | `src/state/bridge_route.rs`                                          |
-| **PositionSnapshotAccount**    | `["LendMirrorJupPositionV1", vault le, nft le]`                | legacy per-position snapshot written by `get_jupiter_position`                                                                                                                                                   | `src/state/jupiter_position.rs`                                      |
-
-
-Why two empty PDAs? Solana's System program refuses to move lamports out of an account that holds data. Jupiter's `operate_dex` signer and every bridge's `authority` must be able to pay fees or rent, so the signer is an empty PDA and the data lives next to it in the wrapper.
-
-### The snapshot (`PositionSnapshot`, 225 bytes, big-endian)
-
-`src/state/jupiter_position.rs::encode_body` and `contracts/libs/PositionSnapshotMsgCodec.sol` are byte-for-byte mirrors:
-
-
-| Offset | Field                                                            | Meaning                                                                               |
-| ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 0      | position (32)                                                    | Jupiter Position account                                                              |
-| 32     | vault_id (u16), nft_id (u32)                                     | which position                                                                        |
-| 38     | position_mint, supply_token, borrow_token (32 each)              | NFT mint, collateral mint, debt mint                                                  |
-| 134    | col_raw, debt_raw, dust_debt, net_debt (u64 each)                | **live** amounts after any liquidation branch walk; `net_debt = debt_raw - dust_debt` |
-| 166    | tick (i32), tick_id (u32)                                        | live tick and the position's id inside it                                             |
-| 174    | stored_col_raw, stored_debt_raw (u64), stored_tick (i32)         | what the Jupiter account still says (stale after liquidation)                         |
-| 194    | is_supply_only, is_liquidated, is_fully_liquidated (1 byte each) | flags                                                                                 |
-| 197    | branch_id (u32)                                                  | liquidation branch the walk ended on, 0 if none                                       |
-| 201    | vault_supply_exchange_price, vault_borrow_exchange_price (u64)   | multiply raw amounts by these ÷ 1e12 to get token units                               |
-| 217    | snapshot_time (i64)                                              | Solana clock at refresh; the send guard and the EVM stale rule both key on it         |
-
-
-LayerZero carries a 32-byte length header plus the body (257 bytes, `src/msg_codec.rs`). Chainlink carries the bare body.
-
-### EVM contracts
-
-
-| Contract                            | Role                                                                                                                                                                                                                                                                                                                                                                                         | Source                                        |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| **LendMirror** (UUPS proxy)         | `lzReceive` (LayerZero) and `ccipReceive` (Chainlink) each store their copy of the latest snapshot per position. `matched(position)` is true when both copies have equal hashes. A delivery older than the stored `snapshotTime` is acknowledged and dropped (`StaleDeliveryIgnored`), never reverted, so the two networks may arrive in any order. `positions()` lists every position seen. | `contracts/LendMirror.sol`                    |
-| **PositionSnapshotMsgCodec**        | decodes the 225 bytes; `price()` applies the exchange prices                                                                                                                                                                                                                                                                                                                                 | `contracts/libs/PositionSnapshotMsgCodec.sol` |
-| **LendMirrorTreasury** (UUPS proxy) | the fixed destination for bridged tokens. `claimCctp` finishes a Circle transfer with Circle's attestation. `ccipReceive` accepts Chainlink token deliveries from the allowed router, source chain, and Solana sender. `forward(token)` moves the whole balance to `strategy[token]`, which only the owner sets. No function sends to `msg.sender` or a caller-supplied address.             | `contracts/LendMirrorTreasury.sol`            |
-
+More detail: [`programs/lendmirror/ARCHITECTURE.md`](programs/lendmirror/ARCHITECTURE.md) maps every source file and explains Anchor for Rust developers new to Solana. [`docs/what-changed.md`](docs/what-changed.md) is the before/after story. [`docs/bridge-providers.md`](docs/bridge-providers.md) covers every token's bridge.
 
 ---
 
+## 2. Mainnet addresses
 
+Solana links go to Solscan, Arbitrum links to Arbiscan.
 
-## 3. Who can do what
+### Our program and contracts
 
-Plain wording. "Admin" is the wallet named at `init_store`; "owner" of a wrapper is the snapshotter who created it.
+| What | Chain | Address | What it does |
+| --- | --- | --- | --- |
+| LendMirror program | Solana | [`9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ`][a-program] | Holds NFTs, operates positions, sends snapshots, bridges tokens. The `operate_dex` build is live since slot 451748984. |
+| Program data | Solana | [`EKeeTYJpf9Z46cRxehg5M16m2fpvT8DcxicojbM92Kkt`][a-programdata] | Stores the program's code (750,280 bytes of room). |
+| Program IDL | Solana | [`8xxYX7DCKg1Y1X4Vqunrr2Ka1YagQL9frFK5sQv4BywU`][a-idl] | Lets explorers decode our instructions and accounts. |
+| Store | Solana | [`4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV`][a-store] | Our identity on LayerZero. Holds the admin and the allow lists. |
+| LayerZero peer | Solana | [`6mfKavvXreuM559b6uJKtzXwmRsLNkuiAA5EQSCAx9hF`][a-peer] | Records that the Arbitrum LendMirror is our LayerZero partner. |
+| Chainlink route | Solana | [`Fa7ousHkzZMXrGtwwYQdSZUB46PE9yLKsTseaNjh2TzK`][a-ccip-route] | Where snapshots go over Chainlink: router, fees, Arbitrum, receiver. |
+| USDC bridge route | Solana | [`Ft1MQnTNf6XZBARxVdeu2WBBti6DW8SrVaFimXstp4Xj`][a-usdc-route] | USDC to Arbitrum over Circle, only to the treasury, at most 10 USDC per transaction. |
+| Bridge signer | Solana | [`D6RLag1KgbK8Fe8URR2zXFaZXKBnnx6tLPuL1sUuaLNG`][a-bridge-signer] | Signs every Chainlink send and every token bridge, and pays Chainlink's fee. |
+| Lookup table | Solana | [`FK2PwZSMdxGNhrdYnZkxALYATBH1SvBonz9vmVb69LAa`][a-lut] | Shortens our transactions so they fit Solana's size limit. |
+| LendMirror (proxy) | Arbitrum | [`0xb42E98c712B5CAf1e55dB8106262077515879EA2`][e-lm-proxy] | Permanent address. Receives snapshots over both networks and keeps both copies. |
+| LendMirror (code) | Arbitrum | [`0xe9E61B9aC26ED2CEBC2F21fbD76F7e6cfDa43032`][e-lm-impl] | The code behind the proxy. Source verified on Arbiscan. |
+| Treasury (proxy) | Arbitrum | [`0x736AAC431E66de7D07eb61738CA3598a53a24Ca0`][e-tr-proxy] | Permanent address. Receives every bridged token and forwards only to the owner-set strategy. |
+| Treasury (code) | Arbitrum | [`0xBED1911918D70c2E88b83f2C75b1763e2c49A795`][e-tr-impl] | The code behind the treasury proxy. Source verified on Arbiscan. |
 
+### Wallets
 
-| Who                                        | Can                                                                                                                                                                                                                            | Cannot                                                                                                                         |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Program upgrade authority** (deploy key) | create the Store once (`init_store`); upgrade the program                                                                                                                                                                      | be replaced on chain by anyone else                                                                                            |
-| **Store admin**                            | set LayerZero peers; replace the snapshotter and sender lists; set the Chainlink snapshot route; set bridge routes (which bridge, which EVM address, cap); set any wrapper's level; return a position NFT to its wrapper owner | change the admin key (no instruction exists); move tokens anywhere except back to the wrapper owner via `release_position_nft` |
-| **Snapshotter** (on `store.snapshotters`)  | wrap a position (becomes its owner); refresh any wrapper; legacy `get_jupiter_position`. A read-only role apart from the wrappers it created                                                                                   | send snapshots; operate or bridge on wrappers it does not own; set levels or routes                                            |
-| **Sender / operator** (on `store.senders`) | send any wrapper's snapshot; bridge from any wrapper at level 1 or 2                                                                                                                                                           | refresh (needs snapshotter, owner, or OnDemand); operate                                                                       |
-| **Wrapper owner**                          | attach an OnDemand list and set its callers; refresh, operate, bridge for that wrapper. The owner is first the snapshotter who created the wrapper, then the wallet that deposited the position NFT                            | raise their own level; get the NFT back without the admin; choose a bridge destination                                         |
-| **Position NFT holder**                    | deposit the NFT into the wrapper (`deposit_position_nft`); they become the wrapper owner                                                                                                                                       | anything else until they own the wrapper                                                                                       |
-| **OnDemand caller** (on a wrapper's list)  | refresh, send, operate, bridge for that one wrapper                                                                                                                                                                            | anything on other wrappers                                                                                                     |
-| **Anyone**                                 | send tokens into a wrapper authority's token account (plain SPL transfer); on EVM: call `forward` and `claimCctp` (they only move funds along fixed paths)                                                                     | trigger any program instruction above                                                                                          |
-| **EVM owner**                              | `LendMirror`: peers, Chainlink route, upgrade. `LendMirrorTreasury`: strategy per token, allowed Chainlink senders, Circle transmitter, upgrade                                                                                | receive tokens from the treasury unless set as a strategy                                                                      |
-| **Level 0 wrapper**                        | be mirrored                                                                                                                                                                                                                    | operate, bridge                                                                                                                |
-| **Level 1 wrapper**                        | deposit collateral, pay back debt (`new_col ≥ 0 && new_debt ≤ 0`, `src/state/wrapper.rs::level_allows`); bridge                                                                                                                | withdraw, borrow                                                                                                               |
-| **Level 2 wrapper**                        | everything level 1 can, plus withdraw and borrow                                                                                                                                                                               | —                                                                                                                              |
-| **Level 3 / 4 wrapper**                    | be stored, be mirrored                                                                                                                                                                                                         | operate, bridge (every amount is rejected until these levels are defined)                                                      |
+| Role | Chain | Address | What it may do |
+| --- | --- | --- | --- |
+| Admin | Solana | [`B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL`][a-admin] | Upgrades the program. Store admin, permanently: sets levels, routes and allow lists, releases NFTs. Also the only snapshotter and sender today. |
+| EVM owner | Arbitrum | [`0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87`][e-owner] | Owns both proxies. Also the treasury's USDC strategy for the test, so test USDC comes back to it. |
+| Test position owner | Solana | [`HgyDJt5yGiPVUaTrfssF3VkdhRZ4BNdtnsCFE9pcPRHv`][a-nftwallet] | Opened the test position on jup.ag and owns wrapper 95/34. |
 
+### The test position: Jupiter vault 95, NFT 34
 
-Where the checks live: allowlist membership in `src/state/store.rs` and `src/state/wrapper.rs`; per-instruction rules in the `constraint =` lines of each `#[derive(Accounts)]` struct in `src/instructions/*.rs`.
+A smart vault: the collateral is a share of a USDG/USDC pool, the debt is USDC. [Open on jup.ag][jup-95-34].
 
----
+| What | Address |
+| --- | --- |
+| Position NFT mint | [`7CkF6a4HVKg7qst2x2XdgL71tAUxvmnh5QU5wqidF23e`][a-nft-mint] |
+| Wrapper (the program's record of the position) | [`H85XkQZ1TEsCTX6DuNmFUU93F2Bv7YuFkDAZ1y6f1Stw`][a-wrapper] |
+| Wrapper authority (holds the NFT and the tokens, signs for Jupiter) | [`AaJKP3h3hgNo7UswHdi1MWnccJzL1AtsgkFbXc9VLQqb`][a-wrapper-auth] |
+| Wrapper's USDC account | [`7h1NZx1iP28M29WDRS4YDztKNHev5dx5QfwNc5DAsHNY`][a-wrapper-usdc] |
+| Wrapper's USDG account | [`5PQqR4XrdHxSy2Ax8VuKL4sUKVd4GjYWmzPASAhuCAWj`][a-wrapper-usdg] |
+| Wrapper's NFT account | [`4BwLdD5nHnvQJqhedjKEwpim5iPu87ScG3hZvQxLWsgy`][a-wrapper-nft] |
 
+### Other parties we talk to
 
+| What | Chain | Address |
+| --- | --- | --- |
+| Jupiter Lend Vaults (main market) | Solana | [`jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi`][a-jup-vaults] |
+| Jupiter Lend DEX (smart vault pools) | Solana | [`jupZ4m2GqUCJ5iueMfzQf8khFfH31d4XAQt3RzCT9Vd`][a-jup-dex] |
+| USDC | Solana | [`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`][a-usdc] |
+| USDG | Solana | [`2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH`][a-usdg] |
+| USDC | Arbitrum | [`0xaf88d065e77c8cC2239327C5EDb3A432268e5831`][e-usdc] |
+| LayerZero EndpointV2 | Arbitrum | [`0x1a44076050125825900e736c501f859c50fE728c`][e-lz-endpoint] |
+| Chainlink CCIP router | Solana | [`Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`][a-ccip-router] |
+| Chainlink CCIP router | Arbitrum | [`0x141fa059441E0ca23ce184B6A78bafD2A517DdE8`][e-ccip-router] |
+| Circle CCTP v2 TokenMessengerMinter | Solana | [`CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe`][a-cctp] |
+| Circle CCTP v2 MessageTransmitter | Arbitrum | [`0x81D40F21F12A8F0E3252Bccb954D722d4c464B64`][e-cctp] |
 
-## 4. Capabilities, end to end
+Network ids: LayerZero Solana `30168` → Arbitrum `30110`. Chainlink Solana `124615329519749607` → Arbitrum `4949039107694359620`. Circle domain Solana `5` → Arbitrum `3`.
 
-Real numbers below are from the Devnet run of 2026-09-28 (wallet `AF1uGS22…`, Jupiter Devnet vault 1 / nft 29).
-
-### A. Mirror one position to EVM
-
-1. **Wrap.** A snapshotter runs `wrap_position { vault_id: 1, nft_id: 29 }`. The program creates the wrapper at level 0 with an empty snapshot and computes the authority bump. Nothing on Jupiter is touched or verified at this point.
-2. **Refresh.** Owner, snapshotter, or OnDemand caller runs `refresh_wrapper`. The program checks the Jupiter accounts by PDA seeds and owner (`position`, `vault_state`, `vault_config`, `tick`), reads collateral and the tick, and if that tick was liquidated walks the liquidation branches passed as remaining accounts (`src/live_position.rs`) to compute what is really left. It stamps `snapshot_time` with the clock. Devnet result: `col_raw 10000000, debt_raw 12114962`.
-3. **Send.** An OnDemand caller or a sender runs `send_position_snapshot_via_chainlink_and_lz { dst_eid: 40161, options, native_fee, ccip_fee_lamports }`. The program requires `snapshot_time > last_sent_snapshot_time` (else `SnapshotAlreadySent`), CPIs LayerZero's Endpoint with the Store as signer, tops up the bridge signer with `ccip_fee_lamports`, CPIs Chainlink's router with the bridge signer as signer, then records the send. Devnet: LayerZero fee 9,952,743 lamports, one transaction, both networks. A second send without a refresh failed with `SnapshotAlreadySent`.
-4. **Read on EVM.** Sepolia stored both copies with hash `0xec817a58…` and `matched(position) == true`.
-
-Why one transaction needs a lookup table: the send names 27 accounts plus LayerZero's, 1,652 bytes raw against Solana's 1,232-byte limit. `lz:oapp:solana:create-lookup-table` puts the fixed accounts in a table so each costs 1 byte instead of 32; every task references it (`tasks/solana/index.ts::getAddressLookupTables`).
-
-### B. Mirror every position
-
-`lz:oapp:solana:sync-all-positions` finds every `PositionWrapper` by account discriminator (`lib/client/lendmirror.ts::listWrappers`), refreshes each, and sends each unless the numbers did not change since the last send (`--force` overrides). One failing position does not stop the loop. The signer must be on `senders`. Devnet: one wrapper, refresh tx `jgVPww…`, send tx `33c9Cj…`.
-
-### C. Hold the NFT and operate the position
-
-1. **Custody.** The wallet holding the position NFT runs `deposit_position_nft`. It need not be the wallet that created the wrapper: the token program requires the holder's signature to move the NFT, and nothing else is required. The program derives the NFT mint from Jupiter's own seeds (`["position_mint", vault le, nft le]`), so only the mint of exactly this position is accepted, and transfers the single token from the holder's account to the authority's associated token account. `custody = true`, and the depositor becomes `wrapper.owner`, so the admin can only ever release the NFT back to them.
-2. **Level.** The admin runs `set_wrapper_level 1`.
-3. **Supply.** Someone first sends tokens (e.g. USDC) to the authority's token account with a plain transfer. Then the owner or an OnDemand caller runs `operate_position` with Jupiter's `operate_dex` amounts, e.g. smart collateral `token1: +20_000_000`. Before the CPI the program checks: custody is true; the level allows the direction (level 1 may only supply or pay back); the transfer type is a direct transfer (a claim would park the payout where nothing here can spend it); Jupiter's signer is the authority PDA, its recipient is absent or the PDA, and every one of the 12 accounts Jupiter can pay into is absent or a token account owned by the PDA; the position is the wrapper's own and its NFT sits in the PDA's account. It then CPIs Jupiter `operate_dex` with the PDA signing (`src/instructions/operate_position.rs`). Jupiter's 73 accounts and its extras (oracle sources, branches, tick debt arrays) come from Jupiter's SDK (`lib/client/jupiterOperate.ts`); the wallet runs Jupiter's setup instructions in a first transaction.
-4. **Borrow.** Admin sets level 2; `operate_position` with debt `new_debt: +5_000_000` borrows 5 USDC into the authority's USDC account.
-
-Only smart vaults (Jupiter types T2, T3, T4) can be operated: the program calls `operate_dex`, which Jupiter refuses on plain vaults such as vault 1. Mirroring, custody and bridging work on every vault.
-5. **Refresh** to see the new numbers in the snapshot.
-
-Verified on a local fork of Jupiter mainnet (`npm run test:fork` with an Agave 4.2+ validator, see Tests) on smart vault 95, USDG/USDC collateral and USDC debt: create position, custody by the NFT holder, level 1 supply of 20 USDC through `operate_dex`, level 1 borrow denied (`LevelDenied`), a borrow paying into a wallet refused (`InvalidTokenAccount`), level 2 borrow of 5 USDC into the wrapper authority's account, level 1 payback, level 1 withdraw denied, level 2 withdraw of 5 USDC, refresh, and release of the NFT. Compute through our program peaks at about 420,000 units, for the withdraw, and the withdraw reaches Solana's maximum call depth of 5. Jupiter Devnet is an old build the Jupiter SDK cannot decode, so nothing runs there.
-
-`release_position_nft` (admin) moves the NFT back to the wrapper owner's associated token account; no other destination is possible.
-
-### D. Bridge USDC to EVM through Circle
-
-1. **Route.** Admin runs `set_bridge_route { mint: USDC, dst_chain_id: 11155111, provider: 1, provider_program: TokenMessengerMinterV2, receiver: treasury, destination_caller: treasury, domain_or_selector: 0, max_amount_per_tx }`.
-2. **Bridge.** Any allowed caller with a level ≥ 1 wrapper runs `bridge_tokens_cctp { amount: 1_000_000, dst_chain_id: 11155111, max_fee: 0, min_finality_threshold: 2000 }`. There is no destination parameter. The program moves 1 USDC from the authority's account to the bridge signer's account, then CPIs Circle's `deposit_for_burn` with `mint_recipient = route.receiver` and `destination_caller = route.destination_caller`, signed by the bridge signer. Devnet tx `2SnABnY…`: authority 2 → 1 USDC, bridge signer 0.
-3. **Attest.** Circle's sandbox API reported `status: complete` for the message about 15 minutes later (standard finality, no fee).
-4. **Claim.** `lz:oapp:evm:treasury:claim-cctp --tx-hash 2SnABnY…` fetched the attestation and called `claimCctp` on the treasury, which called Circle's `receiveMessage`. Treasury balance: 1,000,000.
-5. **Forward.** `lz:oapp:evm:treasury:forward --token <USDC>` sent the whole balance to `strategy[USDC]`. Treasury 0, strategy 1,000,000.
-
-
-
-### E. Bridge a Chainlink-listed token (PST, or USDC)
-
-Same shape with `provider: 2` and `bridge_tokens_ccip`: the program reuses the Chainlink router accounts of the snapshot path, appends the per-token accounts (user token account = bridge signer's, billing configs, pool program and PDAs, token admin registry, lookup table) as remaining accounts with `token_indexes = [0]`, sends an empty data payload with gas limit 0, and pays the fee in SOL from the bridge signer. Before the CPI the bridge signer approves the router's `fee_billing_signer` PDA for exactly `amount`; that PDA is what the router uses to pull the tokens into the pool. The treasury's `ccipReceive` checks router, source selector, and sender.
-
-Verified on Devnet with Chainlink's test token CCIP-BnM (the only burn-mint token with a Devnet → Sepolia lane):
-
-1. **Route.** `set-bridge-route --mint 3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6 --provider ccip` (receiver = treasury, selector 16015286601757825753).
-2. **Bridge.** `bridge-tokens --vault-id 1 --nft-id 29 --mint 3Pjy… --amount 500000000`. Devnet tx `5zWd7upw…`: authority 0.5 → 0 BnM; the pool burned the tokens. CCIP message `0xa4ab447e…`, sender = bridge signer, receiver = treasury.
-3. **Deliver.** Chainlink delivered to Sepolia about 80 seconds later (tx `0xfbedfc3f…`). Treasury 0.5 BnM.
-4. **Forward.** `lz:oapp:evm:treasury:forward --token 0xFd57b4dd…` sent the whole balance to `strategy[BnM]`. Treasury 0, strategy 0.5.
-
-### F. Bridge a LayerZero token (USDT0, USDai, sUSDai)
-
-`provider: 3`, `provider_aux` = the token's OFT escrow account, `domain_or_selector` = LayerZero endpoint id. `bridge_tokens_oft` verifies that `oft_store` and `peer` are the PDAs LayerZero derives from that escrow and destination (`check_oft_pdas`), then CPIs the token's OFT program `send` with `to = route.receiver`, signed by the bridge signer, which also pays the LayerZero fee. The client quotes fee and arriving amount with LayerZero's OFT SDK. **Not tested on any network**: there is no LayerZero test token on Devnet, and the issuers' Solana program ids and escrows are still needed for the routes.
+Retired: the old program's Store [`BLoEaf2L…`][a-old-store] and the old Arbitrum code `0xdAAE65Df…`.
 
 ---
 
+## 3. Test Run
 
+Everything below happened on **mainnet with real funds on 29 September 2026 (UTC)**. Amounts were kept small: 1 USDC at a time. Every row links to its transaction.
 
-## 5. Safety rules (and where each is enforced)
+**Who's who**
 
+| Name in the tables | Address | Why it signs |
+| --- | --- | --- |
+| **Admin** | [`B8Hn…t1hL`][a-admin] | Upgrade authority and Store admin. The only wallet that may change levels or routes, or release an NFT. |
+| **Position owner** | [`HgyD…PRHv`][a-nftwallet] | Opened the Jupiter position, so it holds the NFT. After handing the NFT over, it owns the wrapper and may operate it. |
+| **EVM owner** | [`0x9Dee…9c87`][e-owner] | Owns the Arbitrum contracts. |
+| **Anyone** | | A step any wallet may run. The funds still follow the fixed path. |
 
-| Rule                                                                 | Enforced by                                                                                                             |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| A bridge caller supplies an amount, never a destination              | `BridgeTokensParams` has no address field; `receiver` is read from `BridgeRoute` in `src/instructions/bridge_tokens.rs` |
-| Only the admin writes routes                                         | `SetBridgeRoute.admin: address = store.admin`                                                                           |
-| Tokens leave only from PDA-owned associated token accounts           | `wrapper_ata` / `bridge_ata` constraints (`associated_token::authority = wrapper_authority` / `bridge_signer`)          |
-| Jupiter can only pay out to the program                              | `recipient` and both recipient token accounts are the authority PDA and its ATAs in `jupiter_operate_metas`             |
-| Level 1 can only lower risk                                          | `level_allows` in `src/state/wrapper.rs`; unit tests cover every sign combination and `i128::MIN`                       |
-| Only the admin changes levels                                        | `SetWrapperLevel.admin: address = store.admin`                                                                          |
-| A snapshot is sent once per refresh                                  | `PositionWrapper::can_send` / `record_send`; `SnapshotAlreadySent`                                                      |
-| EVM never regresses to an older snapshot                             | `LendMirror._writeDelivery` stale check                                                                                 |
-| Treasury pays out only to owner-set strategies                       | `LendMirrorTreasury.forward`                                                                                            |
-| A LayerZero send cannot be pointed at another OFT deployment or lane | `check_oft_pdas` derives store and peer from the route's escrow and eid                                                 |
-| Per-transaction bridge cap                                           | `params.amount <= bridge_route.max_amount_per_tx`                                                                       |
-| Jupiter payouts cannot be parked in a claim account                  | `operate_position` rejects `transfer_type == Some(2)` and any claim account                                             |
-| A LayerZero send is paid by its caller, with no caller options       | `fee_lamports >= native_fee` and `options.is_empty()` in `bridge_tokens_oft`; gas comes from the peer's enforced options |
-| A route's receiver is an EVM address                                 | `set_bridge_route` requires the first 12 bytes to be zero, so CCIP, CCTP and OFT all read the same 20 bytes             |
+**The position:** Jupiter vault 95, NFT 34, opened on jup.ag by the position owner, with 9.70 USDG and 10.29 USDC supplied and 15 USDC borrowed.
 
+### 3.1 Set up, once
 
-Not enforced, on purpose: wrapping does not verify the Jupiter position exists (a wrapper for a nonexistent position simply cannot be refreshed and stays at level 0), and any allowed caller may bridge any amount up to the cap as often as they like (the destination is fixed, so this is a fee question, not a safety one).
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | Make room for the new program | Admin | The program account grew to fit the new, larger program. | [`2h6bj43S…`][t-extend] |
+| 2 | Upgrade the program | Admin | The new program, with fresh `V1` account seeds, went live. | [`38GcMTnD…`][t-upgrade-v1] |
+| 3 | Deploy the new LendMirror code on Arbitrum | EVM owner | New code deployed. | [`0xfdfed299…`][t-e-lm-deploy] |
+| 4 | Point the LendMirror proxy at the new code | EVM owner | The permanent address now runs the new code. | [`0x4e751484…`][t-e-lm-upgrade] |
+| 5 | Deploy the treasury on Arbitrum | EVM owner | Code deployed, then the permanent proxy. | [`0x8fb39bcc…`][t-e-tr-impl], [`0x0e9d55c8…`][t-e-tr-proxy] |
+| 6 | Verify both contracts on Arbiscan | EVM owner | Source code is public on the explorer. | [LendMirror code][e-lm-impl], [treasury code][e-tr-impl] |
+| 7 | Create the Store | Admin | Our LayerZero identity exists. The admin is fixed from here on. | [`4Go72E1T…`][t-store] |
+| 8 | Connect LayerZero, Solana side | Admin | Solana knows the Arbitrum LendMirror is our partner. | [`5Eocjtex…`][t-peer-sol], [`66RhEuN9…`][t-nonce] |
+| 9 | Connect LayerZero, Arbitrum side | EVM owner | Arbitrum accepts messages from our Store only. | [`0xc0abee1e…`][t-e-peer] |
+| 10 | Allow the admin to wrap and refresh | Admin | Snapshotter list set. | [`3pZrmMyL…`][t-snapshotters] |
+| 11 | Allow the admin to send and bridge | Admin | Sender list set. | [`srKGH6ou…`][t-senders] |
+| 12 | Connect Chainlink, Solana side | Admin | Snapshots may go to the Arbitrum LendMirror over Chainlink. | [`5SDMGSYC…`][t-ccip-sol] |
+| 13 | Connect Chainlink, Arbitrum side | EVM owner | LendMirror accepts Chainlink messages from our bridge signer only. | [`0xada20bae…`][t-e-ccip] |
+| 14 | Let the treasury accept Chainlink tokens | EVM owner | Only from our bridge signer. | [`0x5fb535fe…`][t-e-tr-ccip] |
+| 15 | Tell the treasury about Circle | EVM owner | The treasury can finish Circle transfers. | [`0x45a7ef62…`][t-e-tr-cctp] |
+| 16 | Set where USDC goes after Arbitrum | EVM owner | The treasury's USDC strategy is the EVM owner's wallet, for the test. | [`0xe52ec6cf…`][t-e-strategy] |
+| 17 | Fix the USDC route | Admin | USDC goes over Circle, only to the treasury, at most 10 USDC per transaction. | [`2H5HH8tS…`][t-usdc-route] |
+| 18 | Publish the IDL | Admin | Explorers show our instructions and accounts in plain names. | [IDL account][a-idl] |
+
+### 3.2 Mirror the position to Arbitrum
+
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | Wrap position 95/34 | Admin | The program created the wrapper [`H85X…`][a-wrapper], at level 0: mirror only. | [`4BYPWA3F…`][t-wrap] |
+| 2 | Refresh the wrapper | Admin | The program read the position from Jupiter and stored it: 9,895,200,710 collateral shares, 14,875,925,507 debt units. | [`haqehTLj…`][t-refresh-1] |
+| 3 | Send the snapshot | Admin | One transaction sent the same snapshot over both networks. Fees: LayerZero 0.0012 SOL, Chainlink 0.0017 SOL. | [`ggPRn6GY…`][t-send] |
+| 4 | Delivered by LayerZero | LayerZero | Arrived and stored on the Arbitrum LendMirror. | [`0x2d10fa9f…`][t-e-lz-deliver], [LayerZero Scan][lzscan-send] |
+| 5 | Delivered by Chainlink | Chainlink | Arrived and stored on the Arbitrum LendMirror. | [`0xdb2187df…`][t-e-ccip-deliver], [CCIP explorer][ccip-send] |
+| 6 | Compare the two copies | Anyone | `lz:oapp:evm:match --all` printed `match`: both networks delivered identical bytes. | read only, no transaction |
+
+### 3.3 Hand the NFT to the program, and take it back
+
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | A wallet without the NFT tries to hand it over | Admin | Refused before sending (`AccountNotInitialized`): only the NFT holder can do this. Nothing sent. | refused in simulation |
+| 2 | Hand the NFT over | Position owner | The NFT moved to the wrapper's NFT account. The position owner became the wrapper owner. | [`4CRg9SrV…`][t-deposit-1] |
+| 3 | Give the NFT back | Admin | The NFT returned to the position owner, the only place it may go. | [`3qZzuKPo…`][t-release] |
+
+### 3.4 Bridge 1 USDC from Solana to Arbitrum
+
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | Raise the wrapper to level 1 | Admin | The wrapper may now bridge, supply and pay back. | [`4WUbsQjp…`][t-level-1] |
+| 2 | Put 1 USDC into the wrapper | Position owner | 1 USDC landed in the wrapper's USDC account [`7h1N…`][a-wrapper-usdc], which belongs to the wrapper authority [`AaJK…`][a-wrapper-auth]. | [`4ZVfSxG5…`][t-fund-1] |
+| 3 | Bridge 1 USDC | Position owner | The program sent 1 USDC into Circle's bridge, addressed to the treasury. The caller only chose the amount. | [`425maWwn…`][t-bridge] |
+| 4 | Claim it on Arbitrum | EVM owner (anyone may) | Circle minted 1 USDC into the treasury. | [`0x5921b568…`][t-e-claim] |
+| 5 | Forward it | EVM owner (anyone may) | The treasury sent the 1 USDC to its USDC strategy, the EVM owner's wallet. | [`0x84b139a3…`][t-e-forward] |
+
+### 3.5 Upgrade the program for smart vaults
+
+Vault 95 is a **smart vault**: its collateral is a share of a two-token pool. Jupiter only accepts its smart-vault instruction, `operate_dex`, on such vaults, and the program was built for the plain one, `operate`. The program was rebuilt on `operate_dex`, tested on a local copy of mainnet (12 of 12 steps passed), then deployed.
+
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | Upgrade the program | Admin | The `operate_dex` build went live. The new program is smaller, so no extra room was needed. The IDL was refreshed after. | [`5JE6pDH4…`][t-upgrade-dex] |
+
+### 3.6 Operate the position through the program
+
+| # | Step | Who | What happened | Proof |
+| --- | --- | --- | --- | --- |
+| 1 | Hand the NFT over again | Position owner | The program holds the NFT. | [`2XndUcs4…`][t-deposit-2] |
+| 2 | Put 1 USDC into the wrapper | Position owner | Wrapper's USDC account: 1 USDC. | [`3BVtkcp2…`][t-fund-2] |
+| 3 | Give the wrapper authority 0.05 SOL | Position owner (the task does this) | Jupiter charges the position's signer for any account it creates, so the wrapper authority needs a little SOL. | [`2u5ZBm99…`][t-topup] |
+| 4 | Supply 1 USDC as collateral | Position owner, level 1 | The wrapper's 1 USDC went into the pool position. Its USDC account went back to 0. | setup [`2uMbBEe9…`][t-supply-setup], supply [`4avLRFj9…`][t-supply], refresh [`sx21cuj2…`][t-refresh-2] |
+| 5 | Raise the wrapper to level 2 | Admin | The wrapper may now also withdraw and borrow. | [`3uqu5xNJ…`][t-level-2] |
+| 6 | Borrow 1 USDC | Position owner, level 2 | 1 USDC landed in the wrapper's own USDC account, not in any wallet. | setup [`4JAyhwkY…`][t-borrow-setup], borrow [`2Dpax2tj…`][t-borrow], refresh [`8h3fbQDF…`][t-refresh-3] |
+| 7 | Pay back 0.9 USDC | Position owner | Paid from the wrapper's USDC account: 1.000000 → 0.099999. Jupiter rounds a payback up by one unit. | setup [`32xqxyyk…`][t-payback-setup], pay back [`5mWz3Dxx…`][t-payback] |
+| 8 | Withdraw 0.5 USDC of collateral | Position owner, level 2 | 0.5 USDC landed in the wrapper's USDC account: 0.099999 → 0.599999. | setup [`4jzQM75B…`][t-withdraw-setup], withdraw [`4LJkH8o9…`][t-withdraw], refresh [`3TMDmnTJ…`][t-refresh-4] |
+
+What the position looked like after each step, as read by the program:
+
+| After | Collateral (pool shares) | Debt (Jupiter units) | Wrapper's USDC |
+| --- | --- | --- | --- |
+| Start | 9,895,200,710 | 14,875,925,507 | 0 |
+| Supply 1 USDC | 10,389,872,603 | 14,865,795,011 | 0 |
+| Borrow 1 USDC | 10,389,872,603 | 15,855,470,939 | 1.000000 |
+| Pay back 0.9 USDC | not refreshed | not refreshed | 0.099999 |
+| Withdraw 0.5 USDC | 10,142,489,050 | 14,975,884,818 | 0.599999 |
+
+How to read the numbers: about 495 million pool shares are worth 1 USD in this pool, so the supply added about 1 USD and the withdraw removed about 0.5 USD. Jupiter stores debt divided by a growing interest index, so 1 USDC of debt shows as about 990 million units. Debt also moves slightly whenever collateral changes, because Jupiter places each position on a price grid and keeps the rounding separately as "dust debt".
+
+### 3.7 What went wrong along the way, and the fix
+
+| What happened | Why | Fix |
+| --- | --- | --- |
+| The first program upload stopped with "Max retries exceeded". | The priority fee was too low for mainnet traffic, so the network dropped upload transactions. | Closed the half-written buffer (SOL refunded) and re-uploaded with a higher fee. |
+| A second upload was refused before starting. | The wallet was short of SOL: the upload parks about 3.6 SOL until it finishes, plus up to 0.3 SOL of fees. | Topped up the wallet. |
+| The first supply attempt stopped in our task, not on chain. | The task measured the transaction without Jupiter's lookup tables, so it was too big to even build. Its setup transaction [`4EXRJ6Pd…`][t-supply-setup-0] went through and created the wrapper's token accounts. | The task passes Jupiter's tables. A dry run on mainnet proved the fix first. |
+| The first payback attempt was refused by Jupiter. | The setup had just created a record Jupiter needs ([`Z5ycKKyL…`][t-payback-setup-0]), but the RPC node that checked the payback had not caught up yet. | The task waits two seconds after the setup and retries twice. The withdraw hit the same lag and went through on the first retry. |
+
+### 3.8 Where things stand after the test
+
+| What | State |
+| --- | --- |
+| Position NFT | Held by the program, in [`4BwL…`][a-wrapper-nft]. |
+| Wrapper level | 2 |
+| Wrapper's USDC account | 0.599999 USDC. It can only go into the position, or over the USDC route to the treasury. |
+| Wrapper authority | 0.05 SOL, kept for Jupiter's rent. There is no way to withdraw it. |
+| Bridge signer | 0.0476 SOL, left from the snapshot send, for future Chainlink fees. |
+| Treasury | Empty: the 1 USDC was forwarded. |
+| EVM owner | Received 1 USDC. |
 
 ---
 
+## 4. Who can do what
 
+| Who | Can | Cannot |
+| --- | --- | --- |
+| **Upgrade authority** (the admin wallet today) | Create the Store once. Upgrade the program. | |
+| **Admin** (named when the Store was created, forever) | Set LayerZero and Chainlink connections, the allow lists, bridge routes and wrapper levels. Give an NFT back to its wrapper owner. | Change the admin. Send an NFT or tokens anywhere else. |
+| **Snapshotter** (allow list) | Wrap a position and become its first owner. Refresh any wrapper. | Send, operate or bridge on wrappers it does not own. |
+| **Sender** (allow list) | Send any wrapper's snapshot. Bridge from any wrapper at level 1 or 2. | Operate a position. |
+| **NFT holder** | Hand the NFT to a wrapper, and become that wrapper's owner. | |
+| **Wrapper owner** | Refresh, operate and bridge that wrapper. Name up to 8 helpers on the wrapper's OnDemand list. | Raise its own level. Choose a bridge destination. |
+| **OnDemand helper** (per wrapper) | Refresh, send, operate and bridge that one wrapper. | Anything on other wrappers. |
+| **Anyone** | Send tokens into a wrapper's token account. On Arbitrum, claim a Circle transfer and forward the treasury's balance. Both only move funds along fixed paths. | Run any program instruction above. |
+| **EVM owner** | Upgrade both Arbitrum contracts. Set peers, allowed senders, and each token's strategy. | Take tokens from the treasury except by setting itself as a strategy. |
 
-## 6. Status
+**Levels**, set per wrapper by the admin:
 
-
-| Piece                                                                          | Status                                                                                                                                    |
-| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Live Jupiter read (ticks, liquidation branches)                                | Built; `crates/jup-tick-parity` and `npm run test:jup-live` compare against Jupiter's SDK                                                 |
-| Snapshot send over LayerZero + Chainlink, once per refresh, newest wins on EVM | **Verified Devnet → Sepolia 2026-09-28**. **Verified mainnet → Arbitrum 2026-09-29** on vault 95 / nft 34 (a smart-collateral vault): refresh, send, both copies match. Fees: LayerZero 0.0012 SOL, Chainlink 0.0017 SOL |
-| Sync every wrapped position                                                    | **Run on Devnet 2026-09-28**                                                                                                              |
-| NFT custody, levels, Jupiter `operate_dex` CPI                                      | Rebuilt 2026-09-30 on Jupiter's `operate_dex` (smart vaults only; plain vaults such as vault 1 are no longer operable). Fork of mainnet vault 95: supply, borrow, payback, withdraw, the level gate and the payout-account check all pass. **Mainnet 2026-09-29, vault 95 / nft 34:** a wallet without the NFT is refused (`AccountNotInitialized` on `source_nft_ata`); the NFT holder deposits and becomes owner (tx `4CRg9SrV…`); the admin releases it back to that owner (tx `3qZzuKPo…`, first run anywhere). **Mainnet 2026-09-30, vault 95 / nft 34, through `operate_dex`:** level 1 supply of 1 USDC as smart collateral (tx `4avLRFj9…`, shares 9,895,200,710 → 10,389,872,603), level 2 borrow of 1 USDC into the wrapper authority's account `7h1NZx1i…` (tx `2Dpax2tj…`, debt raw 14,865,795,011 → 15,855,470,939). level 2 payback of 0.9 USDC from that account (tx `5mWz3Dxx…`, 900,001 spent: Jupiter rounds a payback up one unit), and level 2 withdraw of 0.5 USDC of collateral into it (tx `4LJkH8o9…`, shares 10,389,872,603 → 10,142,489,050). All four operations work on mainnet |
-| Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury. **Verified mainnet → Arbitrum 2026-09-30:** 1 USDC from wrapper 95/34 (bridged by the wrapper owner), claimed by the treasury, forwarded to the strategy `0x9Dee…` |
-| Token bridge, Chainlink CCIP (PST, USDC)                                       | **Verified Devnet → Sepolia 2026-09-28** with CCIP-BnM, end to end through the treasury                                                   |
-| Token bridge, LayerZero OFT (USDT0, USDai, sUSDai)                             | Built, unit-tested; **not tested on any network**                                                                                         |
-| EVM treasury                                                                   | Deployed on Sepolia, used in the Devnet run                                                                                               |
-| Mainnet                                                                        | Upgraded and wired 2026-09-29; LendMirror and treasury implementations verified on Arbiscan. See Addresses |
-
-
-Tokens in scope, and only these: **USDC, USDT, USDai, sUSDai, PST**. Which bridge carries each, with mints and lanes, is in `docs/bridge-providers.md`.
-
-Instructions (`src/lib.rs`): `init_store`, `set_peer_config`, `set_snapshotters`, `set_senders`, `quote_send`, `set_ccip_route`, `get_jupiter_position` (legacy), `wrap_position`, `attach_ondemand`, `set_ondemand_callers`, `refresh_wrapper`, `send_position_snapshot_via_chainlink_and_lz`, `set_wrapper_level`, `deposit_position_nft`, `release_position_nft`, `operate_position`, `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_oft`.
-
----
-
-
-
-## 7. Addresses
-
-
-
-### Devnet / Sepolia (`DEPLOYMENT_TYPE=devnet`)
-
-
-| Item                                                           | Value                                                                                                       |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Solana program id                                              | `GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1` (upgraded 2026-09-28, slot 505141350)                        |
-| Solana Store (OApp, LayerZero sender)                          | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz` under the V1 seeds, **not initialized yet**; the runs above used `BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM` |
-| Bridge signer / CCIP payer                                     | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR` under the V1 seeds; the runs above used `53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m` |
-| Address lookup table                                           | `6hHfFhvqfHmvdgwUigfMBG1ycCQfHbsLhKWuMJExpSDK`                                                              |
-| Admin, snapshotter, sender, upgrade authority                  | `AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo`                                                              |
-| Example wrapper (vault 1 / nft 29)                             | `4n4EThrVJEsPwyPrm5Zvcs4KG19hS3bu33c6zgaCY1xm`; its authority `ta2FFMT3aHMNhyAfcErWfw2C666R76eBkjWFJ5kST5E` |
-| Devnet USDC (Circle)                                           | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`                                                              |
-| Sepolia LendMirror (proxy, LayerZero peer, Chainlink receiver) | `0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514`                                                                |
-| Sepolia LendMirror implementation                              | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` (upgraded 2026-09-29)                                                                |
-| Sepolia LendMirrorTreasury (proxy)                             | `0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C` (implementation `0x948297b2DD73D7Fd6D17E8c966705e2f9981F1D6`)  |
-| Sepolia owner / current USDC strategy                          | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87`                                                                |
-| Sepolia USDC (Circle)                                          | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`                                                                |
-| LayerZero pathway                                              | Devnet `40168` → Sepolia `40161`                                                                            |
-| Chainlink                                                      | Snapshot route wired. Devnet token lanes carry CCIP-BnM `3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6`      |
-
-
-Files: `deployments/solana-testnet/OApp.json`, `deployments/sepolia/*.json`, `config/devnet.ts`. Wrappers, authorities, OnDemand lists, and routes are per position or per token; the tasks print them. Wrappers created under the old `LendMirrorWrapper` seed are abandoned.
-
-### Mainnet (`DEPLOYMENT_TYPE=mainnet`)
-
-Our contracts and keys:
-
-| What | Where | Address | Role | Status |
-|---|---|---|---|---|
-| LendMirror program | Solana | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` | the program; holds NFTs, operates positions, sends snapshots, bridges tokens | `operate_dex` build live since 2026-09-30, slot 451748984 (713,560-byte program in a 750,280-byte account). IDL account `8xxYX7DCKg1Y1X4Vqunrr2Ka1YagQL9frFK5sQv4BywU` refreshed the same day |
-| Program data account | Solana | `EKeeTYJpf9Z46cRxehg5M16m2fpvT8DcxicojbM92Kkt` | holds the program bytes | 3.81 SOL of rent |
-| Solana wallet | Solana | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` | upgrade authority; Store admin (permanent); the only snapshotter and sender | set 2026-09-29 |
-| Store | Solana | `4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV` | PDA `["LendMirrorStoreV1"]`; our LayerZero identity, admin and allowlists | created 2026-09-29 (tx `4Go72E1T…`), registered with LayerZero, send config for Arbitrum initialized |
-| LayerZero peer account | Solana | `6mfKavvXreuM559b6uJKtzXwmRsLNkuiAA5EQSCAx9hF` | PDA `["LendMirrorPeerV1", store, 30110 be]`; says the Arbitrum proxy is our peer | set 2026-09-29 |
-| Chainlink snapshot route | Solana | PDA `["LendMirrorCcipRouteV1"]` | Chainlink router, fee quoter, RMN, Arbitrum selector, proxy as receiver | set 2026-09-29 |
-| USDC bridge route | Solana | `Ft1MQnTNf6XZBARxVdeu2WBBti6DW8SrVaFimXstp4Xj` | USDC to Arbitrum (42161) over Circle CCTP, receiver and claimer = treasury, cap 10 USDC per transaction | set 2026-09-29 |
-| Bridge signer / CCIP payer | Solana | `D6RLag1KgbK8Fe8URR2zXFaZXKBnnx6tLPuL1sUuaLNG` | empty PDA `["LendMirrorCcipPayerV1"]`; signs every Chainlink send and token bridge, pays their SOL fees | allowed as sender on the proxy and the treasury; exists once funded |
-| Address lookup table | Solana | `FK2PwZSMdxGNhrdYnZkxALYATBH1SvBonz9vmVb69LAa` | makes the send transactions fit | created 2026-09-29 |
-| LendMirror proxy | Arbitrum | `0xb42E98c712B5CAf1e55dB8106262077515879EA2` | receives snapshots; LayerZero peer and Chainlink receiver | upgraded 2026-09-29; peer = Store `4FUx…` (tx `0xc0abee1e…`); Chainlink route set (tx `0xada20bae…`) |
-| LendMirror implementation | Arbitrum | `0xe9E61B9aC26ED2CEBC2F21fbD76F7e6cfDa43032` | code behind the proxy | live (upgrade tx `0x4e751484…`); previous `0xdAAE65Df…` retired |
-| LendMirrorTreasury proxy | Arbitrum | `0x736AAC431E66de7D07eb61738CA3598a53a24Ca0` | receives bridged tokens; the receiver of every bridge route; forwards only to owner-set strategies | deployed 2026-09-29; accepts Chainlink from `D6RLag…`; Circle transmitter set; USDC strategy = `0x9Dee…` (test) |
-| LendMirrorTreasury implementation | Arbitrum | `0xBED1911918D70c2E88b83f2C75b1763e2c49A795` | code behind the treasury proxy | live |
-| EVM wallet | Arbitrum | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` | owner of both proxies; the same key owns the Sepolia contracts | |
-
-Other parties' addresses we call:
-
-| What | Where | Address |
-|---|---|---|
-| Jupiter Lend Vaults, main market | Solana | `jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi` |
-| USDC | Solana | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
-| USDC | Arbitrum | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
-| LayerZero EndpointV2 | Arbitrum | `0x1a44076050125825900e736c501f859c50fE728c` |
-| Chainlink CCIP router | Solana / Arbitrum | `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C` / `0x141fa059441E0ca23ce184B6A78bafD2A517DdE8` |
-| Circle CCTP v2 | Solana / Arbitrum | `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe` / MessageTransmitterV2 `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` |
-
-Pathway: LayerZero Solana `30168` → Arbitrum `30110`; Chainlink selectors Solana `124615329519749607` → Arbitrum `4949039107694359620`. Retired: the old program's Store `BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4`. `deployments/arbitrum/LendMirror*.json` still records the retired implementation because the upgrade was done with `cast`; the proxy address in it is correct and the tasks read the ABI from the compiled contract.
-
+| Level | Allows |
+| --- | --- |
+| 0 | Mirror only. The start for every wrapper. |
+| 1 | Supply collateral, pay back debt, bridge tokens. Only moves that lower the risk. |
+| 2 | Level 1, plus withdraw collateral and borrow. |
+| 3, 4 | Stored but not defined yet: everything is refused. |
 
 ---
 
+## 5. Safety rules
 
+| Rule | Where it is enforced |
+| --- | --- |
+| A bridge caller gives an amount, never a destination. | `bridge_tokens.rs`: the destination comes from the admin's `BridgeRoute`. |
+| Only the admin writes routes and levels. | `set_bridge_route`, `set_wrapper_level`: signer must be `store.admin`. |
+| Tokens leave only from accounts the program controls. | `bridge_tokens.rs`: the source must be the wrapper authority's or the bridge signer's own token account. |
+| Jupiter can only pay into the program's accounts. | `operate_position.rs`: Jupiter's signer is the wrapper authority, and all 12 accounts Jupiter can pay into must be absent or owned by it. |
+| Level 1 can only lower the risk. | `raises_risk` in `operate_position.rs` and `level_allows` in `state/wrapper.rs`. |
+| Only direct transfers from Jupiter; nothing parked in a claim account. | `operate_position.rs`: `transfer_type` must be empty or direct. |
+| One bridge transaction moves at most the route's cap. | `bridge_tokens.rs`: `amount <= max_amount_per_tx`. |
+| A snapshot is sent once per refresh. | `PositionWrapper::can_send`; a repeat fails with `SnapshotAlreadySent`. |
+| Arbitrum never goes back to an older snapshot. | `LendMirror.sol`: an older delivery is acknowledged and dropped. |
+| The treasury pays out only to owner-set strategies. | `LendMirrorTreasury.forward`. |
+| An NFT returns only to its wrapper owner. | `release_position_nft`: the destination is `wrapper.owner`. |
+| A LayerZero token send cannot be pointed at another lane, and pays its own fee. | `bridge_tokens_oft`: store and peer are derived from the route; caller options are refused. |
+
+Not enforced, on purpose: wrapping does not check that the Jupiter position exists (a wrapper for a missing position simply cannot be refreshed), and an allowed caller may bridge any amount up to the cap as often as it likes (the destination is fixed, so repeat calls cost fees, not funds).
+
+The full list of review findings, fixed and open: [`docs/review.md`](docs/review.md).
+
+---
+
+## 6. Tokens and bridges
+
+| Token | Bridge the program uses | Mainnet today |
+| --- | --- | --- |
+| **USDC** | Circle CCTP | **Working.** Route set to the treasury, capped at 10 USDC per transaction. 1 USDC bridged in the Test Run. |
+| **PST** | Chainlink CCIP | Not set up. Chainlink has no PST lane from Solana to Arbitrum, only to Ethereum and Arc. The same instruction was proven on Devnet with Chainlink's test token. |
+| **USDT** (as USDT0) | LayerZero OFT | Not set up. Needs the issuer's Solana program id and escrow account. |
+| **USDai** | LayerZero OFT | Not set up. Same inputs as USDT0. |
+| **sUSDai** | LayerZero OFT | Not set up. Same inputs as USDT0. |
+
+Adding a token is one admin command (`set-bridge-route`) plus a strategy on the treasury (`treasury:set-strategy`). No program change is needed. Mints, lanes and destinations per token: [`docs/bridge-providers.md`](docs/bridge-providers.md).
+
+---
+
+## 7. What is proven where
+
+| Piece | Mainnet → Arbitrum | Devnet → Sepolia | Local copy of mainnet |
+| --- | --- | --- | --- |
+| Mirror a position over LayerZero and Chainlink | **Yes** | Yes | |
+| Mirror every wrapped position (`sync-all-positions`) | | Yes | |
+| Hand over and release the NFT | **Yes** | | Yes |
+| Supply, borrow, pay back, withdraw (smart vault, `operate_dex`) | **Yes** | | Yes, 12 of 12 steps |
+| Level 1 refusing a borrow or withdraw | | | Yes |
+| A payout redirected to a wallet is refused | | | Yes |
+| Bridge USDC over Circle | **Yes** | Yes | |
+| Bridge a token over Chainlink | | Yes, test token | |
+| Bridge a token over LayerZero | | | Unit tests only |
+
+Jupiter's Devnet deployment is an old build that its SDK cannot read, so Jupiter operations are tested on a local copy of mainnet (`npm run test:fork`) and then on mainnet.
+
+---
 
 ## 8. Commands
 
-
+The full, step-by-step runbook for Devnet and mainnet, including costs, is [`deployment-instructions.md`](deployment-instructions.md). The essentials:
 
 ### Environment
 
-Node **18**, Rust **1.84** (pinned in `rust-toolchain.toml`), Solana CLI, Anchor **0.31.1**, Foundry. Then:
+Node 18, Rust 1.84 (pinned), Solana CLI 2.1, Anchor 0.31.1, Foundry.
 
 ```bash
 npm install
 nvm use 18
-set -a && source .env && set +a      # DEPLOYMENT_TYPE=devnet plus the four *_DEVNET values
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"   # Anchor needs the Solana CLI
+set -a && source .env && set +a                                            # DEPLOYMENT_TYPE=devnet or mainnet, plus its keys and RPCs
 ```
 
-`DEPLOYMENT_TYPE` picks `config/devnet.ts` or `config/mainnet.ts` for Hardhat, `npx lm`, and `layerzero.config.ts`. Bare `solana` / `forge` / `cast` ignore it; use `npx lm <solana|forge|cast|anchor|build> …` so the profile's RPC and keys are injected. `lz:oapp:wire` crashes; set peers with the `set-peer` tasks.
+`DEPLOYMENT_TYPE` picks `config/devnet.ts` or `config/mainnet.ts`. Use `npx lm <solana|forge|cast|anchor|build>` for anything that writes: it injects the right RPC and key. Bare `solana`, `forge` and `cast` ignore the profile.
 
-### Build
+### Build and test
+
+The local tests load the program at the Devnet address, so build it stamped with that id first. Nothing here touches a public network.
 
 ```bash
-npx lm build -- --features no-log-ix-name     # Solana program, stamped with the profile's program id
-npm run gen:api                               # regenerate lib/client/generated from target/idl (commit the result)
-npx hardhat compile                           # EVM
+LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name
+npm run gen:api                                       # regenerate the TypeScript client from the IDL
+npx hardhat compile                                   # the Arbitrum contracts
+cargo test -p lendmirror                              # 42 unit tests
+forge test                                            # 21 contract tests
+RPC_URL_SOLANA_MAINNET= anchor test --skip-build      # 23 tests on a local validator
+SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork   # vault 95 on a local copy of mainnet
 ```
 
+To deploy, rebuild for your network with `npx lm build -- --features no-log-ix-name`, which stamps the profile's program id, and check the id inside the binary as the runbook shows.
 
-
-### Test (nothing touches a public network)
+### Everyday tasks
 
 ```bash
-cargo test -p lendmirror                                   # 42 unit tests: codecs, level policy, operate_dex bytes and payout checks, send guard, CCTP/CCIP/OFT bytes
-forge test                                                 # 21: LendMirror, treasury, codec
-RPC_URL_SOLANA_MAINNET= anchor test --skip-build           # 23: local validator with the LayerZero endpoint cloned from Devnet
-SOLANA_TEST_VALIDATOR=/path/to/solana-release/bin/solana-test-validator npm run test:fork   # fork of Jupiter mainnet vault 95: custody, supply, gate, borrow, payback, withdraw, release
-cd crates/jup-tick-parity && cargo test                    # tick math vs Jupiter's Rust SDK
-npm run test:jup-live                                      # live read vs Jupiter's read SDK (needs RPC_URL_SOLANA_MAINNET)
+# Mirror
+npx hardhat lz:oapp:solana:wrap-position --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:evm:match --all
+npx hardhat lz:oapp:solana:sync-all-positions --dry-run
+
+# Custody and levels
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 95 --nft-id 34          # NFT holder
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 1   # admin
+npx hardhat lz:oapp:solana:release-position-nft --vault-id 95 --nft-id 34          # admin
+
+# Operate (wrapper owner; smart vaults only)
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id 95 --nft-id 34 --mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v --amount 1000000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action supply --col-token1 1000000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action borrow --debt-amount 1000000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action payback --debt-amount 900000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action withdraw --col-token1 500000
+
+# Bridge to Arbitrum
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint usdc --amount 1000000
+npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # Circle only, once Circle has attested
+npx hardhat lz:oapp:evm:treasury:forward --token 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 ```
 
-`anchor test` loads the program as upgradeable with the test wallet as authority (`Anchor.toml [[test.genesis]]`), which `init_store` requires. `test:fork` clones Jupiter's programs and one vault's accounts at genesis (read-only); regenerate the clone list with `tests/fork/dump-accounts.ts`.
-
-The fork must start at mainnet's slot or Jupiter's oracle rejects every borrow (it compares the clock slot with the slot stored in the cloned price accounts). The Agave 2.1 validator that ships with the pinned CLI hangs after `--warp-slot`; Agave 4.2 does not. Download `solana-release-aarch64-apple-darwin.tar.bz2` (Apple silicon) from github.com/anza-xyz/agave/releases, unpack it anywhere, and pass its `bin/solana-test-validator` in `SOLANA_TEST_VALIDATOR`. Without it the runner uses the 2.1 binary unwarped and the borrow step skips itself with a note.
-
-### Deploy or upgrade Devnet
-
-```bash
-npx lm build -- --features no-log-ix-name
-npx lm solana program extend GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 250000   # only if the new .so is larger than the account
-solana-keygen new --no-bip39-passphrase --silent -o deploy-buffer.json
-npx lm solana program write-buffer target/deploy/lendmirror.so --buffer deploy-buffer.json --use-rpc --max-sign-attempts 100 --with-compute-unit-price 500000   # rerun until "Buffer:" prints; it resumes
-npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json --buffer deploy-buffer.json target/deploy/lendmirror.so --use-rpc --max-sign-attempts 100 --with-compute-unit-price 500000
-npx lm solana program close --buffers        # reclaim SOL from abandoned buffers
-npm run gen:api
-```
-
-Sepolia:
-
-```bash
-npx hardhat compile
-npx lm forge create contracts/LendMirror.sol:LendMirror --broadcast --constructor-args 0x6EDCE65403992e310A62460808c4b910D972f10f
-npx lm cast send 0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514 "upgradeToAndCall(address,bytes)" <NEW_IMPL> 0x
-npx hardhat deploy --tags LendMirrorTreasury  # once; put the proxy address in config/devnet.ts `treasury`
-```
-
-First-time setup of a brand-new deployment (no Store yet): `lz:oapp:solana:create`, `lz:deploy --ci`, `lz:oapp:solana:init-config --oapp-config layerzero.config.ts`, `lz:oapp:solana:set-peer`, `lz:oapp:evm:set-peer`, `lz:oapp:solana:set-ccip-route`, `lz:oapp:evm:set-ccip-route`, `lz:oapp:solana:create-lookup-table`. `deployment-instructions.md` walks through each with explanations.
-
-### Run
-
-Data flow:
-
-```bash
-npx hardhat lz:oapp:solana:wrap-position --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:attach-ondemand --vault-id 1 --nft-id 29           # optional
-npx hardhat lz:oapp:solana:set-ondemand-callers --vault-id 1 --nft-id 29 --callers <pk1>,<pk2>
-npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:evm:match --position <POSITION>       # or --all
-npx hardhat lz:oapp:solana:sync-all-positions [--force] [--only 1:29] [--dry-run]
-```
-
-Custody and operate:
-
-```bash
-npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 95 --nft-id 34
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 1
-npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action supply --col-token1 20000000   # smart vaults only
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 2
-npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action borrow --debt-amount 5000000
-npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action payback --debt-amount 2000000
-npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action withdraw --col-token1 5000000   # share bound defaults to all shares
-npx hardhat lz:oapp:solana:release-position-nft --vault-id 95 --nft-id 34                      # admin escape hatch
-```
-
-Bridge:
-
-```bash
-npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter
-npx hardhat lz:oapp:evm:treasury:set-ccip-route
-npx hardhat lz:oapp:evm:treasury:set-strategy --token <ERC20> --strategy <address>
-npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp                                   # or --provider ccip
-npx hardhat lz:oapp:solana:set-bridge-route --mint <mint> --provider oft --oft-program <id> --escrow <acct> --dst-eid 30110
-npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint usdc --amount 1000000
-npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # Circle only, after attestation
-npx hardhat lz:oapp:evm:treasury:forward --token <ERC20>
-```
-
-Admin lists and peers: `set-snapshotters --keys …`, `set-senders --keys …`, `set-peer`, `get-peer`, `debug`.
+In `operate-position`, smart legs take `--col-token0/1` or `--debt-token0/1`, normal legs `--col-amount` or `--debt-amount`. Amounts are always positive; the action gives the direction.
 
 ---
 
+## 9. Reference: program accounts and the snapshot
 
+Every account is a PDA: an address derived from fixed seeds and the program id. All seeds live in `programs/lendmirror/src/seeds.rs` and `lib/client/seeds.ts`, and all end in `V1`. A layout change means a new seed, never an edit.
 
-## 9. Review findings
-
-Both sides were read end to end for this readme. What was found, what was fixed in the same change set, and what is still open.
-
-### Fixed
-
-| Where | Problem | Fix |
+| Account | Seeds | Holds |
 | --- | --- | --- |
-| `operate_position` | Jupiter accepts a "claim" transfer type. A caller could withdraw or borrow into a Liquidity claim account that no instruction here can spend, stranding the funds. | Only `transfer_type` `None` or `1` (direct) is accepted. Since the move to `operate_dex` (2026-09-30), every account Jupiter can pay into must also be absent or owned by the wrapper authority. |
-| `operate_position`, `bridge_tokens_*` | Store snapshotters, meant to be a read role, could operate any custodied wrapper and bridge from any wrapper. | Operate: owner or OnDemand caller only. Bridge: owner, OnDemand caller, or sender (operator). Docs and `Store` comments now match the code. |
-| `bridge_tokens_*` | The level gate was `level >= 1`, so the reserved levels 3 and 4 could bridge while they cannot operate. | Levels 1 and 2 only. |
-| `bridge_tokens_oft` | The LayerZero fee is paid from the shared bridge-signer PDA. A caller could quote a high `native_fee`, bring little `fee_lamports`, and drain that PDA's SOL; caller-supplied executor options could turn it into a native drop to their own EVM address. | `fee_lamports >= native_fee` and `options` must be empty. Gas comes from the peer's enforced options, set by the admin. |
-| `bridge_tokens_ccip` | The route's `provider_program` was never compared to the Chainlink router the CCIP accounts were validated against. | It must equal `ccip_route.router`. |
-| `bridge_tokens_cctp` | `max_fee` (the Circle fast-transfer fee) had no bound. | Capped at 1% of the amount. |
-| `set_bridge_route` | A 32-byte receiver that is not a left-padded EVM address would be read differently by CCIP (last 20 bytes) than by CCTP and OFT (all 32). A CCTP domain or LayerZero eid larger than `u32` was silently truncated. | Receiver must have 12 zero bytes in front. Domains and eids must fit a `u32`. |
-| `PeerConfig::SIZE` | Sized with `size_of::<Self>()`, which counts the two `Vec` headers, not the up to 1536 bytes of enforced options Borsh writes. Any real enforced options overflowed the 81-byte account. | Sized from `EnforcedOptions::INIT_SPACE`; `set_peer_config` grows an old peer account before writing. |
-| `lib/client/bridge.ts` | The CCIP pool chain-config PDA was derived under the wrong program and passed read-only; the pool writes its rate-limit bucket there. | Derived under the pool program, marked writable. |
-| `bridge_tokens_ccip` | The router was given a `token_pools_signer` account it does not list, and nothing let the router pull the tokens: its on-chain transfer failed with `owner does not match`. | The router's `ccip_send` names 18 accounts. The pull is signed by the router's `fee_billing_signer` PDA, so the bridge signer approves that PDA for exactly `amount` before the CPI. |
-| `tasks/solana/syncAll.ts` | A refresh whose numbers did not change was reported as "unchanged" and skipped, even though `snapshot_time` moved and the send would go through. | "Changed" now also means a newer snapshot time. |
-| `tasks/evm/setPeer.ts` | An uninitialised proxy would be initialised by whichever key ran `set-peer`. | The task now refuses and tells you to fix the deployment. |
-| Gas for the Chainlink snapshot | `400 000` was the Devnet setting; the Sepolia `lzReceive` / `ccipReceive` path needs more headroom. | `600 000` in `config/devnet.ts` and the LayerZero executor option. **The on-chain `CcipRoute` still holds 400 000 until `set-ccip-route` is run again on Devnet.** |
+| Store | `["LendMirrorStoreV1"]` | Admin, LayerZero endpoint, Jupiter program id, snapshotters and senders (8 each) |
+| LayerZero peer | `["LendMirrorPeerV1", store, eid]` | The Arbitrum LendMirror address and enforced options |
+| Chainlink route | `["LendMirrorCcipRouteV1"]` | Router, fee quoter, RMN, destination, receiver, gas limit |
+| Bridge signer | `["LendMirrorCcipPayerV1"]`, no data | Signs every Chainlink send and token bridge; holds SOL for fees |
+| Wrapper | `["LendMirrorPositionWrapperV1", vault_id, nft_id]` | Owner, level, custody, NFT mint, last snapshot, send guard |
+| Wrapper authority | `["LendMirrorWrapperAuthV1", wrapper]`, no data | Owns the wrapper's NFT and token accounts; Jupiter's signer |
+| OnDemand list | `["LendMirrorOnDemandV1", wrapper]` | Up to 8 helpers for one wrapper |
+| Bridge route | `["LendMirrorBridgeRouteV1", mint, chain_id]` | Bridge, receiver, destination, cap, on/off |
 
-### Open, decided not to change now
+The signers are empty accounts on purpose: Solana will not move SOL out of an account that holds data, and these accounts must pay fees and rent.
 
-| Where | Note |
+**The snapshot** is 225 bytes. `src/state/jupiter_position.rs` writes it and `contracts/libs/PositionSnapshotMsgCodec.sol` reads it, byte for byte:
+
+| Offset | Field | Meaning |
+| --- | --- | --- |
+| 0 | position (32) | The Jupiter position account |
+| 32 | vault_id (u16), nft_id (u32) | Which position |
+| 38 | position_mint, supply_token, borrow_token (32 each) | NFT mint, collateral mint, debt mint. For a smart vault the collateral "mint" is the pool address. |
+| 134 | col_raw, debt_raw, dust_debt, net_debt (u64 each) | Live amounts after any liquidation. For a smart vault, col_raw is pool shares. |
+| 166 | tick (i32), tick_id (u32) | Where the position sits on Jupiter's price grid |
+| 174 | stored_col_raw, stored_debt_raw (u64), stored_tick (i32) | What Jupiter's account still says; stale after a liquidation |
+| 194 | is_supply_only, is_liquidated, is_fully_liquidated (1 byte each) | Flags |
+| 197 | branch_id (u32) | The liquidation branch, 0 if none |
+| 201 | vault_supply_exchange_price, vault_borrow_exchange_price (u64) | Multiply raw amounts by these, divided by 1e12, for token units |
+| 217 | snapshot_time (i64) | Solana clock at refresh; the send guard and Arbitrum's "newest wins" rule use it |
+
+LayerZero carries a 32-byte length header plus these 225 bytes. Chainlink carries the 225 bytes alone.
+
+---
+
+## 10. Devnet and Sepolia
+
+| What | Address |
 | --- | --- |
-| `wrap_position` | Does not check that the Jupiter position exists. Harmless (level 0, cannot refresh) but a typo in `nft_id` gives a dead wrapper that cannot be closed. Consider an admin `close_wrapper`. |
-| Wrapper ownership | Fixed 2026-09-28: `deposit_position_nft` used to require the signer to be the wrapper owner, so a wrapper created by an ops wallet for someone else's position could never take custody. Now the NFT holder deposits and becomes the owner. Still open: there is no `set_wrapper_owner`; if the owner key is lost, the admin can only `release_position_nft` back to that lost key. |
-| Bridge signer / wrapper authority SOL | SOL that lands on these PDAs (fees, refunds) has no withdraw instruction and is stuck. |
-| `LendMirror.sol` | Single-step ownership; `lzReceive` is `payable` (LayerZero standard). The decoder accepts any payload of the right length without a version byte. |
-| `LendMirrorTreasury.ccipReceive` | Chainlink does not call the receiver when the route's `gasLimit` is 0; the treasury still receives the tokens, it just does not log the delivery. |
-| `deployments/sepolia/LendMirror_Implementation.json` | Still records the previous implementation. The proxy points at the current one (section 7); the record is informational. |
-| Level 2 borrow on a public network | Proven on the warped fork only. Devnet's Jupiter is an old build the SDK cannot decode; the first live borrow is a small mainnet position after the mainnet upgrade. |
-| LayerZero OFT token path | Not yet run on a public network: no OFT test token on Devnet. |
+| Program | [`GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1`][d-program]. Runs the V1-seed build with plain `operate`; not upgraded to `operate_dex`. |
+| Store | [`4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz`][d-store] |
+| Bridge signer | [`ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR`][d-bridge-signer] |
+| Admin, snapshotter, sender, upgrade authority | [`AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo`][d-admin] |
+| Wrapper, vault 1 / nft 29 | [`YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`][d-wrapper] |
+| Lookup table | [`6hHfFhvqfHmvdgwUigfMBG1ycCQfHbsLhKWuMJExpSDK`][d-lut] |
+| Sepolia LendMirror (proxy) | [`0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514`][s-lm], code `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` |
+| Sepolia treasury (proxy) | [`0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C`][s-tr] |
+| Test tokens | Devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Chainlink CCIP-BnM `3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6` |
+
+Network ids: LayerZero Devnet `40168` → Sepolia `40161`.
+
+---
+
+## 11. Known limits
+
+- **Smart vaults only.** The program operates positions through Jupiter's `operate_dex`. Plain vaults, such as vault 1, accept only `operate`, which the program no longer builds. Mirroring, custody and bridging still work on every vault.
+- **No full exit through the program yet.** "Withdraw everything" and "pay back everything" need Jupiter's `operate_perfect_dex`. Today's exit: the admin releases the NFT, and the owner closes the position on jup.ag.
+- **The withdraw path uses Solana's full call depth**: our program → Jupiter Vaults → Jupiter DEX → Liquidity → token program. It works, with no spare level.
+- **SOL on the signer accounts cannot be withdrawn.** The wrapper authority's rent money and the bridge signer's fee money stay there. A sweep instruction would need a program upgrade.
+- **LayerZero token bridges have never run** on any network.
+- **For smart vaults the snapshot reports pool shares, not dollars.** Turning shares into token amounts on Arbitrum would need the pool's reserves in the snapshot.
+
+The full list: [`docs/review.md`](docs/review.md).
+
+---
+
+## 12. Repo map
+
+| Path | What is there |
+| --- | --- |
+| `programs/lendmirror/` | The Solana program (Anchor). `ARCHITECTURE.md` maps every file. |
+| `contracts/` | The Arbitrum contracts: `LendMirror.sol`, `LendMirrorTreasury.sol`, the snapshot decoder. |
+| `lib/client/` | TypeScript client: generated instruction builders, Jupiter and bridge helpers, seeds. |
+| `tasks/` | Hardhat tasks for every step above (`tasks/solana`, `tasks/evm`). |
+| `config/` | One profile per network: `devnet.ts`, `mainnet.ts`. |
+| `deployments/` | Recorded deployment addresses per network. |
+| `tests/` | Local validator tests; `tests/fork/` runs vault 95 on a local copy of mainnet. |
+| `deployment-instructions.md` | The runbook, from build to mainnet. |
+| `docs/` | `what-changed.md`, `bridge-providers.md`, `review.md`. |
+
+<!-- Links: Solana mainnet (Solscan) -->
+[a-program]: https://solscan.io/account/9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ
+[a-programdata]: https://solscan.io/account/EKeeTYJpf9Z46cRxehg5M16m2fpvT8DcxicojbM92Kkt
+[a-idl]: https://solscan.io/account/8xxYX7DCKg1Y1X4Vqunrr2Ka1YagQL9frFK5sQv4BywU
+[a-store]: https://solscan.io/account/4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV
+[a-peer]: https://solscan.io/account/6mfKavvXreuM559b6uJKtzXwmRsLNkuiAA5EQSCAx9hF
+[a-ccip-route]: https://solscan.io/account/Fa7ousHkzZMXrGtwwYQdSZUB46PE9yLKsTseaNjh2TzK
+[a-usdc-route]: https://solscan.io/account/Ft1MQnTNf6XZBARxVdeu2WBBti6DW8SrVaFimXstp4Xj
+[a-bridge-signer]: https://solscan.io/account/D6RLag1KgbK8Fe8URR2zXFaZXKBnnx6tLPuL1sUuaLNG
+[a-lut]: https://solscan.io/account/FK2PwZSMdxGNhrdYnZkxALYATBH1SvBonz9vmVb69LAa
+[a-admin]: https://solscan.io/account/B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL
+[a-nftwallet]: https://solscan.io/account/HgyDJt5yGiPVUaTrfssF3VkdhRZ4BNdtnsCFE9pcPRHv
+[a-nft-mint]: https://solscan.io/token/7CkF6a4HVKg7qst2x2XdgL71tAUxvmnh5QU5wqidF23e
+[a-wrapper]: https://solscan.io/account/H85XkQZ1TEsCTX6DuNmFUU93F2Bv7YuFkDAZ1y6f1Stw
+[a-wrapper-auth]: https://solscan.io/account/AaJKP3h3hgNo7UswHdi1MWnccJzL1AtsgkFbXc9VLQqb
+[a-wrapper-usdc]: https://solscan.io/account/7h1NZx1iP28M29WDRS4YDztKNHev5dx5QfwNc5DAsHNY
+[a-wrapper-usdg]: https://solscan.io/account/5PQqR4XrdHxSy2Ax8VuKL4sUKVd4GjYWmzPASAhuCAWj
+[a-wrapper-nft]: https://solscan.io/account/4BwLdD5nHnvQJqhedjKEwpim5iPu87ScG3hZvQxLWsgy
+[a-jup-vaults]: https://solscan.io/account/jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi
+[a-jup-dex]: https://solscan.io/account/jupZ4m2GqUCJ5iueMfzQf8khFfH31d4XAQt3RzCT9Vd
+[a-usdc]: https://solscan.io/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+[a-usdg]: https://solscan.io/token/2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH
+[a-ccip-router]: https://solscan.io/account/Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C
+[a-cctp]: https://solscan.io/account/CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe
+[a-old-store]: https://solscan.io/account/BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4
+[jup-95-34]: https://jup.ag/lend/borrow/smart/95/nfts/34
+
+<!-- Links: Arbitrum (Arbiscan) -->
+[e-lm-proxy]: https://arbiscan.io/address/0xb42E98c712B5CAf1e55dB8106262077515879EA2
+[e-lm-impl]: https://arbiscan.io/address/0xe9E61B9aC26ED2CEBC2F21fbD76F7e6cfDa43032#code
+[e-tr-proxy]: https://arbiscan.io/address/0x736AAC431E66de7D07eb61738CA3598a53a24Ca0
+[e-tr-impl]: https://arbiscan.io/address/0xBED1911918D70c2E88b83f2C75b1763e2c49A795#code
+[e-owner]: https://arbiscan.io/address/0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87
+[e-usdc]: https://arbiscan.io/token/0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+[e-lz-endpoint]: https://arbiscan.io/address/0x1a44076050125825900e736c501f859c50fE728c
+[e-ccip-router]: https://arbiscan.io/address/0x141fa059441E0ca23ce184B6A78bafD2A517DdE8
+[e-cctp]: https://arbiscan.io/address/0x81D40F21F12A8F0E3252Bccb954D722d4c464B64
+
+<!-- Links: Test Run transactions, Solana -->
+[t-extend]: https://solscan.io/tx/2h6bj43Srrx3dd9hsgSDKjiaQeRBXy3WDdZqjdXn47xdc9pnK5Uof8QAN748KqqtYw469nMnbfPp5LCQ1FeCM2wu
+[t-upgrade-v1]: https://solscan.io/tx/38GcMTnDmP7jjm2er7GLnMBDKECz1p3dTCXsh7Nj3RWfzUv47jAT8B9CFAH8JBQQ3Yoa1tA8fjc9vgxWjgQdbPw9
+[t-store]: https://solscan.io/tx/4Go72E1TuHQkqv2hp1RJJurTYYAA23uH94GPHFb5r6ozMukD25SAhjGij1REqADwTnR9uBQEtzj1D59wvAq8Mkjg
+[t-peer-sol]: https://solscan.io/tx/5EocjtexGjUrHFLKTstBZcuUs6nqqeD1rJ114ZBt5QgVJ4fyuVUSbZyiwPeeAZRej9pDFXqdonwMbFd9m5btSSUG
+[t-nonce]: https://solscan.io/tx/66RhEuN9vu5bcJopf9Z7TbNvMZjP83yTmpMtjZPciuijR6HHyD4qnL3oviQzvnafQpo9oPncvZUtDFXAkUqzhVv3
+[t-snapshotters]: https://solscan.io/tx/3pZrmMyLJaP4PFuEPM4rKTMexvSS4N9wADZd41dQmRzxmzHUg3AMRGB5Bqq3eXcQG2UHJm1AirTM2gD7NFs7A2uD
+[t-senders]: https://solscan.io/tx/srKGH6ouATR5vKb3Xtf8RBkD8wqNrRS6SxM58293jg7Dhbk461KE7npT4YWuApti8JXPAo2uAmTX7PDB2dNNYde
+[t-ccip-sol]: https://solscan.io/tx/5SDMGSYCwEvPHTUZGrwe7YVUG3w4KiHf2YDxSNjgMPLPrZpqhfXzk9KEmZMCw6PubdgPHMFMWd8zznNCmnj6bMvM
+[t-usdc-route]: https://solscan.io/tx/2H5HH8tS2qG8FXAnDzbQh51pyU6328PG1Pr9NbfLmmNBZ626bPZq4pXMHtWXMKySHSddUUErkYq1yL8qzmGogdve
+[t-wrap]: https://solscan.io/tx/4BYPWA3FfSDiV7AYPGxuvbVRPCK5qJYcYdqz5aqqV1Cycgo1U1S1EY6MLTR2Y86J7jX8j7au2xzPs23UyCcGzKv5
+[t-refresh-1]: https://solscan.io/tx/haqehTLj9cCtpKpBFJGRLzDrWcqmMuhRNw9nZcQAVmvoXd5GbC8a7zZGnBytZwxub9vu2w775wLzr4NHmHhf5qa
+[t-send]: https://solscan.io/tx/ggPRn6GYV8K7JPRrERMmBwQVSmx3yUxef4eWLyg79vXqfm9ik5Abk4QtPbynaPJZZs2kWYkHxjv9CuwEfnTAneg
+[t-deposit-1]: https://solscan.io/tx/4CRg9SrV38aVwY6NUKU9iTnca85A111d8fnQgFW571cABVtxJxqpViBET66zJjy2AdRUgCutW3LfEz9UTG6LwMbB
+[t-release]: https://solscan.io/tx/3qZzuKPoVrrnn8dcZFSiv2E67aENpds9tofYoTJ16UdYBFnTAFgRcWqkv5NEh7fVLk4gULh71jiGTqysiFu4b8Jy
+[t-level-1]: https://solscan.io/tx/4WUbsQjpJ2ZGkuA77MV6SMspNoVEkQsXPuY6mk4JD3yMzdicFcKVDakMXvN8RLEGLZHosQrpJfUfsEnWaj8fDXha
+[t-fund-1]: https://solscan.io/tx/4ZVfSxG5v4L3wqwmguwA9fQ8yNekoQSHQKaRjMuWGQDhwgv3u9MuBMTSqeuXxy89vWwQojXSkv2s1YfjFx7JuPUX
+[t-bridge]: https://solscan.io/tx/425maWwns2GFJVH5WwwxDAX37iDZq8aXrzXezNu7K7bhCqb5diVB8SrijDwZZNwS5dc7QrStchEJiXrby9mrWJLx
+[t-upgrade-dex]: https://solscan.io/tx/5JE6pDH4MzB9KpXvHytUEgH8iASxMfGHgtNkV6B3rexyKhwGsNUpbyGPFJSiGi7rVJc9qPSLKE2Qucgz6r8yyJhr
+[t-deposit-2]: https://solscan.io/tx/2XndUcs4cCs2jiL366W6ESEq2WwCgej77cScrp6NLStb2qtjrnNjs7o6ysXUArYHaYfkFy7BUqDPjvwo41N29WP5
+[t-fund-2]: https://solscan.io/tx/3BVtkcp2JXmbrpPoizU3rfVnm95qzQqu2Pf8dpeuoxSfBLcnQhP3pwuPuvGvbzHV5cYVG6mHfrzxzRcvZ9xdcLi2
+[t-topup]: https://solscan.io/tx/2u5ZBm99H6bDRfRvDXJ1ApiM2R2JvA29PANWn49viJb9NGqqb7Bhmv1smxYa9XpZdnZiN9XYxkNnzRzP9FUBJFZZ
+[t-supply-setup-0]: https://solscan.io/tx/4EXRJ6Pdb8kp8kpF5i65dkfGjRYfWtuddxyh9Ham1bAo6UAAEC5uMoApfq5Y6mvuoXHt8RjcyTcUuMtUz4G6sUx2
+[t-supply-setup]: https://solscan.io/tx/2uMbBEe9yzkNaA54zJGhvV2gqyYgC2WrEU7NuQ9wTsW8QfKcp9DdE6C9iYtB8tLa4LFrEeYo7u1LV5kfH5b19sLz
+[t-supply]: https://solscan.io/tx/4avLRFj9YZg3qQPk68NyXGQMi9FoGdsVRUDaxTwT769vWTdfrHdM1VmdCswNDFxhmYSJE2qEbv7svjCipEfCVPdq
+[t-refresh-2]: https://solscan.io/tx/sx21cuj2KorVbFKre8tX5aEzd12Vjc5n6Jt4xBR23abk9GfmeAb9YYvBZSnkf39MncCKc7bHze6VM2GuNUW5a4i
+[t-level-2]: https://solscan.io/tx/3uqu5xNJ9ADsVygVdyNfFmTuxkV5ULj5TTMWnnQAjfdKBi5daVsbbGConZp5bfbB3LBy6MnvZwuJEFc4QRF4zPtB
+[t-borrow-setup]: https://solscan.io/tx/4JAyhwkYAL36WTYjZeGNcQmCjSF64CnT32wkaW1qsL4skMxTiZXeUWqA7BCZizFA1pLico9qKgrCBiMx22KoL3Ne
+[t-borrow]: https://solscan.io/tx/2Dpax2tjubvfyqMGMv2WnpKc33g1LiKUoXi6GRERorbLVQvQqaqXBbDNkidePYoh6wVfg665q594Q95y9bJ4f9p2
+[t-refresh-3]: https://solscan.io/tx/8h3fbQDFau3vG38fuZJ6GY6sCR8tZvmzCn9JdMcZapebhzokUGb8BkHMfYKnQXkMuGevqNFWwW8wGCW3L8zc6Ai
+[t-payback-setup-0]: https://solscan.io/tx/Z5ycKKyLZjLPjZecNkbAveyQmBFaDMi8QrDjpdLbbdMiKog7dGRUBH2EDbNh1fBNug3d46GdJ4ZJqqpz6rjDHXY
+[t-payback-setup]: https://solscan.io/tx/32xqxyykmRGfjTrTsFWqTnYrdnZqrn8gG5cXZfiB6znct57ptyH6Z5sG5Wh7ynUjfYZakizdxSdem4ER6wxp4wWL
+[t-payback]: https://solscan.io/tx/5mWz3Dxx79TrTP1CVBHMasdE5daPswUqG2vRL48HRLxoZ7sg1wWs4gFTp8knAWHw4YNBr5gwQGP7a3LDkA6H8W5M
+[t-withdraw-setup]: https://solscan.io/tx/4jzQM75Btbsy2P15cc3AEfkJTyGHNiEg3aWen7VEdF3qZsWo4Yx2BZwBgfcseZomuyP1WXfUkfHhSdpxdgvL9kfG
+[t-withdraw]: https://solscan.io/tx/4LJkH8o9XU6QWe3rys7kHNZ1vNnMCHwPd2riZmACtz7p7CFZDauMZZjK2qjNUYt3Ptio4cUuRkpEimCBv2hgqZyi
+[t-refresh-4]: https://solscan.io/tx/3TMDmnTJmknpsPTodqFEPL5LiemmtexVr7UUJ7T1eotE9vFiUipmN1ui73LUFmjyPuUCreNHWm33ftyof4ugNaLY
+
+<!-- Links: Test Run transactions, Arbitrum and message explorers -->
+[t-e-lm-deploy]: https://arbiscan.io/tx/0xfdfed2997ee69a6aaad4459ed60f86ad0344850a0413fffcb5059855e52db54a
+[t-e-lm-upgrade]: https://arbiscan.io/tx/0x4e751484bfe7da0945b63e7d839cf9641df6f58e75f0b7fb29ea9744dae75e80
+[t-e-tr-impl]: https://arbiscan.io/tx/0x8fb39bcc3e3fda5d72a6b309706fdf9733980fbb874a5809b5fbc78d2d1c4fe9
+[t-e-tr-proxy]: https://arbiscan.io/tx/0x0e9d55c8c05f09cc08b032624c314f0eb5edee67c985c8672b2a7ee169c708df
+[t-e-peer]: https://arbiscan.io/tx/0xc0abee1e75705f2bbd0e1bfd3ee2738fdd3447f501dfda0d909e5cc8c7afb325
+[t-e-ccip]: https://arbiscan.io/tx/0xada20bae69bc693b1ed4d169a11eac326186d40891b9308a3a08922943fd4dd6
+[t-e-tr-ccip]: https://arbiscan.io/tx/0x5fb535fe98288f273d91b39b9a90642d21a2de86948a0ad7c5fd3f8a61f0c28d
+[t-e-tr-cctp]: https://arbiscan.io/tx/0x45a7ef622e955757e246a57383ab486c1d3fcaa391f9421c7fd6423a3f39af4c
+[t-e-strategy]: https://arbiscan.io/tx/0xe52ec6cfc3e61ea5f8c59c9358e18f0d5ef5c0a9567e42a351b8df2849c2c294
+[t-e-lz-deliver]: https://arbiscan.io/tx/0x2d10fa9fa41783ebc950558677b2fa957248f79183292cba888891b545bb04d5
+[t-e-ccip-deliver]: https://arbiscan.io/tx/0xdb2187df92dac812990a2f8fa9da7384151fa55de89117b774ef690fa841df07
+[t-e-claim]: https://arbiscan.io/tx/0x5921b5687d9221dd4ab2fd46f17cfdb777efcb2794b45eea76b8c29a7d4d8e59
+[t-e-forward]: https://arbiscan.io/tx/0x84b139a3a0b250f8d5dfb58ab7c2c344a8e0a4c403b0ca66fe0907780ac3471b
+[lzscan-send]: https://layerzeroscan.com/tx/ggPRn6GYV8K7JPRrERMmBwQVSmx3yUxef4eWLyg79vXqfm9ik5Abk4QtPbynaPJZZs2kWYkHxjv9CuwEfnTAneg
+[ccip-send]: https://ccip.chain.link/msg/0xd40d36300a17cc37691f2265838db6762ac9938a1593deaf164583663df6276b
+
+<!-- Links: Devnet and Sepolia -->
+[d-program]: https://solscan.io/account/GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1?cluster=devnet
+[d-store]: https://solscan.io/account/4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz?cluster=devnet
+[d-bridge-signer]: https://solscan.io/account/ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR?cluster=devnet
+[d-admin]: https://solscan.io/account/AF1uGS22J8KUQdM41x3x6FYg4uhgS8sdcHrNPVc3MDPo?cluster=devnet
+[d-wrapper]: https://solscan.io/account/YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr?cluster=devnet
+[d-lut]: https://solscan.io/account/6hHfFhvqfHmvdgwUigfMBG1ycCQfHbsLhKWuMJExpSDK?cluster=devnet
+[s-lm]: https://sepolia.etherscan.io/address/0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514
+[s-tr]: https://sepolia.etherscan.io/address/0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C

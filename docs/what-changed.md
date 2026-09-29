@@ -1,7 +1,7 @@
 # What changed in the LendMirror program
 
 Plain-language summary of the work on branch `feat/position-wrapper-strategies` (10 commits).
-For file-level detail see `programs/lendmirror/ARCHITECTURE.md`. For every command see `readme.md`.
+For file-level detail see `programs/lendmirror/ARCHITECTURE.md`. For the mainnet addresses and the test run see `readme.md`; for every command, `deployment-instructions.md`.
 
 ---
 
@@ -206,8 +206,9 @@ npm run test:fork                                                      # Node 18
 
 ## 8. Not done yet
 
-- Level 2 borrow has run only on the local fork of Jupiter mainnet (started at mainnet's slot so Jupiter's oracle accepts the clock; see the readme's Tests section), not on a live network. Devnet's Jupiter program is an old build the Jupiter SDK cannot decode, so the first live borrow is a small mainnet position after the mainnet upgrade. Tasks `jupiter-init-position` and `fund-authority-wsol` are ready for that.
+Done since: on 29 September 2026 (UTC) the program and the Arbitrum contracts went live on mainnet, and every main flow ran there with real funds. See the readme's Test Run.
 
-- Nothing has been run on Devnet or mainnet. The readme's "Upgrade Devnet to this version" block is the next step.
-- The Arbitrum (mainnet) contract is still the old format and would reject today's snapshot; it needs a redeploy and `upgradeToAndCall`.
+- Operating positions works on smart vaults only (Jupiter's `operate_dex`); plain vaults such as vault 1 are not supported.
+- "Withdraw everything" and "pay back everything" through the program need Jupiter's `operate_perfect_dex`.
+- PST, USDT (USDT0), USDai and sUSDai have no mainnet route yet. PST has no Chainlink lane from Solana to Arbitrum, and the LayerZero tokens need their issuers' Solana program ids and escrows.
 - Wormhole NTT is a reserved bridge id with no instruction; no in-scope token needs it.
