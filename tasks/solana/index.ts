@@ -30,7 +30,7 @@ import { backOff } from 'exponential-backoff'
 
 import { formatEid } from '@layerzerolabs/devtools'
 import { getPrioritizationFees } from '@layerzerolabs/devtools-solana'
-import { createLogger, promptToContinue } from '@layerzerolabs/io-devtools'
+import { createLogger } from '@layerzerolabs/io-devtools'
 import { EndpointId, endpointIdToNetwork } from '@layerzerolabs/lz-definitions'
 
 import { LendMirror } from '../../lib/client/lendmirror'
@@ -211,17 +211,6 @@ export enum TransactionType {
     SendMessage = 'SendMessage',
 }
 
-const TransactionCuEstimates: Record<TransactionType, number> = {
-    // for the sample values, they are: devnet, mainnet
-    [TransactionType.CreateToken]: 125_000, // actual sample: (59073, 123539), 55785 (more volatile as it has CPI to Metaplex)
-    [TransactionType.CreateMultisig]: 5_000, // actual sample: 3,230
-    [TransactionType.InitOft]: 70_000, // actual sample: 59207, 65198 (note: this is the only transaction that createOFTAdapter does)
-    [TransactionType.SetAuthority]: 8_000, // actual sample: 6424, 6472
-    [TransactionType.InitConfig]: 42_000, // actual sample: 33157, 40657
-    [TransactionType.SendOFT]: 230_000, // actual sample: 217,784
-    [TransactionType.SendMessage]: 230_000, // this is an estimate, not based on actual sample
-}
-
 export const getComputeUnitPriceAndLimit = async (
     connection: Connection,
     ixs: Instruction[],
@@ -251,19 +240,10 @@ export const getComputeUnitPriceAndLimit = async (
             }
         )
     } catch (e) {
-        console.error(`Error retrieving simulations compute units from RPC:`, e)
-        const continueByUsingHardcodedEstimate = await promptToContinue(
-            'Failed to call simulateTransaction on the RPC. This can happen when the network is congested. Would you like to use hardcoded estimates (TransactionCuEstimates) ? This may result in slightly overpaying for the transaction.'
-        )
-        if (!continueByUsingHardcodedEstimate) {
-            throw new Error(
-                'Failed to call simulateTransaction on the RPC and user chose to not continue with hardcoded estimate.'
-            )
-        }
-        console.log(
-            `Falling back to hardcoded estimate for ${transactionType}: ${TransactionCuEstimates[transactionType]} CUs`
-        )
-        computeUnits = TransactionCuEstimates[transactionType]
+        // A failed simulation almost always means the transaction itself would fail (a program
+        // error, a missing account). Stop with the program logs instead of asking to send anyway.
+        const message = e instanceof Error ? e.message : String(e)
+        throw new Error(`Simulation failed for ${transactionType}; the transaction would fail too.\n${message}`)
     }
 
     if (!computeUnits) {

@@ -2,7 +2,7 @@ import { EndpointId } from '@layerzerolabs/lz-definitions'
 
 import type { DeploymentProfile } from './types'
 
-/** Solana mainnet (30168) → Arbitrum (30110). No Chainlink route yet. */
+/** Solana mainnet (30168) → Arbitrum One (30110). Chainlink and Circle values checked 2026-09-29. */
 const profile: DeploymentProfile = {
     type: 'mainnet',
     solanaEid: EndpointId.SOLANA_V2_MAINNET, // 30168
@@ -15,8 +15,31 @@ const profile: DeploymentProfile = {
     evmProxy: '0xb42E98c712B5CAf1e55dB8106262077515879EA2',
     evmImplementation: '0xdAAE65Df8B96e9eE45eb756441B7942e5E128924',
     lzEndpoint: '0x1a44076050125825900e736c501f859c50fE728c',
-    ccip: null,
-    cctp: null,
+    // Chainlink directory (docs.chain.link/ccip/directory/mainnet), checked 2026-09-29.
+    // Solana → Arbitrum One lane is listed.
+    ccip: {
+        router: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
+        feeQuoter: 'FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi',
+        rmnRemote: 'RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7',
+        linkMint: 'LinkhB3afbBKb2EQQu7s7umdZceV3wcvAUJhQAfQ23L',
+        destChainSelector: 4949039107694359620n, // Arbitrum One
+        sourceChainSelector: 124615329519749607n, // Solana mainnet
+        evmRouter: '0x141fa059441E0ca23ce184B6A78bafD2A517DdE8', // Arbitrum One router
+        gasLimit: 600_000,
+        // PDA ["LendMirrorCcipPayerV1"] under the mainnet program id.
+        payer: 'D6RLag1KgbK8Fe8URR2zXFaZXKBnnx6tLPuL1sUuaLNG',
+    },
+    // Circle CCTP v2 (developers.circle.com/cctp), checked 2026-09-29.
+    cctp: {
+        tokenMessengerMinter: 'CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe',
+        messageTransmitter: 'CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC',
+        usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        evmDomain: 3, // Arbitrum
+        solanaDomain: 5,
+        evmMessageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64', // MessageTransmitterV2 on Arbitrum
+        attestationApi: 'https://iris-api.circle.com',
+    },
+    // Set after `npx hardhat deploy --tags LendMirrorTreasury` prints the proxy address.
     treasury: '',
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_MAINNET',

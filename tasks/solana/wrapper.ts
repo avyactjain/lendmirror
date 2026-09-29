@@ -1,3 +1,4 @@
+import { PublicKey } from '@solana/web3.js'
 import { publicKey, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
@@ -17,6 +18,10 @@ task('lz:oapp:solana:wrap-position', 'Create a PositionWrapper PDA for a Jupiter
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(solanaDeployment.programId))
         const [wrapper] = instance.pda.wrapper(vaultId, nftId)
+        if (await connection.getAccountInfo(new PublicKey(wrapper))) {
+            console.log(`wrapper ${wrapper} already exists for vault ${vaultId} / nft ${nftId}; nothing to do`)
+            return
+        }
 
         let txBuilder = transactionBuilder().add(instance.wrapPosition(umiWalletSigner, vaultId, nftId))
         txBuilder = await addComputeUnitInstructions(
