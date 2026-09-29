@@ -14,6 +14,7 @@ import { createNoopSigner } from '@metaplex-foundation/umi'
 
 import { ccipPayerAddress, ccipRouteAddress, ccipSendAccounts, CcipRouteAccount } from './ccip'
 import { LendMirror, instructions } from './lendmirror'
+import { SEEDS } from './seeds'
 
 export const PROVIDER_CCTP = 1
 export const PROVIDER_CCIP = 2
@@ -40,7 +41,7 @@ export function bridgeRouteAddress(programId: string, mint: string, dstChainId: 
     const chain = Buffer.alloc(8)
     chain.writeBigUInt64LE(dstChainId)
     return PublicKey.findProgramAddressSync(
-        [Buffer.from('LendMirrorBridgeRoute'), new PublicKey(mint).toBuffer(), chain],
+        [Buffer.from(SEEDS.BRIDGE_ROUTE), new PublicKey(mint).toBuffer(), chain],
         new PublicKey(programId)
     )[0]
 }

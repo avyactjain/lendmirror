@@ -5,6 +5,7 @@ import { createWeb3JsEddsa } from '@metaplex-foundation/umi-eddsa-web3js'
 import { OmniAppPDA } from '@layerzerolabs/lz-solana-sdk-v2/umi'
 
 import { u16Le, u32Le } from './jupiter'
+import { SEEDS } from './seeds'
 
 const eddsa = createWeb3JsEddsa()
 
@@ -14,15 +15,15 @@ export const BPF_LOADER_UPGRADEABLE = publicKey('BPFLoaderUpgradeab1e11111111111
 export const LZ_RECEIVE_TYPES_SEED = 'LzReceiveTypes'
 
 export class LendMirrorPDA extends OmniAppPDA {
-    static STORE_SEED = 'LendMirrorStoreV0'
-    static PEER_SEED = 'LendMirrorPeer'
-    static JUP_POSITION_SEED = 'JupPosition'
+    // Seed strings live in `seeds.ts`, next to their Rust twins. These aliases keep the
+    // existing call sites working.
+    static STORE_SEED = SEEDS.STORE
+    static PEER_SEED = SEEDS.PEER
+    static JUP_POSITION_SEED = SEEDS.JUP_POSITION
     static NONCE_SEED = 'Nonce'
-    /** V1: layout grew (level, custody, send guard). Old `LendMirrorWrapper` accounts are abandoned. */
-    static WRAPPER_SEED = 'LendMirrorWrapperV1'
-    static ONDEMAND_SEED = 'LendMirrorOnDemand'
-    /** Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`. */
-    static WRAPPER_AUTH_SEED = 'LendMirrorWrapperAuth'
+    static WRAPPER_SEED = SEEDS.WRAPPER
+    static ONDEMAND_SEED = SEEDS.ONDEMAND
+    static WRAPPER_AUTH_SEED = SEEDS.WRAPPER_AUTH
 
     constructor(public readonly programId: PublicKey) {
         super(programId)
@@ -73,7 +74,7 @@ export class LendMirrorPDA extends OmniAppPDA {
         ])
     }
 
-    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]  (WRAPPER_SEED = LendMirrorWrapperV1)
+    // seeds = [WRAPPER_SEED, vault_id le, nft_id le]
     wrapper(vaultId: number, nftId: number): Pda {
         return eddsa.findPda(this.programId, [
             Buffer.from(LendMirrorPDA.WRAPPER_SEED, 'utf8'),

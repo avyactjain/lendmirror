@@ -3,6 +3,7 @@ mod errors;
 mod instructions;
 mod live_position;
 mod msg_codec;
+pub mod seeds;
 mod state;
 pub mod tick_math;
 
@@ -27,24 +28,6 @@ declare_id!(anchor_lang::solana_program::pubkey::Pubkey::new_from_array(program_
     "9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ"
 )));
 
-const STORE_SEED: &[u8] = b"LendMirrorStoreV0";
-const PEER_SEED: &[u8] = b"LendMirrorPeer";
-const JUP_POSITION_SEED: &[u8] = b"JupPosition";
-const CCIP_SEED: &[u8] = b"LendMirrorCcip";
-/// Empty account that signs `ccip_send` and pays the SOL fee. It must hold no data.
-const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayer";
-/// One PDA per Jupiter position. Seeds: this + vault_id le + nft_id le.
-/// "V1" because the layout grew (level, custody, send guard). Solana accounts cannot be
-/// resized in place by `init`, so the old `LendMirrorWrapper` accounts on Devnet stay as they
-/// are and every position is wrapped again under the new seed.
-const WRAPPER_SEED: &[u8] = b"LendMirrorWrapperV1";
-/// OnDemand strategy for one wrapper. Seeds: this + wrapper pubkey.
-const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemand";
-/// Empty PDA that owns a wrapper's token accounts and signs Jupiter `operate`.
-/// Seeds: this + wrapper pubkey. See `state/wrapper.rs` for why it is separate from the wrapper.
-const WRAPPER_AUTH_SEED: &[u8] = b"LendMirrorWrapperAuth";
-/// One admin-set bridge destination per (mint, EVM chain id). Seeds: this + mint + chain id le.
-const BRIDGE_ROUTE_SEED: &[u8] = b"LendMirrorBridgeRoute";
 
 /// LendMirror — Solana side of a LayerZero OApp.
 ///

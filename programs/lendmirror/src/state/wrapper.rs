@@ -114,7 +114,7 @@ pub fn level_allows(level: u8, new_col: i128, new_debt: i128) -> bool {
 }
 
 /// Allowlist for who may refresh and send one wrapper's snapshot.
-/// Seeds: `["LendMirrorOnDemand", wrapper.key()]`.
+/// Seeds: `["LendMirrorOnDemandV1", wrapper.key()]`.
 #[account]
 #[derive(InitSpace)]
 pub struct OnDemandStrategy {

@@ -1,3 +1,4 @@
+use crate::seeds::{PEER_SEED, STORE_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 

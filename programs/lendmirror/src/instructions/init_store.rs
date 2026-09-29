@@ -1,4 +1,5 @@
 use crate::errors::LendMirrorError;
+use crate::seeds::STORE_SEED;
 use crate::*;
 use oapp::endpoint::{instructions::RegisterOAppParams, ID as ENDPOINT_ID};
 

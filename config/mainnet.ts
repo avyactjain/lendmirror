@@ -9,7 +9,9 @@ const profile: DeploymentProfile = {
     evmEid: EndpointId.ARBITRUM_V2_MAINNET, // 30110
     evmNetwork: 'arbitrum',
     programId: '9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ',
-    store: 'BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4',
+    // PDA ["LendMirrorStoreV1"], created by init-store after the mainnet upgrade.
+    // The old program's Store was BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4.
+    store: '4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV',
     evmProxy: '0xb42E98c712B5CAf1e55dB8106262077515879EA2',
     evmImplementation: '0xdAAE65Df8B96e9eE45eb756441B7942e5E128924',
     lzEndpoint: '0x1a44076050125825900e736c501f859c50fE728c',

@@ -7,7 +7,8 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 
 | file | responsibility | called by |
 |---|---|---|
-| `src/lib.rs` | program id, PDA seeds, the `#[program]` entry points (one line each) | Solana runtime |
+| `src/lib.rs` | program id, the `#[program]` entry points (one line each) | Solana runtime |
+| `src/seeds.rs` | every PDA seed this program owns, all `LendMirror…V1`; twin of `lib/client/seeds.ts` | every instruction with a `seeds =` constraint |
 | `src/state/store.rs` | `Store` PDA: admin, allowlists (snapshotters read and wrap, senders send and bridge), Jupiter program id | every instruction |
 | `src/state/wrapper.rs` | `PositionWrapper` per position, `OnDemandStrategy` caller list, `level_allows`, send guard | wrap, refresh, send, custody, operate, bridge |
 | `src/state/jupiter_position.rs` | decoders for Jupiter accounts, the 225-byte `PositionSnapshot` and its wire codec | refresh, send, EVM codec (mirror) |
@@ -37,6 +38,7 @@ bridge_tokens_* ─► ATA(wrapper authority) → ATA(bridge signer PDA) → CCT
 
 ## To change X, touch Y
 
+- New account type: seed in `src/seeds.rs` and `lib/client/seeds.ts` (same string, ends in `V1`), struct in `src/state/`, then the instruction.
 - New field on the wrapper: `state/wrapper.rs` (bump `WRAPPER_SEED` if it grows past `reserved`), `wrap_position.rs` init, `lib/client` regen.
 - New access rule: `level_allows` in `state/wrapper.rs` only. Instructions call it; nothing else encodes levels.
 - New bridge provider: constant in `state/bridge_route.rs`, byte builder in `bridges.rs`, one instruction in `bridge_tokens.rs` reusing `BridgeCommon`.

@@ -11,7 +11,7 @@
 //!     only the Store admin writes.
 //!   - Tokens move wrapper-authority ATA → bridge-signer ATA → provider. Both ATAs belong to
 //!     PDAs of this program. No wallet is ever a token owner in this path.
-//!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayer`).
+//!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayerV1`).
 //!     It must hold no data so the System program can debit it for fees.
 //!
 //! Who may call: the wrapper owner, an OnDemand caller of that wrapper, or a Store sender
@@ -23,6 +23,7 @@
 use crate::bridges::{cctp_deposit_for_burn_data, oft_send_data};
 use crate::errors::LendMirrorError;
 use crate::instructions::send_ccip::{ccip_send_instruction_data, CcipTokenAmount};
+use crate::seeds::{BRIDGE_ROUTE_SEED, CCIP_PAYER_SEED, CCIP_ROUTE_SEED, ONDEMAND_SEED, STORE_SEED, WRAPPER_AUTH_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed, pubkey};
@@ -360,7 +361,7 @@ impl<'info> BridgeTokensCctp<'info> {
 pub struct BridgeTokensCcip<'info> {
     pub common: BridgeCommon<'info>,
 
-    #[account(seeds = [CCIP_SEED], bump = ccip_route.bump)]
+    #[account(seeds = [CCIP_ROUTE_SEED], bump = ccip_route.bump)]
     pub ccip_route: Box<Account<'info, CcipRoute>>,
     /// CHECK: router config PDA. Owner must be the router (checked in apply).
     pub config: UncheckedAccount<'info>,

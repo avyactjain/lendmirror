@@ -158,6 +158,18 @@ For a LayerZero token the route also needs the token's OFT program id and escrow
 
 ---
 
+## 5b. One file for every seed
+
+**Before:** the seed strings sat at the top of `lib.rs`, with `V0`, `V1` or no version at random.
+
+**After:** `programs/lendmirror/src/seeds.rs` holds all nine, each ending in `V1`, and
+`lib/client/seeds.ts` holds the same nine for TypeScript. A unit test checks the prefix, the
+suffix, the 32-byte cap, and that no two are equal. Because the Store seed changed, mainnet
+starts from empty state after the upgrade: `init_store`, peers, routes and wrappers are all
+created again, and nothing the old program wrote is read by mistake.
+
+---
+
 ## 6. Who can do what
 
 **Before:**

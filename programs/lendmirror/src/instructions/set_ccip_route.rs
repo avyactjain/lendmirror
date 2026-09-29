@@ -1,3 +1,4 @@
+use crate::seeds::{CCIP_ROUTE_SEED, STORE_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 
@@ -5,7 +6,7 @@ use anchor_lang::prelude::*;
 /// Call once. Call again to change the destination. Only the Store admin can call this.
 ///
 /// Creates one account, `CcipRoute`. Its address is fixed:
-/// program id + the seed text "LendMirrorCcip".
+/// program id + the seed text "LendMirrorCcipRouteV1".
 #[derive(Accounts)]
 pub struct SetCcipRoute<'info> {
     /// Must be the Store admin. Pays the rent if this is the first call.
@@ -19,7 +20,7 @@ pub struct SetCcipRoute<'info> {
         init_if_needed,
         payer = admin,
         space = 8 + CcipRoute::INIT_SPACE,
-        seeds = [CCIP_SEED],
+        seeds = [CCIP_ROUTE_SEED],
         bump
     )]
     pub ccip_route: Account<'info, CcipRoute>,

@@ -25,11 +25,11 @@ describe('wrapper PDAs', () => {
         expect(client).to.equal(expected.toBase58())
     })
 
-    it('ondemand seeds match LendMirrorOnDemand + wrapper', () => {
+    it('ondemand seeds match LendMirrorOnDemandV1 + wrapper', () => {
         const [wrapper] = pda.wrapper(1, 29)
         const [client] = pda.ondemand(wrapper)
         const [expected] = PublicKey.findProgramAddressSync(
-            [Buffer.from('LendMirrorOnDemand'), new PublicKey(wrapper).toBuffer()],
+            [Buffer.from('LendMirrorOnDemandV1'), new PublicKey(wrapper).toBuffer()],
             programId
         )
         expect(client).to.equal(expected.toBase58())
