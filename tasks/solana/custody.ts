@@ -1,5 +1,5 @@
 import { fetchAddressLookupTable, transferSol } from '@metaplex-foundation/mpl-toolbox'
-import { publicKey, sol, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
+import { WrappedInstruction, publicKey, sol, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import { fromWeb3JsPublicKey, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import {
     NATIVE_MINT,
@@ -12,14 +12,15 @@ import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
 import { lendmirror } from '../../lib/client'
-import { buildOperatePosition } from '../../lib/client/jupiterOperate'
+import { DexLeg, buildOperatePosition } from '../../lib/client/jupiterOperate'
 import { resolveSolanaEid } from '../common/deployment'
 import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment, useWeb3Js } from '.'
 
 /**
  * Custody and access-level tasks. Order of use for one position:
- *   wrap-position → deposit-position-nft → set-wrapper-level 1 → operate-position (deposit / payback)
+ *   wrap-position → deposit-position-nft → set-wrapper-level 1 → operate-position (supply / payback)
  *   → set-wrapper-level 2 → operate-position (withdraw / borrow) → refresh-wrapper.
+ * operate-position works on smart vaults only (Jupiter operate_dex).
  */
 
 task('lz:oapp:solana:set-wrapper-level', 'Admin: set a wrapper access level (0 mirror, 1 deposit/payback, 2 + withdraw/borrow)')
@@ -80,16 +81,25 @@ task('lz:oapp:solana:release-position-nft', 'Admin: return the position NFT to t
         console.log(`releasePositionNft: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
     })
 
-task('lz:oapp:solana:operate-position', 'Deposit / withdraw / borrow / payback on a custodied position, within its level')
+task('lz:oapp:solana:operate-position', 'Smart vaults (Jupiter operate_dex): supply or withdraw collateral, borrow or pay back debt, within the wrapper level')
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
-    .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
-    .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
-    .addOptionalParam('col', 'Collateral change in base units. +deposit, -withdraw, "min" = withdraw all', '0', types.string)
-    .addOptionalParam('debt', 'Debt change in base units. +borrow, -payback, "min" = payback all', '0', types.string)
+    .addParam('vaultId', 'Jupiter vault id (a smart vault: T2, T3 or T4)', undefined, types.int)
+    .addParam('nftId', 'Jupiter position nft id', undefined, types.int)
+    .addOptionalParam('colAction', 'Collateral: supply or withdraw', '', types.string)
+    .addOptionalParam('colToken0', 'Smart collateral: pool token0 amount, base units', '', types.string)
+    .addOptionalParam('colToken1', 'Smart collateral: pool token1 amount, base units', '', types.string)
+    .addOptionalParam('colAmount', 'Normal collateral (T3 vaults): amount, base units', '', types.string)
+    .addOptionalParam('colShares', 'Share bound: minimum on supply, maximum on withdraw. Withdraw default: all of the position\'s shares', '', types.string)
+    .addOptionalParam('debtAction', 'Debt: borrow or payback', '', types.string)
+    .addOptionalParam('debtToken0', 'Smart debt (T3/T4): pool token0 amount, base units', '', types.string)
+    .addOptionalParam('debtToken1', 'Smart debt (T3/T4): pool token1 amount, base units', '', types.string)
+    .addOptionalParam('debtAmount', 'Normal debt (T2 vaults): amount, base units', '', types.string)
+    .addOptionalParam('debtShares', 'Share bound: minimum on borrow, maximum on payback', '', types.string)
     .addOptionalParam('market', 'Jupiter market: main, ethena, galaxy', 'main', types.string)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
-    .setAction(async ({ eid: eidArg, vaultId, nftId, col, debt, market, computeUnitPriceScaleFactor }) => {
-        const eid = resolveSolanaEid(eidArg)
+    .setAction(async (args) => {
+        const { vaultId, nftId, market, computeUnitPriceScaleFactor } = args
+        const eid = resolveSolanaEid(args.eid)
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(getSolanaDeployment(eid).programId))
         const store = await instance.getStore(umi.rpc)
@@ -97,6 +107,17 @@ task('lz:oapp:solana:operate-position', 'Deposit / withdraw / borrow / payback o
         const wrapper = await instance.getWrapper(umi.rpc, vaultId, nftId)
         if (!wrapper) throw new Error('No wrapper. Run wrap-position first.')
         if (!wrapper.custody) throw new Error('NFT not in custody. Run deposit-position-nft first.')
+
+        const col = legFrom('collateral', ['supply', 'withdraw'], args.colAction, args.colToken0, args.colToken1, args.colAmount, args.colShares)
+        const debt = legFrom('debt', ['borrow', 'payback'], args.debtAction, args.debtToken0, args.debtToken1, args.debtAmount, args.debtShares)
+        if (!col && !debt) throw new Error('Nothing to do: pass --col-action and/or --debt-action with amounts.')
+        // A smart-collateral withdraw needs a share bound. Default: at most all of the position's shares.
+        if (col?.action === 'withdraw' && col.shares === undefined && (col.token0 !== undefined || col.token1 !== undefined)) {
+            const { getCurrentPosition } = await loadJupiterBorrow('@jup-ag/lend/borrow')
+            const current = await getCurrentPosition({ vaultId, positionId: nftId, connection, market })
+            col.shares = BigInt(current.colRaw.toString())
+            console.log(`share bound for the withdraw: at most ${col.shares} shares (all of the position's)`)
+        }
 
         // The Jupiter SDK simulates a price read with the operate signer (our authority PDA) as
         // fee payer, and Jupiter may create accounts paid by that signer. Keep 0.05 SOL on it.
@@ -118,38 +139,66 @@ task('lz:oapp:solana:operate-position', 'Deposit / withdraw / borrow / payback o
             nftId,
             vaultsProgram: store.vaultsProgram,
             positionMint: wrapper.positionMint,
-            newCol: parseSigned(col),
-            newDebt: parseSigned(debt),
+            col,
+            debt,
             market,
         })
 
-        // Jupiter's lookup tables plus the LayerZero one the helper adds.
-        let txBuilder = transactionBuilder().add(build.setupIxs).add(build.operateIx)
-        txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, computeUnitPriceScaleFactor, TransactionType.SendMessage)
-        const tables = await Promise.all(
-            build.lookupTables.map((t) => fetchAddressLookupTable(umi, fromWeb3JsPublicKey(t.key)))
-        )
-        txBuilder = txBuilder.setAddressLookupTables([...(txBuilder.options.addressLookupTables ?? []), ...tables])
-        const tx = await txBuilder.sendAndConfirm(umi)
-        console.log(`operatePosition: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
-        for (const [name, ata] of Object.entries(build.authorityAtas)) {
-            const bal = await connection.getTokenAccountBalance(ata).catch(() => null)
-            console.log(`${name} ATA ${ata.toBase58()} balance ${bal?.value.amount ?? 'n/a'}`)
+        // Two transactions: Jupiter's setup plus the PDA's token accounts, then the operate. Each
+        // uses Jupiter's lookup tables plus our own; together they can exceed the size limit.
+        const tables = await Promise.all(build.lookupTables.map((t) => fetchAddressLookupTable(umi, fromWeb3JsPublicKey(t.key))))
+        const sendWithTables = async (ixs: WrappedInstruction[], label: string) => {
+            let txBuilder = transactionBuilder().add(ixs)
+            txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, computeUnitPriceScaleFactor, TransactionType.SendMessage)
+            txBuilder = txBuilder.setAddressLookupTables([...(txBuilder.options.addressLookupTables ?? []), ...tables])
+            const tx = await txBuilder.sendAndConfirm(umi)
+            console.log(`${label}: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
+        }
+        if (build.setupIxs.length) await sendWithTables(build.setupIxs, 'setup')
+        await sendWithTables([build.operateIx], 'operatePosition')
+        for (const { label, address } of build.authorityAccounts) {
+            console.log(`${label} account ${address.toBase58()} balance ${await readBalance(connection, address)}`)
         }
         const after = await instance.getWrapper(umi.rpc, vaultId, nftId)
         const snap = after ? unwrapOption(after.snapshot) : null
         console.log('wrapper.snapshot is from the last refresh; run refresh-wrapper to read the new numbers', snap ? `(last col ${snap.colRaw} debt ${snap.debtRaw})` : '')
     })
 
-/** "min" → i128::MIN (Jupiter's "all"). Anything else is a signed integer string. */
-function parseSigned(value: string): bigint {
-    if (value.trim().toLowerCase() === 'min') return -(1n << 127n)
-    return BigInt(value)
+/** One side of an operate call from the task flags. Amounts are positive; the action gives the direction. */
+function legFrom(
+    side: string,
+    actions: string[],
+    action: string,
+    token0: string,
+    token1: string,
+    amount: string,
+    shares: string
+): DexLeg | undefined {
+    const values = { token0, token1, amount, shares }
+    if (!action) {
+        if (Object.values(values).some((v) => v !== '')) throw new Error(`Amounts for the ${side} need --${side === 'debt' ? 'debt' : 'col'}-action.`)
+        return undefined
+    }
+    if (!actions.includes(action)) throw new Error(`${side} action must be ${actions.join(' or ')}, got "${action}".`)
+    const parse = (label: string, v: string) => {
+        if (v === '') return undefined
+        const n = BigInt(v)
+        if (n < 0n) throw new Error(`${side} ${label} must be a positive amount; the action gives the direction.`)
+        return n
+    }
+    return {
+        action: action as DexLeg['action'],
+        token0: parse('token0', token0),
+        token1: parse('token1', token1),
+        amount: parse('amount', amount),
+        shares: parse('shares', shares),
+    }
 }
 
 /** ESM-only Jupiter SDK, loaded the way tests/fork does it. */
 const loadJupiterBorrow = new Function('s', 'return import(s)') as (s: string) => Promise<{
     getInitPositionIx: (p: { vaultId: number; connection: Connection; signer: PublicKey; market?: string }) => Promise<{ ix: TransactionInstruction; nftId: number }>
+    getCurrentPosition: (p: { vaultId: number; positionId: number; connection: Connection; market: string }) => Promise<{ colRaw: { toString(): string } }>
 }>
 
 task('lz:oapp:solana:jupiter-init-position', 'Open a new Jupiter position in a vault; the wallet receives the position NFT')

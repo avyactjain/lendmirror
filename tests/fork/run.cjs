@@ -1,9 +1,12 @@
 /**
- * Custody test on a local fork of Jupiter Lend mainnet.
+ * Custody and smart-vault test on a local fork of Jupiter Lend mainnet (vault 95).
  *
  * 1. Starts solana-test-validator with our program loaded as upgradeable (test wallet is the
  *    upgrade authority, which init_store requires), the LayerZero Endpoint program and its
- *    settings PDA cloned from mainnet, and every Jupiter account from tests/fork/clone-flags.txt.
+ *    settings PDA cloned from mainnet, every Jupiter account from tests/fork/clone-flags.txt,
+ *    and a USDC token account holding 1,000 USDC for the test wallet (written straight into the
+ *    ledger: nobody can mint USDC on a fork). Regenerate the clone list with
+ *    tests/fork/dump-accounts.ts.
  * 2. Runs tests/fork/custody.fork.test.ts against it with the Anchor provider env vars set.
  * 3. Stops the validator.
  *
@@ -20,7 +23,7 @@
  *   npm run test:fork            (needs `npx lm build` first; uses ~/.config/solana/id.json)
  */
 const { spawn, spawnSync } = require('node:child_process')
-const { existsSync, readFileSync } = require('node:fs')
+const { existsSync, readFileSync, writeFileSync } = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
@@ -52,6 +55,29 @@ if (!existsSync(so)) throw new Error(`Missing ${so}. Run: npx lm build -- --feat
 const walletPubkey = spawnSync('solana-keygen', ['pubkey', WALLET], { encoding: 'utf8' }).stdout.trim()
 if (!walletPubkey) throw new Error(`Cannot read wallet ${WALLET}`)
 
+/**
+ * `--account` flag that puts a USDC token account for `owner` into the ledger at genesis.
+ * SPL token account layout (165 bytes): mint 0..32, owner 32..64, amount 64..72, delegate
+ * 72..108, state 108, is_native 109..121, delegated_amount 121..129, close_authority 129..165.
+ */
+function usdcAccountFlag(owner) {
+    const { PublicKey } = require('@solana/web3.js')
+    const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+    const tokenProgram = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+    const ataProgram = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    const ownerKey = new PublicKey(owner)
+    const [ata] = PublicKey.findProgramAddressSync([ownerKey.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()], ataProgram)
+    const data = Buffer.alloc(165)
+    mint.toBuffer().copy(data, 0)
+    ownerKey.toBuffer().copy(data, 32)
+    data.writeBigUInt64LE(1_000_000_000n, 64) // 1,000 USDC
+    data[108] = 1 // AccountState::Initialized
+    const file = path.join(os.tmpdir(), 'lendmirror-fork-wallet-usdc.json')
+    const account = { lamports: 2039280, data: [data.toString('base64'), 'base64'], owner: tokenProgram.toBase58(), executable: false, rentEpoch: 0, space: 165 }
+    writeFileSync(file, JSON.stringify({ pubkey: ata.toBase58(), account }))
+    return ['--account', ata.toBase58(), file]
+}
+
 const cloneFlags = readFileSync(path.join(__dirname, 'clone-flags.txt'), 'utf8')
     .split('\n')
     .filter(Boolean)
@@ -68,6 +94,7 @@ const args = [
     '--clone', LZ_ENDPOINT_SETTINGS,
     '--clone-upgradeable-program', MPL_TOKEN_METADATA,
     ...cloneFlags,
+    ...usdcAccountFlag(walletPubkey),
 ]
 console.log(`starting ${validatorVersion} with ${cloneFlags.length / 2} cloned Jupiter entries${canWarp ? ', warped to mainnet slot' : ' (no warp: borrow step will skip)'}`)
 const validator = spawn(VALIDATOR, args, { stdio: ['ignore', 'inherit', 'inherit'] })

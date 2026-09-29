@@ -16,97 +16,55 @@ import {
     TransactionBuilder,
     transactionBuilder,
 } from '@metaplex-foundation/umi'
-import { Serializer, bytes, i128, mapSerializer, option, struct, u32, u8 } from '@metaplex-foundation/umi/serializers'
+import { Serializer, bytes, mapSerializer, option, struct, u32, u8 } from '@metaplex-foundation/umi/serializers'
 import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners } from '../shared'
+import {
+    DexColAmounts,
+    DexColAmountsArgs,
+    DexDebtAmounts,
+    DexDebtAmountsArgs,
+    getDexColAmountsSerializer,
+    getDexDebtAmountsSerializer,
+} from '../types'
 
 // Accounts.
 export type OperatePositionInstructionAccounts = {
-    /** Pays transaction fees and any account Jupiter creates via the setup instructions. */
+    /** Pays transaction fees and any account the setup instructions create. */
     authority?: Signer
     store: PublicKey | Pda
     wrapper: PublicKey | Pda
     ondemand?: PublicKey | Pda
+    /**
+     * Empty PDA: Jupiter's `signer` and `recipient`, signed via `invoke_signed`. It pays rent
+     * for accounts Jupiter creates during the call, so it holds a little SOL.
+     */
+
     wrapperAuthority: PublicKey | Pda
     vaultsProgram: PublicKey | Pda
-    signerSupplyTokenAccount: PublicKey | Pda
-    signerBorrowTokenAccount: PublicKey | Pda
-    vaultConfig: PublicKey | Pda
-    vaultState: PublicKey | Pda
-    supplyToken: PublicKey | Pda
-    borrowToken: PublicKey | Pda
-    oracle: PublicKey | Pda
-    position: PublicKey | Pda
-    positionTokenAccount: PublicKey | Pda
-    currentPositionTick: PublicKey | Pda
-    finalPositionTick: PublicKey | Pda
-    currentPositionTickId: PublicKey | Pda
-    finalPositionTickId: PublicKey | Pda
-    newBranch: PublicKey | Pda
-    supplyTokenReservesLiquidity: PublicKey | Pda
-    borrowTokenReservesLiquidity: PublicKey | Pda
-    vaultSupplyPositionOnLiquidity: PublicKey | Pda
-    vaultBorrowPositionOnLiquidity: PublicKey | Pda
-    supplyRateModel: PublicKey | Pda
-    borrowRateModel: PublicKey | Pda
-    vaultSupplyTokenAccount: PublicKey | Pda
-    vaultBorrowTokenAccount: PublicKey | Pda
-    supplyTokenClaimAccount?: PublicKey | Pda
-    borrowTokenClaimAccount?: PublicKey | Pda
-    liquidity: PublicKey | Pda
-    liquidityProgram: PublicKey | Pda
-    oracleProgram: PublicKey | Pda
-    supplyTokenProgram: PublicKey | Pda
-    borrowTokenProgram: PublicKey | Pda
-    associatedTokenProgram: PublicKey | Pda
-    systemProgram?: PublicKey | Pda
 }
 
 // Data.
 export type OperatePositionInstructionData = {
     discriminator: Uint8Array
-    /**
-     * Collateral change in supply-token base units. Positive deposits, negative withdraws,
-     * `i128::MIN` withdraws everything.
-     */
-    newCol: bigint
-    /**
-     * Debt change in borrow-token base units. Positive borrows, negative pays back,
-     * `i128::MIN` pays back everything.
-     */
-    newDebt: bigint
-    /**
-     * Jupiter `TransferType`. Only `None` or `Some(1)` (direct transfer) are accepted. `Some(2)`
-     * (claim) would park withdrawn tokens in a Liquidity "claim" account that nothing here can
-     * spend, so it is rejected (`LevelDenied`).
-     */
+    colAmounts: Option<DexColAmounts>
+    debtAmounts: Option<DexDebtAmounts>
+    /** Jupiter `TransferType`: 0 skip, 1 direct, 2 claim. Only `None` or `Some(1)` are accepted. */
     transferType: Option<number>
     /**
-     * Jupiter's `remaining_accounts_indices`: how many oracle sources, branches, and tick
-     * debt arrays follow in `remaining_accounts`. The Jupiter SDK computes this.
+     * How many oracle sources, branches and tick debt arrays follow in the extras.
+     * The Jupiter SDK computes this.
      */
     remainingAccountsIndices: Uint8Array
 }
 
 export type OperatePositionInstructionDataArgs = {
-    /**
-     * Collateral change in supply-token base units. Positive deposits, negative withdraws,
-     * `i128::MIN` withdraws everything.
-     */
-    newCol: number | bigint
-    /**
-     * Debt change in borrow-token base units. Positive borrows, negative pays back,
-     * `i128::MIN` pays back everything.
-     */
-    newDebt: number | bigint
-    /**
-     * Jupiter `TransferType`. Only `None` or `Some(1)` (direct transfer) are accepted. `Some(2)`
-     * (claim) would park withdrawn tokens in a Liquidity "claim" account that nothing here can
-     * spend, so it is rejected (`LevelDenied`).
-     */
+    colAmounts: OptionOrNullable<DexColAmountsArgs>
+    debtAmounts: OptionOrNullable<DexDebtAmountsArgs>
+    /** Jupiter `TransferType`: 0 skip, 1 direct, 2 claim. Only `None` or `Some(1)` are accepted. */
     transferType: OptionOrNullable<number>
     /**
-     * Jupiter's `remaining_accounts_indices`: how many oracle sources, branches, and tick
-     * debt arrays follow in `remaining_accounts`. The Jupiter SDK computes this.
+     * How many oracle sources, branches and tick debt arrays follow in the extras.
+     * The Jupiter SDK computes this.
      */
     remainingAccountsIndices: Uint8Array
 }
@@ -119,8 +77,8 @@ export function getOperatePositionInstructionDataSerializer(): Serializer<
         struct<OperatePositionInstructionData>(
             [
                 ['discriminator', bytes({ size: 8 })],
-                ['newCol', i128()],
-                ['newDebt', i128()],
+                ['colAmounts', option(getDexColAmountsSerializer())],
+                ['debtAmounts', option(getDexDebtAmountsSerializer())],
                 ['transferType', option(u8())],
                 ['remainingAccountsIndices', bytes({ size: u32() })],
             ],
@@ -149,81 +107,6 @@ export function operatePosition(
         ondemand: { index: 3, isWritable: false as boolean, value: input.ondemand ?? null },
         wrapperAuthority: { index: 4, isWritable: true as boolean, value: input.wrapperAuthority ?? null },
         vaultsProgram: { index: 5, isWritable: false as boolean, value: input.vaultsProgram ?? null },
-        signerSupplyTokenAccount: {
-            index: 6,
-            isWritable: true as boolean,
-            value: input.signerSupplyTokenAccount ?? null,
-        },
-        signerBorrowTokenAccount: {
-            index: 7,
-            isWritable: true as boolean,
-            value: input.signerBorrowTokenAccount ?? null,
-        },
-        vaultConfig: { index: 8, isWritable: false as boolean, value: input.vaultConfig ?? null },
-        vaultState: { index: 9, isWritable: true as boolean, value: input.vaultState ?? null },
-        supplyToken: { index: 10, isWritable: false as boolean, value: input.supplyToken ?? null },
-        borrowToken: { index: 11, isWritable: false as boolean, value: input.borrowToken ?? null },
-        oracle: { index: 12, isWritable: false as boolean, value: input.oracle ?? null },
-        position: { index: 13, isWritable: true as boolean, value: input.position ?? null },
-        positionTokenAccount: { index: 14, isWritable: false as boolean, value: input.positionTokenAccount ?? null },
-        currentPositionTick: { index: 15, isWritable: true as boolean, value: input.currentPositionTick ?? null },
-        finalPositionTick: { index: 16, isWritable: true as boolean, value: input.finalPositionTick ?? null },
-        currentPositionTickId: { index: 17, isWritable: false as boolean, value: input.currentPositionTickId ?? null },
-        finalPositionTickId: { index: 18, isWritable: true as boolean, value: input.finalPositionTickId ?? null },
-        newBranch: { index: 19, isWritable: true as boolean, value: input.newBranch ?? null },
-        supplyTokenReservesLiquidity: {
-            index: 20,
-            isWritable: true as boolean,
-            value: input.supplyTokenReservesLiquidity ?? null,
-        },
-        borrowTokenReservesLiquidity: {
-            index: 21,
-            isWritable: true as boolean,
-            value: input.borrowTokenReservesLiquidity ?? null,
-        },
-        vaultSupplyPositionOnLiquidity: {
-            index: 22,
-            isWritable: true as boolean,
-            value: input.vaultSupplyPositionOnLiquidity ?? null,
-        },
-        vaultBorrowPositionOnLiquidity: {
-            index: 23,
-            isWritable: true as boolean,
-            value: input.vaultBorrowPositionOnLiquidity ?? null,
-        },
-        supplyRateModel: { index: 24, isWritable: false as boolean, value: input.supplyRateModel ?? null },
-        borrowRateModel: { index: 25, isWritable: false as boolean, value: input.borrowRateModel ?? null },
-        vaultSupplyTokenAccount: {
-            index: 26,
-            isWritable: true as boolean,
-            value: input.vaultSupplyTokenAccount ?? null,
-        },
-        vaultBorrowTokenAccount: {
-            index: 27,
-            isWritable: true as boolean,
-            value: input.vaultBorrowTokenAccount ?? null,
-        },
-        supplyTokenClaimAccount: {
-            index: 28,
-            isWritable: true as boolean,
-            value: input.supplyTokenClaimAccount ?? null,
-        },
-        borrowTokenClaimAccount: {
-            index: 29,
-            isWritable: true as boolean,
-            value: input.borrowTokenClaimAccount ?? null,
-        },
-        liquidity: { index: 30, isWritable: false as boolean, value: input.liquidity ?? null },
-        liquidityProgram: { index: 31, isWritable: false as boolean, value: input.liquidityProgram ?? null },
-        oracleProgram: { index: 32, isWritable: false as boolean, value: input.oracleProgram ?? null },
-        supplyTokenProgram: { index: 33, isWritable: false as boolean, value: input.supplyTokenProgram ?? null },
-        borrowTokenProgram: { index: 34, isWritable: false as boolean, value: input.borrowTokenProgram ?? null },
-        associatedTokenProgram: {
-            index: 35,
-            isWritable: false as boolean,
-            value: input.associatedTokenProgram ?? null,
-        },
-        systemProgram: { index: 36, isWritable: false as boolean, value: input.systemProgram ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.
@@ -232,13 +115,6 @@ export function operatePosition(
     // Default values.
     if (!resolvedAccounts.authority.value) {
         resolvedAccounts.authority.value = context.identity
-    }
-    if (!resolvedAccounts.systemProgram.value) {
-        resolvedAccounts.systemProgram.value = context.programs.getPublicKey(
-            'splSystem',
-            '11111111111111111111111111111111'
-        )
-        resolvedAccounts.systemProgram.isWritable = false
     }
 
     // Accounts in order.

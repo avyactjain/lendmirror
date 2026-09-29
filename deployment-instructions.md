@@ -36,12 +36,12 @@ EVM gas measured on Sepolia: `LendMirror` implementation 3.2M, treasury implemen
 npx lm build -- --features no-log-ix-name   # compile the Solana program for this network's program id
 npm run gen:api                             # regenerate the TypeScript client from the new IDL (always after a build)
 npx hardhat compile                         # compile the EVM contracts
-cargo test -p lendmirror                    # 39 Rust unit tests
+cargo test -p lendmirror                    # 42 Rust unit tests
 forge test                                  # 21 Solidity tests
 npx lm anchor test --skip-build             # 23 tests on a local validator
 ```
 
-Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs custody and a level 2 borrow against cloned Jupiter mainnet accounts.
+Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs custody, supply, borrow, payback, withdraw and release on smart vault 95, against cloned Jupiter mainnet accounts. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
 
 ## 3. Deploy or upgrade the Solana program
 
@@ -134,9 +134,15 @@ Mainnet only, with a small position (Jupiter on Devnet is an old build the SDK c
 
 ```bash
 npx hardhat lz:oapp:solana:deposit-position-nft --vault-id <V> --nft-id <N>                             # the NFT holder hands the position to the program
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id <V> --nft-id <N> --level 1                     # allow supply and payback
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id <V> --nft-id <N> --mint <MINT> --amount <BASE_UNITS>   # tokens to supply
+npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --col-action supply --col-token1 <BASE_UNITS>   # supply pool token1 as smart collateral
 npx hardhat lz:oapp:solana:set-wrapper-level --vault-id <V> --nft-id <N> --level 2                     # allow withdraw and borrow
-npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --col 0 --debt <BASE_UNITS>    # borrow into the wrapper's own account
+npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --debt-action borrow --debt-amount <BASE_UNITS>  # borrow into the wrapper's own account
+npx hardhat lz:oapp:solana:release-position-nft --vault-id <V> --nft-id <N>                            # admin: NFT back to the wrapper owner
 ```
+
+`operate-position` works on smart vaults only (Jupiter T2, T3, T4). Smart legs take `--col-token0/1` or `--debt-token0/1`, normal legs `--col-amount` or `--debt-amount`. It sends two transactions: Jupiter's setup, then the operate.
 
 ## Devnet state after the 2026-09-29 run
 

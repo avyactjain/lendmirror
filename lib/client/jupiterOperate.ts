@@ -1,17 +1,17 @@
 /**
  * Bridge between the Jupiter Lend write SDK (`@jup-ag/lend`, ESM only) and our
- * `operate_position` instruction.
+ * `operate_position` instruction, which calls Jupiter's `operate_dex` (smart vaults only).
  *
- * The SDK resolves Jupiter's 35 `operate` accounts, the extra oracle/branch/tick accounts,
- * the address lookup tables, and the setup instructions (init tick, init branch) for a given
- * signer. We ask it twice:
+ * The SDK resolves Jupiter's 73 `operate_dex` accounts, its extra oracle/branch/tick accounts,
+ * the lookup tables, the setup instructions (init tick, init branch) and the signed amounts.
+ * We ask it twice:
  *   1. with the WALLET as signer, to get the setup instructions. Those create Jupiter-side
  *      accounts and the payer must sign, which only a wallet can do.
- *   2. with the wrapper AUTHORITY PDA as signer, owner and recipient, to get the account
- *      list our program passes through. That PDA signs inside the program via invoke_signed.
+ *   2. with the wrapper AUTHORITY PDA as signer, owner and recipient, to get the account list
+ *      and the amounts our program passes through. That PDA signs inside the program.
  *
- * Jupiter's `operate` needs a v0 transaction with lookup tables, and the wallet creates the
- * PDA's token accounts (idempotently) before the call.
+ * Our instruction's arguments have the same Borsh layout as Jupiter's, so the amounts are taken
+ * from the SDK's own instruction bytes: what the program checks is exactly what Jupiter gets.
  */
 import { AccountMeta, PublicKey as UmiPublicKey, RpcInterface, Signer as UmiSigner, WrappedInstruction, publicKey } from '@metaplex-foundation/umi'
 import { fromWeb3JsInstruction, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
@@ -19,29 +19,35 @@ import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAd
 import { AddressLookupTableAccount, Connection, PublicKey, TransactionInstruction } from '@solana/web3.js'
 import BN from 'bn.js'
 
+import { getOperatePositionInstructionDataSerializer } from './generated/lendmirror/instructions/operatePosition'
 import { LendMirror, instructions } from './lendmirror'
 
-/** The part of the SDK's `getOperateIx` result this file uses. Keys match the Vaults IDL. */
-type OperateSdkResult = {
-    accounts: Record<string, PublicKey | null> & {
-        signerSupplyTokenAccount: PublicKey
-        signerBorrowTokenAccount: PublicKey
-        supplyToken: PublicKey
-        borrowToken: PublicKey
-        supplyTokenProgram: PublicKey
-        borrowTokenProgram: PublicKey
-    }
-    remainingAccounts: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[]
-    remainingAccountsIndices: number[]
-    addressLookupTableAccounts: AddressLookupTableAccount[]
-    ixs: TransactionInstruction[]
+/** One side of the operation. Amounts are positive; `action` gives the direction. */
+export type DexLeg = {
+    /** Collateral: 'supply' | 'withdraw'. Debt: 'borrow' | 'payback'. */
+    action: 'supply' | 'withdraw' | 'borrow' | 'payback'
+    /** Smart (pool) leg: token amounts in each token's base units. */
+    token0?: bigint
+    token1?: bigint
+    /** Normal leg: amount in the token's base units. */
+    amount?: bigint
+    /** Share bound for a smart leg: minimum on supply/borrow, maximum on withdraw/payback. */
+    shares?: bigint
 }
-type OperateSdk = {
-    getOperateIx: (params: {
+
+type SdkSide = { amount?: BN; token0?: BN; token1?: BN; minShares?: BN; maxShares?: BN }
+type SdkResult = {
+    accounts: Record<string, PublicKey | null> & {
+        supplyDex: Record<string, PublicKey | null>
+        borrowDex: Record<string, PublicKey | null>
+    }
+    ixs: TransactionInstruction[]
+    addressLookupTableAccounts: AddressLookupTableAccount[]
+}
+type DexSdk = {
+    getOperateDexIx: (params: {
         vaultId: number
         positionId: number
-        colAmount: BN
-        debtAmount: BN
         connection: Connection
         signer: PublicKey
         positionOwner?: PublicKey
@@ -49,21 +55,23 @@ type OperateSdk = {
         market?: string
         includeATASetup?: boolean
         includeWrapSol?: boolean
-    }) => Promise<OperateSdkResult>
+        col?: { action: string; input: SdkSide } | null
+        debt?: { action: string; input: SdkSide } | null
+    }) => Promise<SdkResult>
 }
 
 /** `import()` that ts-node (CommonJS) does not rewrite into `require()`. The SDK is ESM only. */
-const loadEsm = new Function('s', 'return import(s)') as (s: string) => Promise<OperateSdk>
+const loadEsm = new Function('s', 'return import(s)') as (s: string) => Promise<DexSdk>
 
 export type OperateBuild = {
-    /** Jupiter setup instructions plus ATA creation for the authority PDA. Wallet signs. */
+    /** Jupiter setup instructions plus token-account creation for the authority PDA. Wallet signs. */
     setupIxs: WrappedInstruction[]
     /** Our `operate_position` instruction. */
     operateIx: WrappedInstruction
     /** Lookup tables Jupiter uses; the transaction must be v0 and reference them. */
     lookupTables: AddressLookupTableAccount[]
-    /** The authority PDA's token accounts, for logging balances afterwards. */
-    authorityAtas: { supply: PublicKey; borrow: PublicKey; nft: PublicKey }
+    /** The authority PDA's token accounts in this call, for logging balances afterwards. */
+    authorityAccounts: { label: string; address: PublicKey }[]
 }
 
 export async function buildOperatePosition(args: {
@@ -76,69 +84,46 @@ export async function buildOperatePosition(args: {
     /** `store.vaults_program`: the Jupiter Vaults program this deployment reads. */
     vaultsProgram: UmiPublicKey
     positionMint: UmiPublicKey
-    /** Signed base units. Positive deposits, negative withdraws. */
-    newCol: bigint
-    /** Signed base units. Positive borrows, negative pays back. */
-    newDebt: bigint
-    /** 'main' unless the vault lives in another Jupiter market; 'devnet' on Devnet (patched SDK). */
+    col?: DexLeg
+    debt?: DexLeg
     market?: string
 }): Promise<OperateBuild> {
-    const { getOperateIx } = await loadEsm('@jup-ag/lend/borrow')
+    const { getOperateDexIx } = await loadEsm('@jup-ag/lend/borrow')
     const { connection, rpc, instance, authority, vaultId, nftId, market = 'main' } = args
     const wallet = toWeb3JsPublicKey(authority.publicKey)
     const [wrapper] = instance.pda.wrapper(vaultId, nftId)
     const [wrapperAuthority] = instance.pda.wrapperAuthority(wrapper)
     const pda = toWeb3JsPublicKey(wrapperAuthority)
-    const colAmount = new BN(args.newCol.toString())
-    const debtAmount = new BN(args.newDebt.toString())
+    const common = { vaultId, positionId: nftId, connection, market, includeATASetup: false, includeWrapSol: false }
+    const legs = { col: sdkLeg(args.col), debt: sdkLeg(args.debt) }
 
     // 1. Setup instructions with the wallet as payer. Drop the last one: the SDK's own operate.
-    const forWallet = await withSimulationDetails('wallet', () => getOperateIx({
-        vaultId,
-        positionId: nftId,
-        colAmount,
-        debtAmount,
-        connection,
-        signer: wallet,
-        market,
-        includeATASetup: false,
-        includeWrapSol: false,
-    }))
+    const forWallet = await withSimulationDetails('wallet', () => getOperateDexIx({ ...common, ...legs, signer: wallet }))
     const jupiterSetup = forWallet.ixs.slice(0, -1)
 
-    // 2. Accounts with the PDA as signer, owner, and recipient. The SDK simulates a price read
-    //    with `signer` as fee payer, so the PDA must hold a little SOL (the task funds it).
-    const forPda = await withSimulationDetails('authority PDA', () => getOperateIx({
-        vaultId,
-        positionId: nftId,
-        colAmount,
-        debtAmount,
-        connection,
-        signer: pda,
-        positionOwner: pda,
-        recipient: pda,
-        market,
-        includeATASetup: false,
-        includeWrapSol: false,
-    }))
-    const a = forPda.accounts
+    // 2. Accounts and amounts with the PDA as signer, owner, and recipient. The SDK simulates a
+    //    price read with `signer` as fee payer, so the PDA must hold a little SOL (the task funds it).
+    const forPda = await withSimulationDetails('authority PDA', () =>
+        getOperateDexIx({ ...common, ...legs, signer: pda, positionOwner: pda, recipient: pda })
+    )
+    const jupiterOperate = forPda.ixs[forPda.ixs.length - 1]
 
     // 3. The PDA's token accounts, created by the wallet if missing.
-    const positionMint = toWeb3JsPublicKey(args.positionMint)
-    const nftAta = getAssociatedTokenAddressSync(positionMint, pda, true)
-    const ataIxs: TransactionInstruction[] = [
-        createAssociatedTokenAccountIdempotentInstruction(wallet, a.signerSupplyTokenAccount, pda, a.supplyToken, a.supplyTokenProgram),
-        createAssociatedTokenAccountIdempotentInstruction(wallet, a.signerBorrowTokenAccount, pda, a.borrowToken, a.borrowTokenProgram),
-        createAssociatedTokenAccountIdempotentInstruction(wallet, nftAta, pda, positionMint),
+    const tokenAccounts = pdaTokenAccounts(forPda.accounts)
+    const nftAta = getAssociatedTokenAddressSync(toWeb3JsPublicKey(args.positionMint), pda, true)
+    const ataIxs = [
+        ...tokenAccounts.map((t) => createAssociatedTokenAccountIdempotentInstruction(wallet, t.address, pda, t.mint, t.program)),
+        createAssociatedTokenAccountIdempotentInstruction(wallet, nftAta, pda, toWeb3JsPublicKey(args.positionMint)),
     ]
 
-    const k = (key: PublicKey | null) => {
-        if (!key) throw new Error('Jupiter SDK returned a null account the program requires')
-        return publicKey(key.toBase58())
-    }
-    const remaining: AccountMeta[] = forPda.remainingAccounts.map((m) => ({
-        pubkey: k(m.pubkey),
-        isSigner: false,
+    // 4. Our instruction: our six accounts, then Jupiter's accounts in Jupiter's order. The
+    //    arguments are Jupiter's own bytes, decoded with our (identical) layout.
+    const [params] = getOperatePositionInstructionDataSerializer().deserialize(
+        Uint8Array.from([...new Uint8Array(8), ...jupiterOperate.data.subarray(8)])
+    )
+    const remaining: AccountMeta[] = jupiterOperate.keys.map((m) => ({
+        pubkey: publicKey(m.pubkey.toBase58()),
+        isSigner: false, // the PDA signs inside the program; nothing else signs for Jupiter
         isWritable: m.isWritable,
     }))
     const operateIx = instructions
@@ -151,40 +136,10 @@ export async function buildOperatePosition(args: {
                 ondemand: await instance.ondemandIfAttached(rpc, wrapper),
                 wrapperAuthority,
                 vaultsProgram: args.vaultsProgram,
-                signerSupplyTokenAccount: k(a.signerSupplyTokenAccount),
-                signerBorrowTokenAccount: k(a.signerBorrowTokenAccount),
-                vaultConfig: k(a.vaultConfig),
-                vaultState: k(a.vaultState),
-                supplyToken: k(a.supplyToken),
-                borrowToken: k(a.borrowToken),
-                oracle: k(a.oracle),
-                position: k(a.position),
-                positionTokenAccount: k(nftAta),
-                currentPositionTick: k(a.currentPositionTick),
-                finalPositionTick: k(a.finalPositionTick),
-                currentPositionTickId: k(a.currentPositionTickId),
-                finalPositionTickId: k(a.finalPositionTickId),
-                newBranch: k(a.newBranch),
-                supplyTokenReservesLiquidity: k(a.supplyTokenReservesLiquidity),
-                borrowTokenReservesLiquidity: k(a.borrowTokenReservesLiquidity),
-                vaultSupplyPositionOnLiquidity: k(a.vaultSupplyPositionOnLiquidity),
-                vaultBorrowPositionOnLiquidity: k(a.vaultBorrowPositionOnLiquidity),
-                supplyRateModel: k(a.supplyRateModel),
-                borrowRateModel: k(a.borrowRateModel),
-                vaultSupplyTokenAccount: k(a.vaultSupplyTokenAccount),
-                vaultBorrowTokenAccount: k(a.vaultBorrowTokenAccount),
-                supplyTokenClaimAccount: a.supplyTokenClaimAccount ? k(a.supplyTokenClaimAccount) : undefined,
-                borrowTokenClaimAccount: a.borrowTokenClaimAccount ? k(a.borrowTokenClaimAccount) : undefined,
-                liquidity: k(a.liquidity),
-                liquidityProgram: k(a.liquidityProgram),
-                oracleProgram: k(a.oracleProgram),
-                supplyTokenProgram: k(a.supplyTokenProgram),
-                borrowTokenProgram: k(a.borrowTokenProgram),
-                associatedTokenProgram: publicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
-                newCol: args.newCol,
-                newDebt: args.newDebt,
-                transferType: null,
-                remainingAccountsIndices: Uint8Array.from(forPda.remainingAccountsIndices),
+                colAmounts: params.colAmounts,
+                debtAmounts: params.debtAmounts,
+                transferType: params.transferType,
+                remainingAccountsIndices: params.remainingAccountsIndices,
             }
         )
         .addRemainingAccounts(remaining).items[0]
@@ -198,8 +153,56 @@ export async function buildOperatePosition(args: {
         setupIxs: [...jupiterSetup, ...ataIxs].map(wrap),
         operateIx,
         lookupTables: forPda.addressLookupTableAccounts,
-        authorityAtas: { supply: a.signerSupplyTokenAccount, borrow: a.signerBorrowTokenAccount, nft: nftAta },
+        authorityAccounts: [...tokenAccounts.map((t) => ({ label: t.label, address: t.address })), { label: 'position NFT', address: nftAta }],
     }
+}
+
+/** Our leg → the SDK's `{ action, input }`. The share bound goes where the SDK expects it. */
+function sdkLeg(leg?: DexLeg): { action: string; input: SdkSide } | null {
+    if (!leg) return null
+    const bn = (v?: bigint) => (v === undefined ? undefined : new BN(v.toString()))
+    const positive = leg.action === 'supply' || leg.action === 'borrow'
+    return {
+        action: leg.action,
+        input: {
+            amount: bn(leg.amount),
+            token0: bn(leg.token0),
+            token1: bn(leg.token1),
+            minShares: positive ? bn(leg.shares) : undefined,
+            maxShares: positive ? undefined : bn(leg.shares),
+        },
+    }
+}
+
+/**
+ * Every token account of the PDA that Jupiter may pull from or pay into, with the mint and token
+ * program needed to create it. Normal legs use the vault's supply/borrow token; smart legs use
+ * the pool's token0/token1. Duplicates (e.g. the USDC account shared by a pool leg and the debt)
+ * appear once.
+ */
+function pdaTokenAccounts(a: SdkResult['accounts']): { label: string; address: PublicKey; mint: PublicKey; program: PublicKey }[] {
+    const candidates: [string, PublicKey | null, PublicKey | null, PublicKey | null][] = [
+        ['supply token', a.signerSupplyTokenAccount, a.supplyToken, a.supplyTokenProgram],
+        ['borrow token', a.signerBorrowTokenAccount, a.borrowToken, a.borrowTokenProgram],
+        ['supply token (recipient)', a.recipientSupplyTokenAccount, a.supplyToken, a.supplyTokenProgram],
+        ['borrow token (recipient)', a.recipientBorrowTokenAccount, a.borrowToken, a.borrowTokenProgram],
+    ]
+    for (const [group, dex] of [['collateral pool', a.supplyDex], ['debt pool', a.borrowDex]] as const) {
+        candidates.push(
+            [`${group} token0`, dex.dexUserToken0Account, dex.dexToken0, dex.dexToken0Program],
+            [`${group} token1`, dex.dexUserToken1Account, dex.dexToken1, dex.dexToken1Program],
+            [`${group} token0 (recipient)`, dex.dexRecipientToken0Account, dex.dexToken0, dex.dexToken0Program],
+            [`${group} token1 (recipient)`, dex.dexRecipientToken1Account, dex.dexToken1, dex.dexToken1Program]
+        )
+    }
+    const seen = new Set<string>()
+    const out: { label: string; address: PublicKey; mint: PublicKey; program: PublicKey }[] = []
+    for (const [label, address, mint, program] of candidates) {
+        if (!address || !mint || !program || seen.has(address.toBase58())) continue
+        seen.add(address.toBase58())
+        out.push({ label, address, mint, program })
+    }
+    return out
 }
 
 /** The SDK hides simulation failures behind "No return data found in logs"; show the details. */

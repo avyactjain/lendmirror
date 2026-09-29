@@ -1,13 +1,15 @@
 /**
- * Custody and levels against a local fork of Jupiter Lend mainnet (vault 1: WSOL → USDC).
- * Started by tests/fork/run.cjs. Read-only against mainnet; every transaction here hits
- * the local validator.
+ * Custody, levels and Jupiter smart-vault operations against a local fork of Jupiter Lend
+ * mainnet. Vault 95: USDG/USDC smart collateral, USDC debt (a T2 vault), operated through our
+ * program's `operate_position`, which calls Jupiter's `operate_dex`. Started by
+ * tests/fork/run.cjs. Read-only against mainnet; every transaction here hits the local validator.
  *
  * Flow: init_store → Jupiter init_position (wallet gets the NFT) → wallet hands the NFT to a
  * second wallet, the "holder" → wallet (a snapshotter) wraps → holder deposits the NFT and
- * becomes the wrapper owner → holder puts the wallet on the OnDemand list → level 1 → deposit
- * collateral (allowed) → borrow (denied) → level 2 → borrow (allowed, USDC lands in the wrapper
- * authority's ATA) → refresh shows the debt.
+ * becomes the wrapper owner → holder puts the wallet on the OnDemand list → level 1 → supply
+ * USDC as smart collateral (allowed) → borrow (denied) → level 2 → a borrow paying into the
+ * wallet (refused) → borrow (USDC lands in the wrapper authority's account) → level 1 → pay
+ * back (allowed) → withdraw (denied) → level 2 → withdraw → refresh → admin releases the NFT.
  */
 import { expect } from 'chai'
 import { readFileSync } from 'node:fs'
@@ -16,9 +18,7 @@ import { WrappedInstruction, createSignerFromKeypair, publicKey, signerIdentity,
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { fromWeb3JsPublicKey, toWeb3JsInstruction, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import {
-    NATIVE_MINT,
     createAssociatedTokenAccountIdempotentInstruction,
-    createSyncNativeInstruction,
     createTransferCheckedInstruction,
     getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
@@ -38,18 +38,23 @@ import {
 
 import { lendmirror } from '../../lib/client'
 import { decodeJupiterPositionFields, jupiterPositionMintPda, jupiterPositionPda } from '../../lib/client/jupiter'
-import { buildOperatePosition } from '../../lib/client/jupiterOperate'
+import { DexLeg, buildOperatePosition } from '../../lib/client/jupiterOperate'
 
 const PROGRAM_ID = 'GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1'
-const VAULT_ID = 1
-const COLLATERAL_LAMPORTS = 300_000_000 // 0.3 SOL of WSOL
-const BORROW_USDC = 5_000_000 // 5 USDC, above the vault's minimum borrow
+const VAULT_ID = 95
+const USDC = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+const PDA_FUNDING = 30_000_000n // 30 USDC moved into the wrapper authority's account
+const SUPPLY = 20_000_000n // 20 USDC supplied as smart collateral (pool token1)
+const BORROW = 5_000_000n // 5 USDC
+const PAYBACK = 2_000_000n // 2 USDC
+const WITHDRAW = 5_000_000n // 5 USDC of collateral
 
 const loadEsm = new Function('s', 'return import(s)') as (s: string) => Promise<{
     getInitPositionIx: (p: { vaultId: number; connection: Connection; signer: PublicKey }) => Promise<{ ix: any; nftId: number }>
+    getCurrentPosition: (p: { vaultId: number; positionId: number; connection: Connection; market: string }) => Promise<{ colRaw: { toString(): string }; debtRaw: { toString(): string } }>
 }>
 
-describe('custody on a Jupiter mainnet fork', function () {
+describe('custody and smart-vault operate on a Jupiter mainnet fork', function () {
     this.timeout(600_000)
     const url = process.env.ANCHOR_PROVIDER_URL ?? 'http://127.0.0.1:8899'
     const wallet = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(process.env.ANCHOR_WALLET!, 'utf8'))))
@@ -63,6 +68,7 @@ describe('custody on a Jupiter mainnet fork', function () {
     const holderSigner = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(holder.secretKey))
     const instance = new lendmirror.LendMirror(publicKey(PROGRAM_ID))
     const vaultsProgram = lendmirror.JUPITER_VAULTS_MAINNET
+    const walletUsdc = getAssociatedTokenAddressSync(USDC, wallet.publicKey)
     let nftId = 0
     let positionMint: PublicKey
     let authorityPda: PublicKey
@@ -75,6 +81,8 @@ describe('custody on a Jupiter mainnet fork', function () {
         const balance = await connection.getBalance(wallet.publicKey, 'confirmed')
         expect(balance).to.be.greaterThan(10 * LAMPORTS_PER_SOL)
         expect(String(signer.publicKey)).to.equal(wallet.publicKey.toBase58(), 'umi signer is the wallet')
+        const usdc = await connection.getTokenAccountBalance(walletUsdc)
+        expect(usdc.value.amount).to.equal('1000000000', 'the runner gave the wallet 1,000 USDC')
     })
 
     it('init_store on the fork with the mainnet Vaults program', async () => {
@@ -83,7 +91,7 @@ describe('custody on a Jupiter mainnet fork', function () {
         expect(store?.vaultsProgram).to.equal(vaultsProgram)
     })
 
-    it('wallet opens a Jupiter position (gets the NFT)', async () => {
+    it('wallet opens a Jupiter position in the smart vault (gets the NFT)', async () => {
         const { getInitPositionIx } = await loadEsm('@jup-ag/lend/borrow')
         const { ix, nftId: id } = await getInitPositionIx({ vaultId: VAULT_ID, connection, signer: wallet.publicKey })
         nftId = id
@@ -142,75 +150,111 @@ describe('custody on a Jupiter mainnet fork', function () {
         expect(bal.value.amount).to.equal('1', 'NFT sits in the authority ATA')
 
         // The Jupiter SDK simulates a price read with the operate signer as fee payer, and
-        // Jupiter's operate may create accounts paid by its signer. Give the PDA some SOL.
-        await sendAndConfirmTransaction(
-            connection,
-            new Transaction().add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: authorityPda, lamports: 50_000_000 })),
-            [wallet]
-        )
-        await waitVisible(toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0]))
-    })
-
-    it('level 1 can deposit collateral from the authority ATA', async () => {
-        // Put WSOL into the authority's ATA: the wallet funds it; only the program can move it out.
-        const wsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, authorityPda, true)
+        // Jupiter may create accounts paid by its signer. Give the PDA some SOL. Then move USDC
+        // into the PDA's account: the wallet funds it; only the program can move it out.
+        const pdaUsdcAccount = getAssociatedTokenAddressSync(USDC, authorityPda, true)
         await sendAndConfirmTransaction(
             connection,
             new Transaction()
-                .add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, wsolAta, authorityPda, NATIVE_MINT))
-                .add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: wsolAta, lamports: COLLATERAL_LAMPORTS }))
-                .add(createSyncNativeInstruction(wsolAta)),
+                .add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: authorityPda, lamports: 50_000_000 }))
+                .add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, pdaUsdcAccount, authorityPda, USDC))
+                .add(createTransferCheckedInstruction(walletUsdc, USDC, pdaUsdcAccount, wallet.publicKey, PDA_FUNDING, 6)),
             [wallet]
         )
-        await operate(BigInt(COLLATERAL_LAMPORTS), 0n)
+        expect(await pdaUsdc()).to.equal(PDA_FUNDING)
+        await waitVisible(toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0]))
+    })
+
+    it('level 1 supplies USDC as smart collateral', async () => {
+        await operate({ col: { action: 'supply', token1: SUPPLY } })
         const position = await connection.getAccountInfo(toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0]))
         const fields = decodeJupiterPositionFields(position!.data)
-        expect(fields.supplyAmount > 0n).to.equal(true, 'collateral recorded on the Jupiter position')
+        expect(fields.supplyAmount > 0n).to.equal(true, 'pool shares recorded on the Jupiter position')
+        expect(await pdaUsdc()).to.equal(PDA_FUNDING - SUPPLY)
     })
 
     it('level 1 cannot borrow', async () => {
         try {
-            await operate(0n, BigInt(BORROW_USDC))
+            await operate({ debt: { action: 'borrow', amount: BORROW } })
             expect.fail('expected LevelDenied')
         } catch (err) {
             expect(String(err)).to.match(/LevelDenied|6014|0x177e/)
         }
     })
 
-    let borrowed = false
-
-    it('level 2 borrows and the USDC lands in the authority ATA', async function () {
+    it('level 2: a borrow that would pay into the wallet is refused', async () => {
         await send(instance.setWrapperLevel(signer, VAULT_ID, nftId, 2))
-        try {
-            const { authorityAtas } = await operate(0n, BigInt(BORROW_USDC))
-            const bal = await connection.getTokenAccountBalance(authorityAtas.borrow)
-            expect(bal.value.amount).to.equal(String(BORROW_USDC))
-            borrowed = true
-        } catch (err) {
-            // Our program passed every check and reached Jupiter; Jupiter's oracle then failed on
-            // the fork's slot-0 clock (see tests/fork/run.cjs). Not something this repo can fix.
-            if (/oracle\/src\/helper\.rs|LibraryMathError|0x1770/.test(String(err))) {
-                console.log('      (skipped: Jupiter oracle rejects the fork clock at slot 0; borrow is exercised on Devnet)')
-                this.skip()
-            }
-            throw err
+        // Our six named accounts come first, then Jupiter's list; slot 2 is Jupiter's
+        // signer_borrow_token_account, one of the accounts Jupiter pays borrowed tokens into.
+        const redirect = (ix: WrappedInstruction): WrappedInstruction => {
+            const keys = ix.instruction.keys.map((k, i) => (i === 6 + 2 ? { ...k, pubkey: fromWeb3JsPublicKey(walletUsdc) } : k))
+            return { ...ix, instruction: { ...ix.instruction, keys } }
         }
+        try {
+            await operate({ debt: { action: 'borrow', amount: BORROW } }, redirect)
+            expect.fail('expected InvalidTokenAccount')
+        } catch (err) {
+            expect(String(err)).to.match(/InvalidTokenAccount|6018|0x1782/, String(err).slice(0, 2000))
+        }
+    })
+
+    it('level 2 borrows and the USDC lands in the authority account', async () => {
+        const before = await pdaUsdc()
+        await operate({ debt: { action: 'borrow', amount: BORROW } })
+        expect(await pdaUsdc()).to.equal(before + BORROW)
+    })
+
+    it('level 1 can pay back, cannot withdraw', async () => {
+        await send(instance.setWrapperLevel(signer, VAULT_ID, nftId, 1))
+        const before = await pdaUsdc()
+        await operate({ debt: { action: 'payback', amount: PAYBACK } })
+        // Jupiter rounds a payback up by at most one base unit, in the protocol's favour.
+        const spent = before - (await pdaUsdc())
+        expect(spent >= PAYBACK && spent <= PAYBACK + 1n).to.equal(true, `payback spent ${spent}`)
+        try {
+            await operate({ col: { action: 'withdraw', token1: WITHDRAW, shares: await positionShares() } })
+            expect.fail('expected LevelDenied')
+        } catch (err) {
+            expect(String(err)).to.match(/LevelDenied|6014|0x177e/)
+        }
+    })
+
+    it('level 2 withdraws collateral into the authority account', async () => {
+        await send(instance.setWrapperLevel(signer, VAULT_ID, nftId, 2))
+        const before = await pdaUsdc()
+        await operate({ col: { action: 'withdraw', token1: WITHDRAW, shares: await positionShares() } })
+        expect(await pdaUsdc()).to.equal(before + WITHDRAW)
     })
 
     it('refresh_wrapper reads the position back into the wrapper', async () => {
         const position = toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0])
         await waitVisible(position)
         // The refresh derives Jupiter's tick account from the position's current tick. umi's
-        // view can trail the borrow by seconds; wait until it matches the confirmed web3 view.
+        // view can trail the last operate by seconds; wait until it matches the web3 view.
         await waitPositionSynced(position)
         const store = await instance.getStore(umi.rpc)
         await send(await instance.refreshWrapper(umi.rpc, signer, VAULT_ID, nftId, store!.vaultsProgram))
         const wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
         const snap = unwrapOption(wrapper!.snapshot)
         expect(snap).to.not.equal(null)
-        expect(snap!.colRaw > 0n).to.equal(true, 'the level 1 deposit is in the snapshot')
-        if (borrowed) expect(snap!.debtRaw > 0n).to.equal(true)
+        expect(snap!.colRaw > 0n).to.equal(true, 'collateral shares are in the snapshot')
+        expect(snap!.debtRaw > 0n).to.equal(true, 'the remaining debt is in the snapshot')
     })
+
+    it('admin releases the NFT back to the wrapper owner', async () => {
+        await send(instance.releasePositionNft(signer, VAULT_ID, nftId, holderSigner.publicKey, fromWeb3JsPublicKey(positionMint)))
+        const bal = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(positionMint, holder.publicKey), 'confirmed')
+        expect(bal.value.amount).to.equal('1', 'the holder has the NFT again')
+        const wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
+        expect(wrapper?.custody).to.equal(false)
+    })
+
+    /** All of the position's collateral shares: a loose upper bound for a withdraw. */
+    async function positionShares(): Promise<bigint> {
+        const { getCurrentPosition } = await loadEsm('@jup-ag/lend/borrow')
+        const current = await getCurrentPosition({ vaultId: VAULT_ID, positionId: nftId, connection, market: 'main' })
+        return BigInt(current.colRaw.toString())
+    }
 
     /**
      * umi reads through its own view of the RPC; on a fresh local validator it can trail the
@@ -243,8 +287,13 @@ describe('custody on a Jupiter mainnet fork', function () {
         throw new Error('umi never caught up with the position after the borrow')
     }
 
-    /** Build and send one operate_position with Jupiter's setup instructions and lookup tables. */
-    async function operate(newCol: bigint, newDebt: bigint) {
+    /**
+     * Build and send one operate_position: Jupiter's setup instructions and the PDA's token
+     * accounts in a first transaction, the operate itself in a second one (both need Jupiter's
+     * lookup tables; together they can exceed the transaction size limit).
+     * `tamper` edits our instruction before sending, to prove the program's checks.
+     */
+    async function operate(legs: { col?: DexLeg; debt?: DexLeg }, tamper?: (ix: WrappedInstruction) => WrappedInstruction) {
         const build = await buildOperatePosition({
             connection,
             rpc: umi.rpc,
@@ -254,11 +303,18 @@ describe('custody on a Jupiter mainnet fork', function () {
             nftId,
             vaultsProgram,
             positionMint: fromWeb3JsPublicKey(positionMint),
-            newCol,
-            newDebt,
+            ...legs,
         })
-        await send([...build.setupIxs, build.operateIx], build.lookupTables, 1_400_000)
+        if (build.setupIxs.length) await send(build.setupIxs, build.lookupTables, 1_400_000)
+        const signature = await send(tamper ? tamper(build.operateIx) : build.operateIx, build.lookupTables, 1_400_000)
+        const tx = await connection.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' })
+        const depth = Math.max(...(tx?.meta?.logMessages ?? []).map((l) => Number((l.match(/invoke \[(\d+)\]/) ?? [])[1] ?? 0)))
+        console.log(`      (operate: ${tx?.meta?.computeUnitsConsumed} compute units, call depth ${depth})`)
         return build
+    }
+
+    async function pdaUsdc(): Promise<bigint> {
+        return BigInt((await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(USDC, authorityPda, true), 'confirmed')).value.amount)
     }
 
     /**

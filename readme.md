@@ -73,7 +73,7 @@ Every seed lives in `src/seeds.rs` (Rust) and `lib/client/seeds.ts` (TypeScript)
 | **PositionSnapshotAccount**    | `["LendMirrorJupPositionV1", vault le, nft le]`                | legacy per-position snapshot written by `get_jupiter_position`                                                                                                                                                   | `src/state/jupiter_position.rs`                                      |
 
 
-Why two empty PDAs? Solana's System program refuses to move lamports out of an account that holds data. Jupiter's `operate` signer and every bridge's `authority` must be able to pay fees or rent, so the signer is an empty PDA and the data lives next to it in the wrapper.
+Why two empty PDAs? Solana's System program refuses to move lamports out of an account that holds data. Jupiter's `operate_dex` signer and every bridge's `authority` must be able to pay fees or rent, so the signer is an empty PDA and the data lives next to it in the wrapper.
 
 ### The snapshot (`PositionSnapshot`, 225 bytes, big-endian)
 
@@ -159,11 +159,13 @@ Why one transaction needs a lookup table: the send names 27 accounts plus LayerZ
 
 1. **Custody.** The wallet holding the position NFT runs `deposit_position_nft`. It need not be the wallet that created the wrapper: the token program requires the holder's signature to move the NFT, and nothing else is required. The program derives the NFT mint from Jupiter's own seeds (`["position_mint", vault le, nft le]`), so only the mint of exactly this position is accepted, and transfers the single token from the holder's account to the authority's associated token account. `custody = true`, and the depositor becomes `wrapper.owner`, so the admin can only ever release the NFT back to them.
 2. **Level.** The admin runs `set_wrapper_level 1`.
-3. **Deposit.** Someone first sends collateral (e.g. wrapped SOL) to the authority's token account with a plain transfer. Then the owner or an OnDemand caller runs `operate_position { new_col: +300_000_000, new_debt: 0 }`. Before the CPI the program checks: custody is true; the level allows the signed amounts; the transfer type is a direct transfer and no Jupiter claim accounts are passed (a claim would park the payout where nothing here can spend it); `supply_token` and `borrow_token` equal the vault's mints; the three token accounts are the authority's associated token accounts. It then CPIs Jupiter `operate` with the authority PDA as `signer` **and** `recipient` (`src/instructions/operate_position.rs::jupiter_operate_metas`). Jupiter needs 35 accounts and its own extra accounts (oracle sources, branches, tick debt arrays), which the client resolves with Jupiter's SDK (`lib/client/jupiterOperate.ts`); the wallet runs Jupiter's setup instructions (init tick, init branch) in the same transaction.
-4. **Borrow.** Admin sets level 2; `operate_position { new_col: 0, new_debt: +5_000_000 }` borrows 5 USDC into the authority's USDC account.
+3. **Supply.** Someone first sends tokens (e.g. USDC) to the authority's token account with a plain transfer. Then the owner or an OnDemand caller runs `operate_position` with Jupiter's `operate_dex` amounts, e.g. smart collateral `token1: +20_000_000`. Before the CPI the program checks: custody is true; the level allows the direction (level 1 may only supply or pay back); the transfer type is a direct transfer (a claim would park the payout where nothing here can spend it); Jupiter's signer is the authority PDA, its recipient is absent or the PDA, and every one of the 12 accounts Jupiter can pay into is absent or a token account owned by the PDA; the position is the wrapper's own and its NFT sits in the PDA's account. It then CPIs Jupiter `operate_dex` with the PDA signing (`src/instructions/operate_position.rs`). Jupiter's 73 accounts and its extras (oracle sources, branches, tick debt arrays) come from Jupiter's SDK (`lib/client/jupiterOperate.ts`); the wallet runs Jupiter's setup instructions in a first transaction.
+4. **Borrow.** Admin sets level 2; `operate_position` with debt `new_debt: +5_000_000` borrows 5 USDC into the authority's USDC account.
+
+Only smart vaults (Jupiter types T2, T3, T4) can be operated: the program calls `operate_dex`, which Jupiter refuses on plain vaults such as vault 1. Mirroring, custody and bridging work on every vault.
 5. **Refresh** to see the new numbers in the snapshot.
 
-Verified on a local fork of Jupiter mainnet (`npm run test:fork` with an Agave 4.2+ validator, see Tests): create position, custody, level 1 deposit through the CPI, level 1 borrow denied with `LevelDenied`, level 2 borrow with the USDC landing in the wrapper authority's account, refresh shows the collateral. Jupiter Devnet is an old build the Jupiter SDK cannot decode, so nothing runs there; the first live borrow is a small mainnet position after the mainnet upgrade.
+Verified on a local fork of Jupiter mainnet (`npm run test:fork` with an Agave 4.2+ validator, see Tests) on smart vault 95, USDG/USDC collateral and USDC debt: create position, custody by the NFT holder, level 1 supply of 20 USDC through `operate_dex`, level 1 borrow denied (`LevelDenied`), a borrow paying into a wallet refused (`InvalidTokenAccount`), level 2 borrow of 5 USDC into the wrapper authority's account, level 1 payback, level 1 withdraw denied, level 2 withdraw of 5 USDC, refresh, and release of the NFT. Compute through our program peaks at about 420,000 units, for the withdraw, and the withdraw reaches Solana's maximum call depth of 5. Jupiter Devnet is an old build the Jupiter SDK cannot decode, so nothing runs there.
 
 `release_position_nft` (admin) moves the NFT back to the wrapper owner's associated token account; no other destination is possible.
 
@@ -231,7 +233,7 @@ Not enforced, on purpose: wrapping does not verify the Jupiter position exists (
 | Live Jupiter read (ticks, liquidation branches)                                | Built; `crates/jup-tick-parity` and `npm run test:jup-live` compare against Jupiter's SDK                                                 |
 | Snapshot send over LayerZero + Chainlink, once per refresh, newest wins on EVM | **Verified Devnet → Sepolia 2026-09-28**. **Verified mainnet → Arbitrum 2026-09-29** on vault 95 / nft 34 (a smart-collateral vault): refresh, send, both copies match. Fees: LayerZero 0.0012 SOL, Chainlink 0.0017 SOL |
 | Sync every wrapped position                                                    | **Run on Devnet 2026-09-28**                                                                                                              |
-| NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, the level gate, and the level 2 borrow proven on a warped Jupiter mainnet fork. **Mainnet 2026-09-29, vault 95 / nft 34:** a wallet without the NFT is refused (`AccountNotInitialized` on `source_nft_ata`); the NFT holder deposits and becomes owner (tx `4CRg9SrV…`); the admin releases it back to that owner (tx `3qZzuKPo…`, first run anywhere). `operate` not yet run on mainnet; it only builds Jupiter's plain `operate`, so smart vaults (`operate_dex`) are not supported |
+| NFT custody, levels, Jupiter `operate_dex` CPI                                      | Rebuilt 2026-09-30 on Jupiter's `operate_dex` (smart vaults only; plain vaults such as vault 1 are no longer operable). Fork of mainnet vault 95: supply, borrow, payback, withdraw, the level gate and the payout-account check all pass. **Mainnet 2026-09-29, vault 95 / nft 34:** a wallet without the NFT is refused (`AccountNotInitialized` on `source_nft_ata`); the NFT holder deposits and becomes owner (tx `4CRg9SrV…`); the admin releases it back to that owner (tx `3qZzuKPo…`, first run anywhere). The `operate_dex` build is not yet deployed to mainnet |
 | Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury. **Verified mainnet → Arbitrum 2026-09-30:** 1 USDC from wrapper 95/34 (bridged by the wrapper owner), claimed by the treasury, forwarded to the strategy `0x9Dee…` |
 | Token bridge, Chainlink CCIP (PST, USDC)                                       | **Verified Devnet → Sepolia 2026-09-28** with CCIP-BnM, end to end through the treasury                                                   |
 | Token bridge, LayerZero OFT (USDT0, USDai, sUSDai)                             | Built, unit-tested; **not tested on any network**                                                                                         |
@@ -342,10 +344,10 @@ npx hardhat compile                           # EVM
 ### Test (nothing touches a public network)
 
 ```bash
-cargo test -p lendmirror                                   # 37 unit tests: codecs, level policy, send guard, CCTP/CCIP/OFT bytes
+cargo test -p lendmirror                                   # 42 unit tests: codecs, level policy, operate_dex bytes and payout checks, send guard, CCTP/CCIP/OFT bytes
 forge test                                                 # 21: LendMirror, treasury, codec
 RPC_URL_SOLANA_MAINNET= anchor test --skip-build           # 23: local validator with the LayerZero endpoint cloned from Devnet
-SOLANA_TEST_VALIDATOR=/path/to/solana-release/bin/solana-test-validator npm run test:fork   # fork of Jupiter mainnet: custody, deposit, gate, borrow
+SOLANA_TEST_VALIDATOR=/path/to/solana-release/bin/solana-test-validator npm run test:fork   # fork of Jupiter mainnet vault 95: custody, supply, gate, borrow, payback, withdraw, release
 cd crates/jup-tick-parity && cargo test                    # tick math vs Jupiter's Rust SDK
 npm run test:jup-live                                      # live read vs Jupiter's read SDK (needs RPC_URL_SOLANA_MAINNET)
 ```
@@ -394,12 +396,14 @@ npx hardhat lz:oapp:solana:sync-all-positions [--force] [--only 1:29] [--dry-run
 Custody and operate:
 
 ```bash
-npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 300000000 --debt 0
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 2
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 0 --debt 5000000     # --col min / --debt min = all
-npx hardhat lz:oapp:solana:release-position-nft --vault-id 1 --nft-id 29                        # admin escape hatch
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 1
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action supply --col-token1 20000000   # smart vaults only
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 2
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action borrow --debt-amount 5000000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action payback --debt-amount 2000000
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action withdraw --col-token1 5000000   # share bound defaults to all shares
+npx hardhat lz:oapp:solana:release-position-nft --vault-id 95 --nft-id 34                      # admin escape hatch
 ```
 
 Bridge:
@@ -429,7 +433,7 @@ Both sides were read end to end for this readme. What was found, what was fixed 
 
 | Where | Problem | Fix |
 | --- | --- | --- |
-| `operate_position` | Jupiter's `operate` accepts a "claim" transfer type. A caller could withdraw or borrow into a Liquidity claim account that no instruction here can spend, stranding the funds. | Only `transfer_type` `None` or `1` (direct) is accepted, and both claim accounts must be absent. |
+| `operate_position` | Jupiter accepts a "claim" transfer type. A caller could withdraw or borrow into a Liquidity claim account that no instruction here can spend, stranding the funds. | Only `transfer_type` `None` or `1` (direct) is accepted. Since the move to `operate_dex` (2026-09-30), every account Jupiter can pay into must also be absent or owned by the wrapper authority. |
 | `operate_position`, `bridge_tokens_*` | Store snapshotters, meant to be a read role, could operate any custodied wrapper and bridge from any wrapper. | Operate: owner or OnDemand caller only. Bridge: owner, OnDemand caller, or sender (operator). Docs and `Store` comments now match the code. |
 | `bridge_tokens_*` | The level gate was `level >= 1`, so the reserved levels 3 and 4 could bridge while they cannot operate. | Levels 1 and 2 only. |
 | `bridge_tokens_oft` | The LayerZero fee is paid from the shared bridge-signer PDA. A caller could quote a high `native_fee`, bring little `fee_lamports`, and drain that PDA's SOL; caller-supplied executor options could turn it into a native drop to their own EVM address. | `fee_lamports >= native_fee` and `options` must be empty. Gas comes from the peer's enforced options, set by the admin. |

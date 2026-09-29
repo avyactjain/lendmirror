@@ -27,8 +27,8 @@
 //!     allocate `8 + INIT_SPACE` bytes. Every field must have a fixed size for this to work.
 //!   - Solana accounts cannot grow for free, so changing this layout means a new seed. That is
 //!     why the seed is `LendMirrorPositionWrapperV1`: wrappers under the older seeds
-//!     (`LendMirrorWrapper`, `LendMirrorPositionWrapperV1`) still exist on
-//!     Devnet with the old layout and are simply left behind.
+//!     (`LendMirrorWrapper`, `LendMirrorWrapperV1`) still exist on Devnet and are simply
+//!     left behind.
 
 use crate::state::jupiter_position::PositionSnapshot;
 use crate::state::store::ALLOWLIST_LEN;
@@ -98,16 +98,16 @@ impl PositionWrapper {
     }
 }
 
-/// Does `level` allow a Jupiter `operate` call with these signed amounts?
+/// Does `level` allow an operation on the position?
 ///
-/// Amounts follow Jupiter's convention: positive `new_col` deposits, negative withdraws;
-/// positive `new_debt` borrows, negative pays back. `i128::MIN` means "all".
+/// `raises_risk` is true when the call takes collateral out or adds debt (withdraw, borrow);
+/// `operate_position::raises_risk` works it out from Jupiter's signed amounts.
 ///
-/// `level_allows(1, 100, 0)` → true (deposit). `level_allows(1, 0, 50)` → false (borrow).
-/// `level_allows(2, -100, 50)` → true. `level_allows(3, 100, 0)` → false (reserved).
-pub fn level_allows(level: u8, new_col: i128, new_debt: i128) -> bool {
+/// `level_allows(1, false)` → true (deposit or payback). `level_allows(1, true)` → false.
+/// `level_allows(2, true)` → true. `level_allows(3, false)` → false (reserved).
+pub fn level_allows(level: u8, raises_risk: bool) -> bool {
     match level {
-        LEVEL_DEPOSIT_PAYBACK => new_col >= 0 && new_debt <= 0,
+        LEVEL_DEPOSIT_PAYBACK => !raises_risk,
         LEVEL_WITHDRAW_BORROW => true,
         // Level 0 has no rights. Levels 3 and 4 are stored but not defined yet.
         _ => false,
@@ -177,21 +177,16 @@ mod tests {
 
     #[test]
     fn level_one_only_lowers_risk() {
-        assert!(level_allows(1, 100, 0)); // deposit
-        assert!(level_allows(1, 0, -50)); // payback
-        assert!(level_allows(1, 100, -50)); // both
-        assert!(level_allows(1, 0, i128::MIN)); // payback all
-        assert!(!level_allows(1, -1, 0)); // withdraw
-        assert!(!level_allows(1, 0, 1)); // borrow
-        assert!(!level_allows(1, i128::MIN, 0)); // withdraw all
+        assert!(level_allows(1, false)); // deposit or payback
+        assert!(!level_allows(1, true)); // withdraw or borrow
     }
 
     #[test]
     fn level_two_allows_everything_and_others_nothing() {
-        assert!(level_allows(2, -100, 50));
-        assert!(level_allows(2, i128::MIN, i128::MIN));
+        assert!(level_allows(2, true));
+        assert!(level_allows(2, false));
         for level in [0u8, 3, 4, 5, 255] {
-            assert!(!level_allows(level, 100, 0), "level {level} must reject even a deposit");
+            assert!(!level_allows(level, false), "level {level} must reject even a deposit");
         }
     }
 

@@ -7,6 +7,9 @@
  */
 
 export * from './bridgeTokensParams'
+export * from './dexAmounts'
+export * from './dexColAmounts'
+export * from './dexDebtAmounts'
 export * from './enforcedOptions'
 export * from './messagingFee'
 export * from './peerConfigParam'

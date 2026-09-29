@@ -87,7 +87,7 @@ Four new instructions.
 | `set_wrapper_level` | admin | 0 = mirror only. 1 = deposit and pay back. 2 = also withdraw and borrow. 3 and 4 = stored but everything is rejected until defined. |
 | `deposit_position_nft` | the NFT holder | moves the Jupiter position NFT from the holder's wallet into the authority PDA's token account; the holder becomes the wrapper owner |
 | `release_position_nft` | admin | moves it back to the wrapper owner (escape hatch; never to anyone else) |
-| `operate_position` | owner or OnDemand caller | calls Jupiter `operate` with the authority PDA as signer **and** recipient, after checking the level |
+| `operate_position` | owner or OnDemand caller | calls Jupiter `operate_dex` (smart vaults only) with the authority PDA as signer and recipient, after checking the level and that every account Jupiter can pay into belongs to the PDA |
 
 Why this is safe: Jupiter sends withdrawn collateral and borrowed tokens to the `recipient`.
 The program always passes its own PDA there, so those tokens can only land in a program-owned
@@ -96,16 +96,16 @@ account. Level 1 can only do things that lower the risk of the loan (deposit, pa
 Commands:
 
 ```bash
-npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
-# put collateral in the authority PDA's token account first (the task prints the address)
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 300000000 --debt 0   # deposit 0.3 WSOL
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 2
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 0 --debt 5000000     # borrow 5 USDC
-npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29                            # read the new numbers
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 1
+# put tokens in the authority PDA's token account first (fund-authority-token)
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action supply --col-token1 20000000   # supply 20 USDC as smart collateral
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 2
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action borrow --debt-amount 5000000  # borrow 5 USDC
+npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 95 --nft-id 34                                          # read the new numbers
 ```
 
-`--col min` or `--debt min` means "all" (withdraw everything / pay back everything).
+Only smart vaults (Jupiter T2, T3, T4) can be operated; the program calls Jupiter's `operate_dex`. There is no "withdraw everything" or "pay back everything" through the program yet (that needs Jupiter's `operate_perfect_dex`); the full exit is `release-position-nft` and closing the position on jup.ag.
 
 Tested on a local copy of Jupiter mainnet (`npm run test:fork`, started at mainnet's slot so
 Jupiter's price oracle accepts the clock): the NFT goes into custody, a level 1 deposit goes

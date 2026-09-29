@@ -19,7 +19,7 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 | `src/instructions/refresh_wrapper.rs` | fill `wrapper.snapshot` | tasks, `sync-all-positions` |
 | `src/instructions/send_position_snapshot.rs` | LayerZero CPI (Store signs) + Chainlink CPI (payer PDA signs), once per refresh | tasks, `sync-all-positions` |
 | `src/instructions/custody.rs` | `set_wrapper_level`, `deposit_position_nft`, `release_position_nft` | tasks |
-| `src/instructions/operate_position.rs` | Jupiter `operate` CPI signed by the wrapper authority PDA, gated by level | task `operate-position` |
+| `src/instructions/operate_position.rs` | Jupiter `operate_dex` CPI (smart vaults only) signed by the wrapper authority PDA, gated by level; checks every account Jupiter can pay into | task `operate-position` |
 | `src/instructions/bridge_tokens.rs` | `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_oft` | task `bridge-tokens` |
 | `src/instructions/send_ccip.rs`, `src/bridges.rs` | pure byte builders for Chainlink `ccip_send`, Circle `deposit_for_burn`, LayerZero OFT `send` | send, bridge |
 | `src/live_position.rs`, `src/tick_math.rs` | liquidation branch walk and tick ratio math | `compute_position_snapshot` |
@@ -30,7 +30,7 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 ```
 wrap_position ─► PositionWrapper (level 0)
 deposit_position_nft ─► NFT in ATA(wrapper authority PDA)      admin: set_wrapper_level 1 | 2
-operate_position ─► Jupiter operate, signer = wrapper authority PDA, recipient = same PDA
+operate_position ─► Jupiter operate_dex, signer = wrapper authority PDA, every payout account owned by that PDA
 refresh_wrapper ─► wrapper.snapshot (clock-stamped)
 send_position_snapshot_via_chainlink_and_lz ─► Endpoint (LayerZero) + Router (CCIP) ─► EVM LendMirror
 bridge_tokens_* ─► ATA(wrapper authority) → ATA(bridge signer PDA) → CCTP / CCIP / OFT ─► EVM LendMirrorTreasury
@@ -62,4 +62,4 @@ bridge_tokens_* ─► ATA(wrapper authority) → ATA(bridge signer PDA) → CCT
 - **`UncheckedAccount` + `/// CHECK:`.** Anchor does no type check; the comment states what the program verifies instead (or that the callee does).
 - **CPI (cross-program invocation).** Build an `Instruction { program_id, accounts, data }` and call `invoke` (caller signs) or `invoke_signed` (a PDA signs). The callee's account order and Borsh data layout must match its IDL exactly.
 - **`remaining_accounts`.** Extra accounts the client appends after the named ones, for lists whose length varies (liquidation branches, LayerZero endpoint accounts, CCIP per-token accounts).
-- **Compute and size limits.** ~1.4M compute units per transaction and 1232 bytes per transaction; address lookup tables shrink account lists (Jupiter `operate` needs them).
+- **Compute and size limits.** ~1.4M compute units per transaction and 1232 bytes per transaction; address lookup tables shrink account lists (Jupiter `operate_dex` needs them). A smart-vault withdraw through our program reaches the maximum call depth of 5: our program → Vaults → DEX → Liquidity → token program.
