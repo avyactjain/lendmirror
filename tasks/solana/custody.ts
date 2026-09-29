@@ -155,8 +155,23 @@ task('lz:oapp:solana:operate-position', 'Smart vaults (Jupiter operate_dex): sup
             const tx = await txBuilder.sendAndConfirm(umi)
             console.log(`${label}: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
         }
-        if (build.setupIxs.length) await sendWithTables(build.setupIxs, 'setup')
-        await sendWithTables([build.operateIx], 'operatePosition')
+        if (build.setupIxs.length) {
+            await sendWithTables(build.setupIxs, 'setup')
+            // The setup creates accounts the operate needs (e.g. Jupiter's tick record). An RPC
+            // pool can answer the operate's checks from a node that has not seen them yet.
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+        }
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await sendWithTables([build.operateIx], 'operatePosition')
+                break
+            } catch (err) {
+                const lagging = /AccountOwnedByWrongProgram|AccountNotInitialized/.test(String(err))
+                if (!lagging || attempt === 3) throw err
+                console.log(`operate saw an account the setup just created as missing (RPC lag); retrying (${attempt}/2)`)
+                await new Promise((resolve) => setTimeout(resolve, 3000))
+            }
+        }
         for (const { label, address } of build.authorityAccounts) {
             console.log(`${label} account ${address.toBase58()} balance ${await readBalance(connection, address)}`)
         }
