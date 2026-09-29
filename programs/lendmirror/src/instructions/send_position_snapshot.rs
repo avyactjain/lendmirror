@@ -32,6 +32,7 @@
 use crate::errors::LendMirrorError;
 use crate::instructions::send_ccip::{ccip_send_instruction_data, CCIP_DATA_LIMIT};
 use crate::msg_codec::LzMessage;
+use crate::seeds::{CCIP_PAYER_SEED, CCIP_ROUTE_SEED, ONDEMAND_SEED, PEER_SEED, STORE_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{instruction::Instruction, program::invoke, program::invoke_signed, pubkey, system_instruction};
@@ -96,7 +97,7 @@ pub struct SendPositionSnapshotViaChainlinkAndLz<'info> {
     #[account(mut, seeds = [CCIP_PAYER_SEED], bump)]
     pub ccip_payer: UncheckedAccount<'info>,
 
-    #[account(seeds = [CCIP_SEED], bump = ccip_route.bump)]
+    #[account(seeds = [CCIP_ROUTE_SEED], bump = ccip_route.bump)]
     pub ccip_route: Box<Account<'info, CcipRoute>>,
 
     // --- Chainlink router accounts. Derived by lib/client/ccip.ts ccipSendAccounts. ---

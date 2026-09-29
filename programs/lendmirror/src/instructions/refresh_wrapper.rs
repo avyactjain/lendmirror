@@ -19,6 +19,7 @@
 
 use crate::errors::LendMirrorError;
 use crate::instructions::get_jupiter_position::compute_position_snapshot;
+use crate::seeds::{ONDEMAND_SEED, STORE_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 

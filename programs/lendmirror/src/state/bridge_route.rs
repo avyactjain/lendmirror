@@ -26,7 +26,7 @@ pub const PROVIDER_LZ_OFT: u8 = 3;
 #[allow(dead_code)]
 pub const PROVIDER_WORMHOLE_NTT: u8 = 4;
 
-/// Seeds: `["LendMirrorBridgeRoute", mint, dst_chain_id le]`.
+/// Seeds: `["LendMirrorBridgeRouteV1", mint, dst_chain_id le]`.
 #[account]
 #[derive(InitSpace)]
 pub struct BridgeRoute {

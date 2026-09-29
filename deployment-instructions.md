@@ -1,236 +1,162 @@
 # Deployment instructions
 
-One switch picks the whole path: Solana network, EVM network, program id, wallets, and RPCs.
+Every command below was run end to end on Devnet → Sepolia on 2026-09-29. Mainnet → Arbitrum uses the same commands with `DEPLOYMENT_TYPE=mainnet`.
 
-## How `.env` wires up
+Run everything from the repo root, in order. Each task reads the network, keys, RPCs and addresses from `DEPLOYMENT_TYPE` in `.env` and `config/<devnet|mainnet>.ts`.
 
-Set this once:
-
-```bash
-DEPLOYMENT_TYPE=devnet   # or mainnet
-```
-
-That loads either `config/devnet.ts` or `config/mainnet.ts`. Secrets stay in `.env` under names ending in `_DEVNET` or `_MAINNET`. Only the active side is read.
-
-| `.env` variable | Used when | Purpose |
-|-----------------|-----------|---------|
-| `DEPLOYMENT_TYPE` | always | `devnet` or `mainnet` |
-| `SOLANA_KEYPAIR_PATH_DEVNET` | `devnet` | Solana wallet file for Devnet writes |
-| `EVM_PRIVATE_KEY_DEVNET` | `devnet` | Sepolia owner key |
-| `RPC_URL_SOLANA_DEVNET` | `devnet` | Solana Devnet RPC |
-| `RPC_URL_EVM_DEVNET` | `devnet` | Sepolia RPC |
-| `SOLANA_KEYPAIR_PATH_MAINNET` | `mainnet` | Solana wallet file for mainnet writes |
-| `EVM_PRIVATE_KEY_MAINNET` | `mainnet` | Arbitrum owner key |
-| `RPC_URL_SOLANA_MAINNET` | `mainnet` | Solana mainnet RPC |
-| `RPC_URL_EVM_MAINNET` | `mainnet` | Arbitrum RPC |
-
-Hardhat, `npx lm`, and `layerzero.config.ts` all call `lib/deployment.ts`, which:
-
-1. Reads `DEPLOYMENT_TYPE`
-2. Loads the matching profile (program id, Store, proxy, eids, Chainlink settings)
-3. Resolves the matching key path and RPC URLs from `.env`
-4. Prints one banner line: type, Solana pubkey, EVM address, program, RPC hosts
-
-Old names (`PRIVATE_KEY`, `SOLANA_KEYPAIR_PATH`, `RPC_URL_SOLANA_TESTNET`, …) are ignored.
-
-## Load `.env` into the current terminal
-
-`npx lm` and Hardhat load `.env` themselves. Shell expansions like `$RPC_URL_EVM_DEVNET` do not, unless you export them:
+## 0. Once per terminal
 
 ```bash
-set -a && source .env && set +a
+nvm use 18                                                               # Hardhat and the tasks need Node 18
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH" # Anchor needs the Solana CLI on PATH
+set -a && source .env && set +a                                          # only needed for the bare `cast` lines below
 ```
 
-- `set -a` — export every variable that gets set
-- `source .env` — read the file into this shell
-- `set +a` — stop auto-exporting
+`.env` needs `DEPLOYMENT_TYPE=devnet` or `mainnet`, plus for that network: `SOLANA_KEYPAIR_PATH_*`, `EVM_PRIVATE_KEY_*`, `RPC_URL_SOLANA_*`, `RPC_URL_EVM_*`. The Solana key must be the program's upgrade authority.
 
-Check:
+## 1. Estimate the cost
 
 ```bash
-echo "$DEPLOYMENT_TYPE"
-echo "$RPC_URL_EVM_DEVNET"
+npx lm solana rent $(wc -c < target/deploy/lendmirror.so)   # SOL the program account must hold (run after step 2)
+npx lm solana program show <PROGRAM_ID>                     # current size and balance; an upgrade only pays for growth
+npx lm solana balance                                       # your SOL
 ```
 
-## Tools
+On 2026-09-29 the program was 730,272 bytes: 3.71 SOL of rent. The mainnet program account holds 1.71 SOL, so the upgrade costs about 2.0 SOL, and the deploy parks another 3.71 SOL in a temporary buffer that is refunded at the end. Hold about 6 SOL.
 
 ```bash
-nvm use 18
+cast gas-price --rpc-url $RPC_URL_EVM_MAINNET               # wei per gas on Arbitrum
 ```
 
-Use Node 18 for Hardhat. Use `npx lm` for Solana CLI, Forge, Cast, and Anchor build so the profile RPC and keys are injected. Bare `solana` / `forge` / `cast` bypass the switch.
+EVM gas measured on Sepolia: `LendMirror` implementation 3.2M, treasury implementation 1.3M, each proxy 0.3M, each configuration call under 0.1M. Multiply by the gas price.
 
-## Upgrade an existing Devnet deploy
-
-You already have Store `Bqsqzi…` and proxy `0xbE4c…`. Do **not** run `create` or `lz:deploy` again.
-
-### 1. Build Solana
+## 2. Build and test
 
 ```bash
-npx lm build -- --features no-log-ix-name
+npx lm build -- --features no-log-ix-name   # compile the Solana program for this network's program id
+npm run gen:api                             # regenerate the TypeScript client from the new IDL (always after a build)
+npx hardhat compile                         # compile the EVM contracts
+cargo test -p lendmirror                    # 42 Rust unit tests
+forge test                                  # 21 Solidity tests
+npx lm anchor test --skip-build             # 23 tests on a local validator
 ```
 
-Builds the program with `LENDMIRROR_ID` set to the profile program id.
+Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs custody, supply, borrow, payback, withdraw and release on smart vault 95, against cloned Jupiter mainnet accounts. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
 
-### 2. Upgrade Solana bytecode
-
-If the new `.so` is bigger than the on-chain program account (`solana program show <id>` prints the
-data length; the deploy fails with "account data too small" otherwise), extend the account first.
-The upgrade authority signs; the cost is rent for the extra bytes.
+## 3. Deploy or upgrade the Solana program
 
 ```bash
-npx lm solana program extend GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 250000
+npx lm solana program extend <PROGRAM_ID> 500000     # only if step 1 showed the new .so is bigger than the account
+npx lm solana program deploy --program-id <PROGRAM_ID> target/deploy/lendmirror.so --use-rpc --max-sign-attempts 100 --with-compute-unit-price 300000   # upgrade the existing program in place
 ```
 
+Pass the program id as an address, never `target/deploy/lendmirror-keypair.json`. That keypair is the Devnet program's; on mainnet it would create a second program at the Devnet address instead of upgrading yours. Mainnet drops uploads sent with a low priority fee ("Max retries exceeded"); if a deploy stops halfway, `npx lm solana program close --buffers` refunds the SOL parked in the half-written buffer, then rerun.
+
+`<PROGRAM_ID>`: Devnet `GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1`, mainnet `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ`.
+
+Publish the IDL so explorers decode the program's accounts and instructions. `anchor build` writes the `address` field as the `declare_id!` expression text, so upload a copy with the real id:
 
 ```bash
-npx lm solana program deploy \
-  --program-id target/deploy/lendmirror-keypair.json \
-  target/deploy/lendmirror.so \
-  --use-rpc \
-  --max-sign-attempts 20 \
-  --with-compute-unit-price 50000
+node -e "const i=require('./target/idl/lendmirror.json');i.address='<PROGRAM_ID>';require('fs').writeFileSync('target/idl/lendmirror.onchain.json',JSON.stringify(i))"   # copy with the real program id
+npx lm anchor idl init <PROGRAM_ID> --filepath target/idl/lendmirror.onchain.json --priority-fee 300000 --provider.cluster "$RPC_URL_SOLANA_MAINNET" --provider.wallet "$SOLANA_KEYPAIR_PATH_MAINNET"   # first time
+npx lm anchor idl upgrade <PROGRAM_ID> --filepath target/idl/lendmirror.onchain.json --priority-fee 300000 --provider.cluster "$RPC_URL_SOLANA_MAINNET" --provider.wallet "$SOLANA_KEYPAIR_PATH_MAINNET"   # after every later program upgrade
+npx lm anchor idl fetch <PROGRAM_ID> --provider.cluster "$RPC_URL_SOLANA_MAINNET" | head -c 200   # check: starts with the program id
 ```
 
-Uploads the new `.so` to the same program id. Raises resign attempts and CU price so Devnet congestion is less likely to stall the deploy.
+The upgrade authority pays: rent for the compressed IDL (a fraction of a SOL) plus one transaction per 600-byte chunk. Use the Devnet variables for Devnet.
 
-### 3. Compile Hardhat artifacts
+## 4. Deploy or upgrade the EVM contracts
+
+The `LendMirror` proxy already exists on both networks (Sepolia `0xbE4c…`, Arbitrum `0xb42E…`), so upgrade it:
 
 ```bash
-npx hardhat compile
+npx lm forge create contracts/LendMirror.sol:LendMirror --broadcast --constructor-args <LZ_ENDPOINT>   # deploy the new implementation; copy "Deployed to"
+npx lm cast send <PROXY> "upgradeToAndCall(address,bytes)" <NEW_IMPLEMENTATION> 0x                     # point the proxy at it
+cast storage <PROXY> 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url $RPC_URL_EVM_MAINNET   # must print the new implementation
 ```
 
-Refreshes the EVM ABI so tasks see functions like `setCcipRoute`.
+`<LZ_ENDPOINT>`: Sepolia `0x6EDCE65403992e310A62460808c4b910D972f10f`, Arbitrum `0x1a44076050125825900e736c501f859c50fE728c`. Put the new implementation into `config/<type>.ts` → `evmImplementation`.
 
-### 4. Deploy a new Sepolia implementation
+The treasury does not exist on Arbitrum yet:
 
 ```bash
-npx lm forge create contracts/LendMirror.sol:LendMirror \
-  --broadcast \
-  --constructor-args 0x6EDCE65403992e310A62460808c4b910D972f10f
+npx hardhat deploy --tags LendMirrorTreasury   # deploy the treasury proxy; put the printed address into config/<type>.ts → treasury
 ```
 
-Deploys new logic with the Sepolia LayerZero endpoint baked in. Copy the **Deployed to** address.
-
-### 5. Point the proxy at the new implementation
+Verify the source on the explorer so its pages decode calls and show the code. Needs `ETHERSCAN_API_KEY` in `.env` (one Etherscan key covers Arbiscan and Sepolia) and the Hardhat 2 line of the plugin, `npm install --save-dev @nomicfoundation/hardhat-verify@^2` (version 3 is for Hardhat 3 and fails with an ESM error). If the command stalls after "Successfully submitted", the source matched; rerun it or check the explorer page. Manual fallback: upload `artifacts/<Contract>.standard-input.json`, written from `artifacts/contracts/<Contract>.sol/<Contract>.dbg.json`'s build info, as "Solidity (Standard-Json-Input)".
 
 ```bash
-npx lm cast send 0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514 \
-  "upgradeToAndCall(address,bytes)" <NEW_IMPL_ADDRESS> 0x
+npx hardhat verify --network arbitrum <LENDMIRROR_IMPLEMENTATION> <LZ_ENDPOINT>   # LendMirror implementation; the constructor arg is the LayerZero endpoint
+npx hardhat verify --network arbitrum <TREASURY_IMPLEMENTATION>                  # treasury implementation, no constructor args
 ```
 
-UUPS upgrade on the existing proxy. Proxy address stays the same; peers stay valid.
+The proxies are OpenZeppelin's `ERC1967Proxy`, which the explorer matches on its own. On each proxy's page use "More Options → Is this a proxy?" so "Read/Write as Proxy" shows the implementation's functions.
 
-### 6. Confirm Solana peer
+Do not use `lz:deploy` on a network that already has the proxy. It trusts its local records, deploys an implementation, skips the upgrade, and still prints success.
+
+## 5. Initialize
 
 ```bash
-npx hardhat lz:oapp:solana:get-peer
+npx hardhat lz:oapp:solana:create                                                     # create the Store PDA and register it with LayerZero
+npx hardhat lz:oapp:solana:init-config --ci --oapp-config layerzero.config.ts          # create LayerZero's send-library accounts for the EVM chain
+npx hardhat lz:oapp:solana:set-peer                                                   # Solana: the EVM proxy is our peer
+npx hardhat lz:oapp:evm:set-peer                                                      # EVM: the new Store is our peer
+npx hardhat lz:oapp:solana:get-peer                                                   # check: prints the EVM proxy
+npx hardhat lz:oapp:solana:set-snapshotters --keys <PUBKEY>                           # wallets allowed to wrap and refresh (comma-separated, up to 8)
+npx hardhat lz:oapp:solana:set-senders --keys <PUBKEY>                                # wallets allowed to send and bridge (comma-separated, up to 8)
+npx hardhat lz:oapp:solana:set-ccip-route                                             # Solana: Chainlink router and EVM receiver for snapshots
+npx hardhat lz:oapp:evm:set-ccip-route                                                # EVM: accept Chainlink snapshots from our bridge signer
+npx hardhat lz:oapp:evm:treasury:set-ccip-route                                       # treasury: accept Chainlink tokens from our bridge signer
+npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter                                 # treasury: Circle's contract for USDC claims
+npx hardhat lz:oapp:evm:treasury:set-strategy --token <ERC20> --strategy <ADDRESS>    # treasury: where each token is forwarded (one per token)
+npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp               # USDC goes over Circle to the treasury
+npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (PST on mainnet, CCIP-BnM on Devnet)
+npx hardhat lz:oapp:solana:create-lookup-table                                        # pack the fixed accounts so sends fit in one transaction
 ```
 
-Prints the EVM peer stored on Solana (should be the Sepolia proxy).
+`lz:oapp:solana:create` also writes `deployments/solana-<net>/OApp.json`; commit it. `set-bridge-route` defaults to the treasury as receiver and to Sepolia or Arbitrum as destination.
 
-### 7. Set Chainlink route on Solana
+## 6. Verify
 
 ```bash
-npx hardhat lz:oapp:solana:set-ccip-route
+npx hardhat lz:oapp:solana:wrap-position --vault-id <V> --nft-id <N>                                   # create the wrapper for one Jupiter position
+npx hardhat lz:oapp:solana:refresh-wrapper --vault-id <V> --nft-id <N>                                 # read the position from Jupiter
+npx hardhat lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz --vault-id <V> --nft-id <N>     # send it over LayerZero and Chainlink
+npx hardhat lz:oapp:evm:match --all                                                                    # after a few minutes: both copies arrived and match
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id <V> --nft-id <N> --level 1                     # allow deposit, payback, and bridging
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id <V> --nft-id <N> --mint <MINT> --amount <BASE_UNITS>   # put test tokens in the wrapper
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint <MINT> --amount <BASE_UNITS>          # bridge them to the treasury
+npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <SOLANA_SIGNATURE>                              # USDC only, about 15 minutes later
+npx hardhat lz:oapp:evm:treasury:forward --token <ERC20>                                               # move the treasury balance to the strategy
 ```
 
-Writes router, destination, and receiver from the Devnet profile onto `CcipRoute`.
-
-### 8. Set Chainlink route on Sepolia
+Mainnet only, with a small position (Jupiter on Devnet is an old build the SDK cannot read):
 
 ```bash
-npx hardhat lz:oapp:evm:set-ccip-route
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id <V> --nft-id <N>                             # the NFT holder hands the position to the program
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id <V> --nft-id <N> --level 1                     # allow supply and payback
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id <V> --nft-id <N> --mint <MINT> --amount <BASE_UNITS>   # tokens to supply
+npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --col-action supply --col-token1 <BASE_UNITS>   # supply pool token1 as smart collateral
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id <V> --nft-id <N> --level 2                     # allow withdraw and borrow
+npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --debt-action borrow --debt-amount <BASE_UNITS>  # borrow into the wrapper's own account
+npx hardhat lz:oapp:solana:release-position-nft --vault-id <V> --nft-id <N>                            # admin: NFT back to the wrapper owner
 ```
 
-Allows the Sepolia CCIP router and the empty Solana payer (`53Zqmx…`) to call `ccipReceive`.
+`operate-position` works on smart vaults only (Jupiter T2, T3, T4). Smart legs take `--col-token0/1` or `--debt-token0/1`, normal legs `--col-amount` or `--debt-amount`. It sends two transactions: Jupiter's setup, then the operate.
 
-### 9. Regenerate the TypeScript client
+## Devnet state after the 2026-09-29 run
 
-```bash
-npm run gen:api
-```
+| Item | Value |
+| --- | --- |
+| Store | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz` |
+| Bridge signer | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR` |
+| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` |
+| Wrapper vault 1 / nft 29 | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
 
-Reads `target/idl/lendmirror.json` and rewrites `lib/client/generated`. Run it after every program build so the hardhat tasks use the new instruction and account layouts.
-
-### 10. Deploy the token treasury on Sepolia
-
-```bash
-npx hardhat deploy --tags LendMirrorTreasury
-```
-
-UUPS proxy. Copy the printed proxy address into `config/devnet.ts` as `treasury`. Then:
-
-```bash
-npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter
-npx hardhat lz:oapp:evm:treasury:set-ccip-route
-npx hardhat lz:oapp:evm:treasury:set-strategy --token <USDC on Sepolia> --strategy <address>
-```
-
-### 11. Wrap and mirror a position
-
-```bash
-npx hardhat lz:oapp:solana:wrap-position --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:send-position-snapshot-via-chainlink-and-lz --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:evm:match --position <POSITION>
-```
-
-The wrapper seed is `LendMirrorWrapperV1`; wrappers created by the previous version are ignored. A second send of the same snapshot fails with `SnapshotAlreadySent` until the next refresh. `sync-all-positions` does refresh + send for every wrapper.
-
-### 12. Custody, levels, operate
-
-```bash
-npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col <base units> --debt 0
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 2
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 0 --debt <base units>
-```
-
-Collateral must already sit in the wrapper authority's token account (the task prints it). The task tops the authority PDA up to 0.05 SOL because the Jupiter SDK simulates with that PDA as fee payer.
-
-### 13. Bridge tokens
-
-```bash
-npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp
-npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint usdc --amount 1000000
-npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>
-npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
-```
-
-The route names the treasury as `destination_caller`, so Circle does not auto-deliver; `claim-cctp` fetches the attestation from Circle's sandbox API and calls `receiveMessage` through the treasury.
-
-## First-time deploy (empty program / no Store)
-
-Only when this program id has never had a Store:
-
-```bash
-npx lm build -- --features no-log-ix-name
-npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json target/deploy/lendmirror.so --use-rpc --max-sign-attempts 20 --with-compute-unit-price 50000
-npx hardhat lz:oapp:solana:create
-npx hardhat lz:deploy --ci
-npx hardhat lz:oapp:solana:init-config --oapp-config layerzero.config.ts
-npx hardhat lz:oapp:solana:set-peer
-npx hardhat lz:oapp:evm:set-peer
-```
-
-Then continue from step 7 above for Chainlink (Devnet only), then steps 9 to 13.
-
-| Command | One line |
-|---------|----------|
-| `lz:oapp:solana:create` | Creates the Store PDA once; signer must be the upgrade authority. |
-| `lz:deploy --ci` | Deploys the UUPS proxy + implementation on the profile EVM network. |
-| `lz:oapp:solana:init-config` | Creates LayerZero send-library accounts for the destination eid. |
-| `lz:oapp:solana:set-peer` | Saves the EVM proxy as Solana’s peer. |
-| `lz:oapp:evm:set-peer` | Saves the Solana Store as the EVM peer. |
-
-## Mainnet
-
-Set `DEPLOYMENT_TYPE=mainnet` and fill the `*_MAINNET` keys. Same commands. The Arbitrum `LendMirror` implementation is still the old 200-byte-snapshot build: redeploy it (constructor arg `0x1a44076050125825900e736c501f859c50fE728c`) and `upgradeToAndCall` before any mainnet send. Chainlink, CCTP, and the treasury are not in the mainnet profile yet.
+Wrappers created before the seed module (under `LendMirrorWrapperV1`) are left behind. The same vault and nft now get a fresh wrapper under `LendMirrorPositionWrapperV1`.
 
 ## Do not
 
-- Run bare `solana`, `forge`, or `cast` for writes — they ignore `DEPLOYMENT_TYPE`.
-- Run `create` or `lz:deploy` again on an already-live program/proxy unless you intend a new Store and new proxy.
-- Pass `--eid` / `--network` that disagree with `DEPLOYMENT_TYPE` — the task will stop.
+- Run bare `solana`, `forge` or `cast send`; they ignore `DEPLOYMENT_TYPE`. Bare `cast storage` and `cast gas-price` are fine because they only read.
+- Skip `npm run gen:api` after a build.
+- Edit a seed in `programs/lendmirror/src/seeds.rs` once an account exists under it on mainnet; add a `V2` seed.

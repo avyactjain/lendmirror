@@ -105,8 +105,6 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
     .addParam('amount', 'Base units to bridge', undefined, types.string)
     .addOptionalParam('chainId', 'EVM chain id. Default: Sepolia 11155111 on devnet', undefined, types.int)
     .addOptionalParam('fast', 'CCTP fast transfer: pass the max fee in base units. Default: standard, no fee', '', types.string)
-    .addOptionalParam('poolProgram', 'CCIP only: token pool program from the token admin registry', '', types.string)
-    .addOptionalParam('lookupTable', 'CCIP only: lookup table from the token admin registry', '', types.string)
     .addOptionalParam('fundLamports', 'CCIP only: SOL moved onto the bridge signer for the fee', 50_000_000, types.int)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(async (args) => {
@@ -129,6 +127,7 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
         const common = { vaultId: args.vaultId, nftId: args.nftId, mint, dstChainId: chainId, amount: BigInt(args.amount) }
 
         let txBuilder = transactionBuilder()
+        const extraLookupTables: ReturnType<typeof publicKey>[] = []
         if (route.provider === PROVIDER_CCTP) {
             const eventData = generateSigner(umi)
             txBuilder = txBuilder.add(
@@ -146,23 +145,17 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
                 )
             )
         } else if (route.provider === PROVIDER_CCIP) {
-            if (!args.poolProgram || !args.lookupTable) throw new Error('CCIP needs --pool-program and --lookup-table (from the token admin registry).')
             const ccipRouteInfo = await connection.getAccountInfo(new PublicKey(ccipRouteAddress(programId)))
             if (!ccipRouteInfo) throw new Error('No CCIP route. Run lz:oapp:solana:set-ccip-route first.')
-            txBuilder = txBuilder.add(
-                bridgeTokensCcip(
-                    instance,
-                    umiWalletSigner,
-                    {
-                        ...common,
-                        route: decodeCcipRoute(ccipRouteInfo.data),
-                        poolProgram: args.poolProgram,
-                        lookupTable: args.lookupTable,
-                        feeLamports: BigInt(args.fundLamports),
-                    },
-                    ondemand
-                )
+            const built = await bridgeTokensCcip(
+                instance,
+                connection,
+                umiWalletSigner,
+                { ...common, route: decodeCcipRoute(ccipRouteInfo.data), feeLamports: BigInt(args.fundLamports) },
+                ondemand
             )
+            txBuilder = txBuilder.add(built.instruction)
+            extraLookupTables.push(built.lookupTable)
         } else if (route.provider === PROVIDER_LZ_OFT) {
             const receiver = '0x' + Buffer.from(route.receiver).subarray(12).toString('hex')
             const built = await bridgeTokensOft(
@@ -183,7 +176,7 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
         } else {
             throw new Error(`Route provider ${route.provider} has no instruction (Wormhole NTT is reserved).`)
         }
-        txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, args.computeUnitPriceScaleFactor, TransactionType.SendMessage)
+        txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, args.computeUnitPriceScaleFactor, TransactionType.SendMessage, extraLookupTables)
         const tx = await txBuilder.sendAndConfirm(umi)
         const sig = bs58.encode(tx.signature)
         console.log(`bridgeTokens: ${getExplorerTxLink(sig, eid === 40168)}`)

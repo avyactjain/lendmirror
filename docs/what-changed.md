@@ -1,7 +1,7 @@
 # What changed in the LendMirror program
 
 Plain-language summary of the work on branch `feat/position-wrapper-strategies` (10 commits).
-For file-level detail see `programs/lendmirror/ARCHITECTURE.md`. For every command see `readme.md`.
+For file-level detail see `programs/lendmirror/ARCHITECTURE.md`. For the mainnet addresses and the test run see `readme.md`; for every command, `deployment-instructions.md`.
 
 ---
 
@@ -64,7 +64,7 @@ flags. Address seed: `LendMirrorWrapper`.
 **After:**
 It also stores: `level` (0 to 4), `custody` (is the NFT inside), `position_mint`, the time of
 the last snapshot that was sent, a send counter, and the bump of its **authority PDA**. Address
-seed: `LendMirrorWrapperV1`. Solana accounts cannot grow, so the old Devnet wrappers are left
+seed: `LendMirrorWrapperV1` (renamed to `LendMirrorPositionWrapperV1` with the seed module, so every position gets a fresh wrapper). Solana accounts cannot grow, so the old Devnet wrappers are left
 behind and every position is wrapped again.
 
 The **authority PDA** is a second address per wrapper that holds no data. It owns every token
@@ -85,9 +85,9 @@ Four new instructions.
 | Instruction | Who | What |
 |---|---|---|
 | `set_wrapper_level` | admin | 0 = mirror only. 1 = deposit and pay back. 2 = also withdraw and borrow. 3 and 4 = stored but everything is rejected until defined. |
-| `deposit_position_nft` | wrapper owner | moves the Jupiter position NFT from the owner's wallet into the authority PDA's token account |
+| `deposit_position_nft` | the NFT holder | moves the Jupiter position NFT from the holder's wallet into the authority PDA's token account; the holder becomes the wrapper owner |
 | `release_position_nft` | admin | moves it back to the wrapper owner (escape hatch; never to anyone else) |
-| `operate_position` | owner or OnDemand caller | calls Jupiter `operate` with the authority PDA as signer **and** recipient, after checking the level |
+| `operate_position` | owner or OnDemand caller | calls Jupiter `operate_dex` (smart vaults only) with the authority PDA as signer and recipient, after checking the level and that every account Jupiter can pay into belongs to the PDA |
 
 Why this is safe: Jupiter sends withdrawn collateral and borrowed tokens to the `recipient`.
 The program always passes its own PDA there, so those tokens can only land in a program-owned
@@ -96,20 +96,21 @@ account. Level 1 can only do things that lower the risk of the loan (deposit, pa
 Commands:
 
 ```bash
-npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 1 --nft-id 29
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
-# put collateral in the authority PDA's token account first (the task prints the address)
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 300000000 --debt 0   # deposit 0.3 WSOL
-npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 2
-npx hardhat lz:oapp:solana:operate-position --vault-id 1 --nft-id 29 --col 0 --debt 5000000     # borrow 5 USDC
-npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 1 --nft-id 29                            # read the new numbers
+npx hardhat lz:oapp:solana:deposit-position-nft --vault-id 95 --nft-id 34
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 1
+# put tokens in the authority PDA's token account first (fund-authority-token)
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action supply --col-token1 20000000   # supply 20 USDC as smart collateral
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 95 --nft-id 34 --level 2
+npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action borrow --debt-amount 5000000  # borrow 5 USDC
+npx hardhat lz:oapp:solana:refresh-wrapper --vault-id 95 --nft-id 34                                          # read the new numbers
 ```
 
-`--col min` or `--debt min` means "all" (withdraw everything / pay back everything).
+Only smart vaults (Jupiter T2, T3, T4) can be operated; the program calls Jupiter's `operate_dex`. There is no "withdraw everything" or "pay back everything" through the program yet (that needs Jupiter's `operate_perfect_dex`); the full exit is `release-position-nft` and closing the position on jup.ag.
 
-Tested on a local copy of Jupiter mainnet (`npm run test:fork`): the NFT goes into custody, a
-level 1 deposit goes through, a level 1 borrow is denied. The level 2 borrow needs a live price
-oracle, which the local copy cannot provide, so that one is checked on Devnet.
+Tested on a local copy of Jupiter mainnet (`npm run test:fork`, started at mainnet's slot so
+Jupiter's price oracle accepts the clock): the NFT goes into custody, a level 1 deposit goes
+through, a level 1 borrow is denied, a level 2 borrow succeeds and the USDC lands in the
+wrapper authority's account.
 
 ---
 
@@ -147,9 +148,25 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # a
 npx hardhat lz:oapp:evm:treasury:forward --token <USDC on Sepolia>
 ```
 
+Proven on Devnet → Sepolia on 2026-09-28: 1 USDC over Circle and 0.5 CCIP-BnM (Chainlink's test
+token) over Chainlink, both landing in the treasury and forwarded to the strategy address. The
+LayerZero path is built but has no test token on Devnet.
+
 For a LayerZero token the route also needs the token's OFT program id and escrow account:
 `set-bridge-route --mint <mint> --provider oft --oft-program <id> --escrow <account> --dst-eid 30110`.
 `docs/bridge-providers.md` has every token's mint, bridge, and destinations.
+
+---
+
+## 5b. One file for every seed
+
+**Before:** the seed strings sat at the top of `lib.rs`, with `V0`, `V1` or no version at random.
+
+**After:** `programs/lendmirror/src/seeds.rs` holds all nine, each ending in `V1`, and
+`lib/client/seeds.ts` holds the same nine for TypeScript. A unit test checks the prefix, the
+suffix, the 32-byte cap, and that no two are equal. Because the Store seed changed, mainnet
+starts from empty state after the upgrade: `init_store`, peers, routes and wrappers are all
+created again, and nothing the old program wrote is read by mistake.
 
 ---
 
@@ -165,7 +182,7 @@ Admin set lists. Snapshotters read Jupiter. OnDemand callers armed sends. Sender
 | Admin | set peers, lists, Chainlink route, bridge routes, wrapper levels; release an NFT to its owner |
 | Snapshotter | wrap (becomes owner), refresh |
 | Sender (operator) | send any wrapper's snapshot, bridge from any level 1 or 2 wrapper |
-| Wrapper owner | attach OnDemand, deposit the NFT, refresh, operate, bridge |
+| Wrapper owner | attach OnDemand, refresh, operate, bridge. The NFT holder becomes owner by depositing the NFT |
 | OnDemand caller | refresh, send, operate, bridge for that wrapper |
 | Ethereum owner | peers and upgrades on `LendMirror`; strategies, allowed senders, upgrades on `LendMirrorTreasury` |
 
@@ -189,6 +206,9 @@ npm run test:fork                                                      # Node 18
 
 ## 8. Not done yet
 
-- Nothing has been run on Devnet or mainnet. The readme's "Upgrade Devnet to this version" block is the next step.
-- The Arbitrum (mainnet) contract is still the old format and would reject today's snapshot; it needs a redeploy and `upgradeToAndCall`.
+Done since: on 29 September 2026 (UTC) the program and the Arbitrum contracts went live on mainnet, and every main flow ran there with real funds. See the readme's Test Run.
+
+- Operating positions works on smart vaults only (Jupiter's `operate_dex`); plain vaults such as vault 1 are not supported.
+- "Withdraw everything" and "pay back everything" through the program need Jupiter's `operate_perfect_dex`.
+- PST, USDT (USDT0), USDai and sUSDai have no mainnet route yet. PST has no Chainlink lane from Solana to Arbitrum, and the LayerZero tokens need their issuers' Solana program ids and escrows.
 - Wormhole NTT is a reserved bridge id with no instruction; no in-scope token needs it.

@@ -12,7 +12,7 @@ import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners
 
 // Accounts.
 export type DepositPositionNftInstructionAccounts = {
-    /** Wrapper owner. Holds the NFT now and pays for the authority's token account. */
+    /** Holds the NFT now and pays for the authority's token account. Becomes `wrapper.owner`. */
     authority?: Signer
     store: PublicKey | Pda
     wrapper: PublicKey | Pda
@@ -25,7 +25,11 @@ export type DepositPositionNftInstructionAccounts = {
      */
 
     positionMint: PublicKey | Pda
-    /** Owner's token account holding the single NFT. */
+    /**
+     * The signer's token account holding the single NFT. `token::authority = authority` is the
+     * ownership proof: only the wallet that owns this account can sign the transfer out of it.
+     */
+
     sourceNftAta: PublicKey | Pda
     /** The authority's associated token account for the NFT. Created here if missing. */
     wrapperNftAta: PublicKey | Pda

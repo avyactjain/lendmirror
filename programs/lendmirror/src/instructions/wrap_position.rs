@@ -1,9 +1,11 @@
 use crate::errors::LendMirrorError;
+use crate::seeds::{ONDEMAND_SEED, STORE_SEED, WRAPPER_AUTH_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 
-/// Create a wrapper PDA for one Jupiter position. Signer must be a Store
-/// snapshotter; they become `wrapper.owner`.
+/// Create a wrapper PDA for one Jupiter position. Signer must be a Store snapshotter; they
+/// become `wrapper.owner` until the NFT holder deposits the NFT (`deposit_position_nft`), which
+/// moves ownership to the depositor.
 #[derive(Accounts)]
 #[instruction(params: WrapPositionParams)]
 pub struct WrapPosition<'info> {

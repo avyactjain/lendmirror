@@ -23,6 +23,12 @@ const deploy: DeployFunction = async (hre) => {
         proxy: {
             owner: deployer,
             proxyContract: 'UUPS',
+            // OpenZeppelin v5 UUPS has no `upgradeTo`, only `upgradeToAndCall(impl, data)`.
+            // hardhat-deploy defaults to `upgradeTo`, so an upgrade of an existing proxy fails.
+            upgradeFunction: {
+                methodName: 'upgradeToAndCall',
+                upgradeArgs: ['{implementation}', '0x'],
+            },
             execute: {
                 init: {
                     methodName: 'initialize',

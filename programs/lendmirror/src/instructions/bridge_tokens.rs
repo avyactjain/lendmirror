@@ -11,7 +11,7 @@
 //!     only the Store admin writes.
 //!   - Tokens move wrapper-authority ATA → bridge-signer ATA → provider. Both ATAs belong to
 //!     PDAs of this program. No wallet is ever a token owner in this path.
-//!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayer`).
+//!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayerV1`).
 //!     It must hold no data so the System program can debit it for fees.
 //!
 //! Who may call: the wrapper owner, an OnDemand caller of that wrapper, or a Store sender
@@ -23,11 +23,12 @@
 use crate::bridges::{cctp_deposit_for_burn_data, oft_send_data};
 use crate::errors::LendMirrorError;
 use crate::instructions::send_ccip::{ccip_send_instruction_data, CcipTokenAmount};
+use crate::seeds::{BRIDGE_ROUTE_SEED, CCIP_PAYER_SEED, CCIP_ROUTE_SEED, ONDEMAND_SEED, STORE_SEED, WRAPPER_AUTH_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed, pubkey};
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked};
+use anchor_spl::token_interface::{approve_checked, transfer_checked, ApproveChecked, Mint, TokenAccount, TokenInterface, TransferChecked};
 
 const NATIVE_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 
@@ -360,7 +361,7 @@ impl<'info> BridgeTokensCctp<'info> {
 pub struct BridgeTokensCcip<'info> {
     pub common: BridgeCommon<'info>,
 
-    #[account(seeds = [CCIP_SEED], bump = ccip_route.bump)]
+    #[account(seeds = [CCIP_ROUTE_SEED], bump = ccip_route.bump)]
     pub ccip_route: Box<Account<'info, CcipRoute>>,
     /// CHECK: router config PDA. Owner must be the router (checked in apply).
     pub config: UncheckedAccount<'info>,
@@ -380,7 +381,9 @@ pub struct BridgeTokensCcip<'info> {
     /// CHECK: fee receiver ATA.
     #[account(mut)]
     pub fee_token_receiver: UncheckedAccount<'info>,
-    /// CHECK: router fee billing signer PDA.
+    /// CHECK: router PDA ["fee_billing_signer"] (verified in apply). The router pulls the bridged
+    /// tokens as this delegate (see `transfer_token` in its onramp), so the bridge signer approves
+    /// it for `amount` before the CPI.
     pub fee_billing_signer: UncheckedAccount<'info>,
     /// CHECK: fee quoter program (checked in apply).
     pub fee_quoter: UncheckedAccount<'info>,
@@ -398,13 +401,15 @@ pub struct BridgeTokensCcip<'info> {
     pub rmn_remote_curses: UncheckedAccount<'info>,
     /// CHECK: RMN config PDA.
     pub rmn_remote_config: UncheckedAccount<'info>,
-    /// CHECK: router token-pool signer PDA.
-    #[account(mut)]
-    pub token_pools_signer: UncheckedAccount<'info>,
     /// CHECK: CCIP router program. Must be the route's provider program.
     #[account(address = common.bridge_route.provider_program)]
     pub ccip_router: UncheckedAccount<'info>,
 }
+
+// The router's on-chain IDL (1.6.2) names 18 accounts for `ccip_send`, ending at
+// `rmn_remote_config`; everything after that is the per-token slice. The router's
+// "external_token_pools_signer" PDA only signs the pool's lock-or-burn call; the pull from the
+// user's token account is signed by `fee_billing_signer`, so that is the delegate we approve.
 
 impl<'info> BridgeTokensCcip<'info> {
     pub fn apply(
@@ -424,8 +429,27 @@ impl<'info> BridgeTokensCcip<'info> {
         require!(!ctx.remaining_accounts.is_empty(), LendMirrorError::InvalidBridgeAccount);
         // The first per-token account must be the bridge signer's ATA the router pulls from.
         require_keys_eq!(ctx.remaining_accounts[0].key(), c.bridge_ata.key(), LendMirrorError::InvalidBridgeAccount);
+        let (expected_billing_signer, _) =
+            Pubkey::find_program_address(&[b"fee_billing_signer"], &a.ccip_route.router);
+        require_keys_eq!(a.fee_billing_signer.key(), expected_billing_signer, LendMirrorError::InvalidCcipAccount);
 
         c.pull_to_bridge_signer(params.amount)?;
+        // Let the router's fee billing signer take exactly `amount` from the bridge signer's account.
+        let signer_seeds: &[&[u8]] = &[CCIP_PAYER_SEED, &[ctx.bumps.common.bridge_signer]];
+        approve_checked(
+            CpiContext::new_with_signer(
+                c.token_program.to_account_info(),
+                ApproveChecked {
+                    to: c.bridge_ata.to_account_info(),
+                    delegate: a.fee_billing_signer.to_account_info(),
+                    authority: c.bridge_signer.to_account_info(),
+                    mint: c.mint.to_account_info(),
+                },
+                &[signer_seeds],
+            ),
+            params.amount,
+            c.mint.decimals,
+        )?;
         if params.fee_lamports > 0 {
             anchor_lang::solana_program::program::invoke(
                 &anchor_lang::solana_program::system_instruction::transfer(
@@ -470,7 +494,6 @@ impl<'info> BridgeTokensCcip<'info> {
             AccountMeta::new_readonly(a.rmn_remote.key(), false),
             AccountMeta::new_readonly(a.rmn_remote_curses.key(), false),
             AccountMeta::new_readonly(a.rmn_remote_config.key(), false),
-            AccountMeta::new(a.token_pools_signer.key(), false),
         ];
         metas.extend(ctx.remaining_accounts.iter().map(|info| AccountMeta {
             pubkey: info.key(),
@@ -496,11 +519,9 @@ impl<'info> BridgeTokensCcip<'info> {
             a.rmn_remote.to_account_info(),
             a.rmn_remote_curses.to_account_info(),
             a.rmn_remote_config.to_account_info(),
-            a.token_pools_signer.to_account_info(),
             a.ccip_router.to_account_info(),
         ];
         infos.extend_from_slice(ctx.remaining_accounts);
-        let signer_seeds: &[&[u8]] = &[CCIP_PAYER_SEED, &[ctx.bumps.common.bridge_signer]];
         invoke_signed(
             &Instruction { program_id: route.provider_program, accounts: metas, data },
             &infos,

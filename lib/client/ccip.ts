@@ -1,6 +1,8 @@
 import { Instruction, PublicKey as UmiPublicKey, Signer, publicKey, transactionBuilder } from '@metaplex-foundation/umi'
 import { PublicKey } from '@solana/web3.js'
 
+import { SEEDS } from './seeds'
+
 /** Solana Devnet CCIP programs. https://docs.chain.link/ccip/directory/testnet/chain/solana-devnet */
 export const CCIP_ROUTER_DEVNET = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
 export const CCIP_FEE_QUOTER_DEVNET = 'FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi'
@@ -33,11 +35,11 @@ export type CcipRouteAccount = {
 }
 
 export function ccipRouteAddress(programId: string): string {
-    return findPda(programId, [Buffer.from('LendMirrorCcip')])
+    return findPda(programId, [Buffer.from(SEEDS.CCIP_ROUTE)])
 }
 
 export function ccipPayerAddress(programId: string): string {
-    return findPda(programId, [Buffer.from('LendMirrorCcipPayer')])
+    return findPda(programId, [Buffer.from(SEEDS.CCIP_PAYER)])
 }
 
 export function decodeCcipRoute(data: Uint8Array): CcipRouteAccount {

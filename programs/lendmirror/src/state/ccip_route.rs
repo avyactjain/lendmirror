@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 /// Where `send_position_snapshot_via_chainlink_and_lz` delivers the snapshot body over Chainlink.
 /// Separate from the Store so the Store layout stays as it is.
 ///
-/// Seed: `["LendMirrorCcip"]`.
+/// Seed: `["LendMirrorCcipRouteV1"]`.
 #[account]
 #[derive(InitSpace)]
 pub struct CcipRoute {

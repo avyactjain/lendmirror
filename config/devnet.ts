@@ -9,9 +9,11 @@ const profile: DeploymentProfile = {
     evmEid: EndpointId.SEPOLIA_V2_TESTNET, // 40161
     evmNetwork: 'sepolia',
     programId: 'GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1',
-    store: 'BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM',
+    // PDA ["LendMirrorStoreV1"]. Not initialized yet: run init-store after deploying the V1-seed build.
+    // The pre-V1 Store was BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM.
+    store: '4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz',
     evmProxy: '0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514',
-    evmImplementation: '0x0011b8DE09Cee9d0eba8afaa26643623e511D93F',
+    evmImplementation: '0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6',
     lzEndpoint: '0x6EDCE65403992e310A62460808c4b910D972f10f',
     ccip: {
         router: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
@@ -22,7 +24,8 @@ const profile: DeploymentProfile = {
         sourceChainSelector: 16423721717087811551n,
         evmRouter: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
         gasLimit: 600_000,
-        payer: '53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m',
+        // PDA ["LendMirrorCcipPayerV1"]. Pre-V1: 53ZqmxXwJhXxgLBFXpM1mZUDZ4AZwXaVhpnktxusQn6m.
+        payer: 'ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR',
     },
     cctp: {
         tokenMessengerMinter: 'CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe',

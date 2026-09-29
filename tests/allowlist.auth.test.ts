@@ -11,9 +11,9 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import idl from '../target/idl/lendmirror.json'
 
-const STORE_SEED = Buffer.from('LendMirrorStoreV0')
-const PEER_SEED = Buffer.from('LendMirrorPeer')
-const WRAPPER_SEED = Buffer.from('LendMirrorWrapperV1')
+const STORE_SEED = Buffer.from('LendMirrorStoreV1')
+const PEER_SEED = Buffer.from('LendMirrorPeerV1')
+const WRAPPER_SEED = Buffer.from('LendMirrorPositionWrapperV1')
 const PROGRAM_ID = new PublicKey('GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1')
 const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6')
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')
@@ -48,7 +48,7 @@ describe('allowlist auth', function () {
     const stranger = Keypair.generate()
 
     const [storePda] = PublicKey.findProgramAddressSync([STORE_SEED], PROGRAM_ID)
-    const [ccipRoutePda] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcip')], PROGRAM_ID)
+    const [ccipRoutePda] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipRouteV1')], PROGRAM_ID)
     const programData = programDataPda(PROGRAM_ID)
 
     function initStoreAccounts(payer: PublicKey) {
@@ -407,7 +407,7 @@ describe('allowlist auth', function () {
         // custody = false.
         const [wrapperPda] = wrapperAddress(1, 8002)
         const [wrapperAuthority] = PublicKey.findProgramAddressSync(
-            [Buffer.from('LendMirrorWrapperAuth'), wrapperPda.toBuffer()],
+            [Buffer.from('LendMirrorWrapperAuthV1'), wrapperPda.toBuffer()],
             PROGRAM_ID
         )
         const [positionMint] = jupiterPda('position_mint', 1, 8002)
@@ -546,10 +546,10 @@ describe('allowlist auth', function () {
         const mint = await createMint(provider.connection, admin, admin.publicKey, null, 6)
         const [wrapperPda] = wrapperAddress(1, 8002)
         const [wrapperAuthority] = PublicKey.findProgramAddressSync(
-            [Buffer.from('LendMirrorWrapperAuth'), wrapperPda.toBuffer()],
+            [Buffer.from('LendMirrorWrapperAuthV1'), wrapperPda.toBuffer()],
             PROGRAM_ID
         )
-        const [bridgeSigner] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayer')], PROGRAM_ID)
+        const [bridgeSigner] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayerV1')], PROGRAM_ID)
         const wrapperAta = await getOrCreateAssociatedTokenAccount(provider.connection, admin, mint, wrapperAuthority, true)
         await mintTo(provider.connection, admin, mint, wrapperAta.address, admin, 10)
         const bridgeAta = getAssociatedTokenAddressSync(mint, bridgeSigner, true)
@@ -645,11 +645,11 @@ describe('allowlist auth', function () {
         expect(balance.value.amount).to.equal('10')
     })
 
-    /** BridgeRoute PDA: ["LendMirrorBridgeRoute", mint, dst_chain_id le]. */
+    /** BridgeRoute PDA: ["LendMirrorBridgeRouteV1", mint, dst_chain_id le]. */
     function bridgeRouteAddress(mint: PublicKey, dstChainId: bigint): [PublicKey, number] {
         const chain = Buffer.alloc(8)
         chain.writeBigUInt64LE(dstChainId)
-        return PublicKey.findProgramAddressSync([Buffer.from('LendMirrorBridgeRoute'), mint.toBuffer(), chain], PROGRAM_ID)
+        return PublicKey.findProgramAddressSync([Buffer.from('LendMirrorBridgeRouteV1'), mint.toBuffer(), chain], PROGRAM_ID)
     }
 
     /** Wrapper PDA under the V1 seed. */
@@ -693,7 +693,7 @@ describe('allowlist auth', function () {
         eidBuf.writeUInt32BE(DST_EID)
         const [peer] = PublicKey.findProgramAddressSync([PEER_SEED, storePda.toBuffer(), eidBuf], PROGRAM_ID)
         const [endpoint] = PublicKey.findProgramAddressSync([Buffer.from('Endpoint')], ENDPOINT_PROGRAM)
-        const [ccipPayer] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayer')], PROGRAM_ID)
+        const [ccipPayer] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayerV1')], PROGRAM_ID)
         const placeholder = Keypair.generate().publicKey
         return {
             authority,

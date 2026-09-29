@@ -7,13 +7,14 @@
  */
 import { AccountMeta, PublicKey as UmiPublicKey, RpcInterface, Signer, WrappedInstruction, publicKey } from '@metaplex-foundation/umi'
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { PublicKey } from '@solana/web3.js'
+import { Connection, PublicKey } from '@solana/web3.js'
 
 import { OftPDA, oft } from '@layerzerolabs/oft-v2-solana-sdk'
 import { createNoopSigner } from '@metaplex-foundation/umi'
 
 import { ccipPayerAddress, ccipRouteAddress, ccipSendAccounts, CcipRouteAccount } from './ccip'
 import { LendMirror, instructions } from './lendmirror'
+import { SEEDS } from './seeds'
 
 export const PROVIDER_CCTP = 1
 export const PROVIDER_CCIP = 2
@@ -40,7 +41,7 @@ export function bridgeRouteAddress(programId: string, mint: string, dstChainId: 
     const chain = Buffer.alloc(8)
     chain.writeBigUInt64LE(dstChainId)
     return PublicKey.findProgramAddressSync(
-        [Buffer.from('LendMirrorBridgeRoute'), new PublicKey(mint).toBuffer(), chain],
+        [Buffer.from(SEEDS.BRIDGE_ROUTE), new PublicKey(mint).toBuffer(), chain],
         new PublicKey(programId)
     )[0]
 }
@@ -169,67 +170,95 @@ export async function bridgeTokensCctp(
 }
 
 /**
- * Chainlink's per-token accounts for `ccip_send` with `token_amounts`, in the order the router
- * documents (docs.chain.link/ccip/api-reference/svm/v1.6.0/router). `poolProgram` and the
- * lookup table come from the token admin registry on chain; pass what you read there.
+ * Chainlink's per-token accounts for `ccip_send` with `token_amounts`.
+ *
+ * Chainlink publishes each token's pool accounts in an address lookup table whose address sits
+ * in the token admin registry PDA (`["token_admin_registry", mint]` under the router). The
+ * table holds, in order: the table itself, the registry, the pool program, the pool config, the
+ * pool token account, the pool signer, the token program, the mint, the fee-quoter token config,
+ * and any extra accounts the pool needs. The router expects that same order, preceded by the
+ * sender's token account and the two per-destination fee-quoter PDAs
+ * (docs.chain.link/ccip/api-reference/svm/v1.6.0/router).
  */
-export function ccipTokenRemainingAccounts(args: {
+export async function ccipTokenRemainingAccounts(args: {
+    connection: Connection
     route: CcipRouteAccount
     mint: string
     bridgeSigner: string
-    poolProgram: string
-    lookupTable: string
-    tokenProgram?: string
-}): AccountMeta[] {
-    const { route, mint } = args
-    const tokenProgram = new PublicKey(args.tokenProgram ?? TOKEN_PROGRAM_ID)
-    const mintKey = new PublicKey(mint)
+}): Promise<{ accounts: AccountMeta[]; tokenProgram: PublicKey; lookupTable: PublicKey }> {
+    const { route } = args
+    const mintKey = new PublicKey(args.mint)
+    const mintInfo = await args.connection.getAccountInfo(mintKey)
+    if (!mintInfo) throw new Error(`Mint ${args.mint} not found`)
+    const tokenProgram = mintInfo.owner // Token or Token-2022, whichever issued the mint
     const router = new PublicKey(route.router)
     const feeQuoter = new PublicKey(route.feeQuoter)
-    const pool = new PublicKey(args.poolProgram)
     const selector = Buffer.alloc(8)
     selector.writeBigUInt64LE(route.destChainSelector)
     const pda = (program: PublicKey, seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, program)[0]
-    const poolSigner = pda(pool, [Buffer.from('ccip_tokenpool_signer'), mintKey.toBuffer()])
+
+    const registry = pda(router, [Buffer.from('token_admin_registry'), mintKey.toBuffer()])
+    const registryInfo = await args.connection.getAccountInfo(registry)
+    if (!registryInfo) throw new Error(`Token ${args.mint} is not registered with CCIP on this cluster (no token admin registry)`)
+    // TokenAdminRegistry: discriminator 8, version 1, administrator 32, pending_administrator 32,
+    // lookup_table 32, writable_indexes [u128; 2] (a bitmap over the table's entries, most
+    // significant bit = entry 0), mint 32, supports_auto_derivation 1.
+    const lookupTable = new PublicKey(registryInfo.data.subarray(73, 105))
+    const writableBits = registryInfo.data.subarray(105, 137)
+    const isWritable = (index: number): boolean => {
+        const word = index < 128 ? 0 : 1
+        const bit = index < 128 ? index : index - 128
+        // Each word is a little-endian u128 and entry 0 is its most significant bit, so entry
+        // `bit` lives at bit position 127 - bit counted from the least significant end.
+        const pos = 127 - bit
+        const byte = writableBits[word * 16 + Math.floor(pos / 8)]
+        return ((byte >> (pos % 8)) & 1) === 1
+    }
+    const table = await args.connection.getAddressLookupTable(lookupTable)
+    if (!table.value) throw new Error(`Lookup table ${lookupTable.toBase58()} not found`)
+    const entries = table.value.state.addresses
+    if (entries.length < 9) throw new Error(`Lookup table ${lookupTable.toBase58()} has ${entries.length} entries; expected at least 9`)
+    const poolProgram = entries[2]
+
     const userTokenAccount = getAssociatedTokenAddressSync(mintKey, new PublicKey(args.bridgeSigner), true, tokenProgram)
-    const poolTokenAccount = getAssociatedTokenAddressSync(mintKey, poolSigner, true, tokenProgram)
     const meta = (key: PublicKey, isWritable: boolean): AccountMeta => ({ pubkey: publicKey(key.toBase58()), isSigner: false, isWritable })
-    return [
+    const accounts = [
         meta(userTokenAccount, true),
+        // fee quoter's per-destination billing config for this token
         meta(pda(feeQuoter, [Buffer.from('per_chain_per_token_config'), selector, mintKey.toBuffer()]), false),
-        meta(pda(pool, [Buffer.from('ccip_tokenpool_chainconfig'), selector, mintKey.toBuffer()]), false), // under the POOL program
-        meta(new PublicKey(args.lookupTable), false),
-        meta(pda(router, [Buffer.from('token_admin_registry'), mintKey.toBuffer()]), false),
-        meta(pool, false),
-        meta(pda(pool, [Buffer.from('ccip_tokenpool_config'), mintKey.toBuffer()]), false),
-        meta(poolTokenAccount, true),
-        meta(poolSigner, false),
-        meta(tokenProgram, false),
-        meta(mintKey, false),
-        meta(pda(feeQuoter, [Buffer.from('fee_billing_token_config'), mintKey.toBuffer()]), false),
+        // the POOL program's per-destination config (verified on Devnet: the router derives it there)
+        // Writable: the pool updates its outbound rate-limit bucket in this account on every send.
+        meta(pda(poolProgram, [Buffer.from('ccip_tokenpool_chainconfig'), selector, mintKey.toBuffer()]), true),
+        // The router checks each table entry's writability against the registry bitmap.
+        ...entries.map((key, index) => meta(key, isWritable(index))),
     ]
+    return { accounts, tokenProgram, lookupTable }
 }
 
-/** `bridge_tokens_ccip`. The caller reads `poolProgram` / `lookupTable` from Chainlink's token admin registry. */
-export function bridgeTokensCcip(
+/**
+ * `bridge_tokens_ccip`. Pool accounts come from Chainlink's on-chain registry and lookup table.
+ * Reference that table in the transaction: with ~45 accounts the send does not fit otherwise.
+ */
+export async function bridgeTokensCcip(
     instance: LendMirror,
+    connection: Connection,
     authority: Signer,
-    args: BridgeTokensArgs & { route: CcipRouteAccount; poolProgram: string; lookupTable: string; feeLamports: bigint },
+    args: BridgeTokensArgs & { route: CcipRouteAccount; feeLamports: bigint },
     ondemand: UmiPublicKey | undefined
-): WrappedInstruction {
+): Promise<{ instruction: WrappedInstruction; lookupTable: UmiPublicKey }> {
     const programId = String(instance.programId)
     const [wrapper] = instance.pda.wrapper(args.vaultId, args.nftId)
     const [wrapperAuthority] = instance.pda.wrapperAuthority(wrapper)
     const bridgeSigner = ccipPayerAddress(programId)
     const routeAccounts = ccipSendAccounts(args.route, bridgeSigner)
-    const remaining = ccipTokenRemainingAccounts({
+    const { accounts: remaining, tokenProgram, lookupTable } = await ccipTokenRemainingAccounts({
+        connection,
         route: args.route,
         mint: args.mint,
         bridgeSigner,
-        poolProgram: args.poolProgram,
-        lookupTable: args.lookupTable,
     })
-    return instructions
+    const tokenProgramKey = publicKey(tokenProgram.toBase58())
+    const instruction = instructions
         .bridgeTokensCcip(
             { identity: authority, programs: instance.programRepo },
             {
@@ -241,9 +270,9 @@ export function bridgeTokensCcip(
                 bridgeSigner: publicKey(bridgeSigner),
                 bridgeRoute: publicKey(bridgeRouteAddress(programId, args.mint, args.dstChainId).toBase58()),
                 mint: publicKey(args.mint),
-                wrapperAta: LendMirror.ata(wrapperAuthority, publicKey(args.mint)),
-                bridgeAta: LendMirror.ata(publicKey(bridgeSigner), publicKey(args.mint)),
-                tokenProgram: publicKey(TOKEN_PROGRAM_ID),
+                wrapperAta: LendMirror.ata(wrapperAuthority, publicKey(args.mint), tokenProgramKey),
+                bridgeAta: LendMirror.ata(publicKey(bridgeSigner), publicKey(args.mint), tokenProgramKey),
+                tokenProgram: tokenProgramKey,
                 associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
                 ccipRoute: publicKey(ccipRouteAddress(programId)),
                 config: publicKey(routeAccounts.config),
@@ -262,7 +291,6 @@ export function bridgeTokensCcip(
                 rmnRemote: publicKey(args.route.rmnRemote),
                 rmnRemoteCurses: publicKey(routeAccounts.rmnRemoteCurses),
                 rmnRemoteConfig: publicKey(routeAccounts.rmnRemoteConfig),
-                tokenPoolsSigner: publicKey(routeAccounts.tokenPoolsSigner),
                 ccipRouter: publicKey(args.route.router),
                 params: {
                     amount: args.amount,
@@ -277,6 +305,7 @@ export function bridgeTokensCcip(
             }
         )
         .addRemainingAccounts(remaining).items[0]
+    return { instruction, lookupTable: publicKey(lookupTable.toBase58()) }
 }
 
 /**
