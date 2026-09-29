@@ -26,7 +26,8 @@
 //!   - `#[derive(InitSpace)]` computes `INIT_SPACE`, the byte size of the struct, so `init` can
 //!     allocate `8 + INIT_SPACE` bytes. Every field must have a fixed size for this to work.
 //!   - Solana accounts cannot grow for free, so changing this layout means a new seed. That is
-//!     why the seed is `LendMirrorWrapperV1`: old `LendMirrorWrapper` accounts still exist on
+//!     why the seed is `LendMirrorPositionWrapperV1`: wrappers under the older seeds
+//!     (`LendMirrorWrapper`, `LendMirrorPositionWrapperV1`) still exist on
 //!     Devnet with the old layout and are simply left behind.
 
 use crate::state::jupiter_position::PositionSnapshot;
@@ -43,7 +44,7 @@ pub const LEVEL_WITHDRAW_BORROW: u8 = 2;
 /// Highest level the admin may store. Levels 3 and 4 are reserved and reject every operation.
 pub const LEVEL_MAX: u8 = 4;
 
-/// One PDA per Jupiter position. Seeds: `["LendMirrorWrapperV1", vault_id le, nft_id le]`.
+/// One PDA per Jupiter position. Seeds: `["LendMirrorPositionWrapperV1", vault_id le, nft_id le]`.
 ///
 /// `owner` is the wallet that called `wrap_position`, replaced by whoever deposits the position
 /// NFT (`deposit_position_nft`). Never the program id.

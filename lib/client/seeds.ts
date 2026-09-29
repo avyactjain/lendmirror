@@ -15,7 +15,7 @@ export const SEEDS = {
     /** Empty PDA that signs Chainlink sends and every token bridge, and pays their fees. */
     CCIP_PAYER: 'LendMirrorCcipPayerV1',
     /** One PDA per Jupiter position: [WRAPPER, vault_id le, nft_id le]. */
-    WRAPPER: 'LendMirrorWrapperV1',
+    WRAPPER: 'LendMirrorPositionWrapperV1',
     /** Up to 8 wallets allowed to act on one wrapper: [ONDEMAND, wrapper]. */
     ONDEMAND: 'LendMirrorOnDemandV1',
     /** Empty PDA that owns a wrapper's token accounts and signs Jupiter operate: [WRAPPER_AUTH, wrapper]. */

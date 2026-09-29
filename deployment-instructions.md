@@ -123,9 +123,9 @@ npx hardhat lz:oapp:solana:operate-position --vault-id <V> --nft-id <N> --col 0 
 | Store | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz` |
 | Bridge signer | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR` |
 | Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` |
-| Test wrapper | vault 1 / nft 1, level 1 |
+| Wrapper vault 1 / nft 29 | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
 
-Wrappers created before the V1 seeds (for example vault 1 / nft 29) still refresh and send, but custody, operate and bridge fail on them: they store a signing bump from the old authority seed. Use a new position on Devnet. Mainnet has none of these.
+Wrappers created before the seed module (under `LendMirrorWrapperV1`) are left behind. The same vault and nft now get a fresh wrapper under `LendMirrorPositionWrapperV1`.
 
 ## Do not
 

@@ -13,7 +13,7 @@ import idl from '../target/idl/lendmirror.json'
 
 const STORE_SEED = Buffer.from('LendMirrorStoreV1')
 const PEER_SEED = Buffer.from('LendMirrorPeerV1')
-const WRAPPER_SEED = Buffer.from('LendMirrorWrapperV1')
+const WRAPPER_SEED = Buffer.from('LendMirrorPositionWrapperV1')
 const PROGRAM_ID = new PublicKey('GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1')
 const ENDPOINT_PROGRAM = new PublicKey('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6')
 const JUPITER_VAULTS_DEVNET = new PublicKey('Ho32sUQ4NzuAQgkPkHuNDG3G18rgHmYtXFA8EBmqQrAu')

@@ -64,7 +64,7 @@ flags. Address seed: `LendMirrorWrapper`.
 **After:**
 It also stores: `level` (0 to 4), `custody` (is the NFT inside), `position_mint`, the time of
 the last snapshot that was sent, a send counter, and the bump of its **authority PDA**. Address
-seed: `LendMirrorWrapperV1`. Solana accounts cannot grow, so the old Devnet wrappers are left
+seed: `LendMirrorWrapperV1` (renamed to `LendMirrorPositionWrapperV1` with the seed module, so every position gets a fresh wrapper). Solana accounts cannot grow, so the old Devnet wrappers are left
 behind and every position is wrapped again.
 
 The **authority PDA** is a second address per wrapper that holds no data. It owns every token

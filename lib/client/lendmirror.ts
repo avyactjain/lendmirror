@@ -267,8 +267,13 @@ export class LendMirror {
     }
 
     /** Every PositionWrapper this program owns, found by account discriminator. */
+    /**
+     * Every wrapper under the current seed. Accounts of the same type left behind by an older
+     * seed are skipped: their address is not the one `pda.wrapper` derives for their ids.
+     */
     async listWrappers(rpc: RpcInterface): Promise<accounts.PositionWrapper[]> {
-        return accounts.getPositionWrapperGpaBuilder({ rpc, programs: this.programRepo }).getDeserialized()
+        const all = await accounts.getPositionWrapperGpaBuilder({ rpc, programs: this.programRepo }).getDeserialized()
+        return all.filter((w) => w.publicKey === this.pda.wrapper(w.vaultId, w.nftId)[0])
     }
 
     /** Associated token account of `owner` for `mint`, as a umi PublicKey. */

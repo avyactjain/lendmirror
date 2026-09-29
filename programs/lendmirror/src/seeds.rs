@@ -43,7 +43,7 @@ pub const CCIP_ROUTE_SEED: &[u8] = b"LendMirrorCcipRouteV1";
 pub const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayerV1";
 
 /// One PDA per Jupiter position. Seeds: `[WRAPPER_SEED, vault_id le, nft_id le]`.
-pub const WRAPPER_SEED: &[u8] = b"LendMirrorWrapperV1";
+pub const WRAPPER_SEED: &[u8] = b"LendMirrorPositionWrapperV1";
 
 /// Up to 8 wallets allowed to act on one wrapper. Seeds: `[ONDEMAND_SEED, wrapper]`.
 pub const ONDEMAND_SEED: &[u8] = b"LendMirrorOnDemandV1";
