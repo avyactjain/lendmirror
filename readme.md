@@ -282,7 +282,7 @@ Our contracts and keys:
 
 | What | Where | Address | Role | Status |
 |---|---|---|---|---|
-| LendMirror program | Solana | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` | the program; holds NFTs, operates positions, sends snapshots, bridges tokens | V1-seed build live since 2026-09-29, slot 451695916, 750,280 bytes |
+| LendMirror program | Solana | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` | the program; holds NFTs, operates positions, sends snapshots, bridges tokens | `operate_dex` build live since 2026-09-30, slot 451748984 (713,560-byte program in a 750,280-byte account). IDL account `8xxYX7DCKg1Y1X4Vqunrr2Ka1YagQL9frFK5sQv4BywU` refreshed the same day |
 | Program data account | Solana | `EKeeTYJpf9Z46cRxehg5M16m2fpvT8DcxicojbM92Kkt` | holds the program bytes | 3.81 SOL of rent |
 | Solana wallet | Solana | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` | upgrade authority; Store admin (permanent); the only snapshotter and sender | set 2026-09-29 |
 | Store | Solana | `4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV` | PDA `["LendMirrorStoreV1"]`; our LayerZero identity, admin and allowlists | created 2026-09-29 (tx `4Go72E1T…`), registered with LayerZero, send config for Arbitrum initialized |

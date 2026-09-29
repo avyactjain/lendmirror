@@ -1,4 +1,4 @@
-import { fetchAddressLookupTable, transferSol } from '@metaplex-foundation/mpl-toolbox'
+import { transferSol } from '@metaplex-foundation/mpl-toolbox'
 import { WrappedInstruction, publicKey, sol, transactionBuilder, unwrapOption } from '@metaplex-foundation/umi'
 import { fromWeb3JsPublicKey, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import {
@@ -146,11 +146,12 @@ task('lz:oapp:solana:operate-position', 'Smart vaults (Jupiter operate_dex): sup
 
         // Two transactions: Jupiter's setup plus the PDA's token accounts, then the operate. Each
         // uses Jupiter's lookup tables plus our own; together they can exceed the size limit.
-        const tables = await Promise.all(build.lookupTables.map((t) => fetchAddressLookupTable(umi, fromWeb3JsPublicKey(t.key))))
+        // The tables go into the compute-unit helper so its measuring simulation uses them too:
+        // without them the operate's ~80 accounts do not fit in a transaction at all.
+        const jupiterTables = build.lookupTables.map((t) => fromWeb3JsPublicKey(t.key))
         const sendWithTables = async (ixs: WrappedInstruction[], label: string) => {
             let txBuilder = transactionBuilder().add(ixs)
-            txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, computeUnitPriceScaleFactor, TransactionType.SendMessage)
-            txBuilder = txBuilder.setAddressLookupTables([...(txBuilder.options.addressLookupTables ?? []), ...tables])
+            txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, computeUnitPriceScaleFactor, TransactionType.SendMessage, jupiterTables)
             const tx = await txBuilder.sendAndConfirm(umi)
             console.log(`${label}: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
         }
