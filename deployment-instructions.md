@@ -141,8 +141,11 @@ The wallet in `.env` must be the upgrade authority. The program id is `config/<t
 New proxy (no proxy on this network yet):
 
 ```bash
-npx hardhat lz:deploy --ci
+npx hardhat lz:deploy --ci --networks sepolia --tags LendMirror    # devnet profile
+npx hardhat lz:deploy --ci --networks arbitrum --tags LendMirror   # mainnet profile
 ```
+
+Always pass `--networks`. Without it the task deploys to every network in `hardhat.config.ts`, and the one that does not match `DEPLOYMENT_TYPE` fails with "Missing named deployer account" because only the active profile's key is loaded. On a network that already has the proxy, the task deploys a fresh implementation but does not upgrade the proxy, so use the upgrade commands below instead.
 
 Writes `deployments/<evmNetwork>/LendMirror.json`. Put the proxy address into `config/<type>.ts` → `evmProxy`.
 
