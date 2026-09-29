@@ -54,9 +54,8 @@ Use `npx lm <solana|forge|cast|anchor>` for anything that writes: it injects the
 Solana. The program lives in a data account that must hold rent for its size. Run after step 1 (the `.so` must exist):
 
 ```bash
-SO=$(stat -f %z target/deploy/lendmirror.so)     # Linux: stat -c %s
-npx lm solana rent $SO                            # rent the program account needs for this size
-npx lm solana program show <PROGRAM_ID>           # upgrade only: current "Data Length" and "Balance"
+npx lm solana rent $(wc -c < target/deploy/lendmirror.so)   # SOL the program account must hold for a file this size
+npx lm solana program show <PROGRAM_ID>                     # upgrade only: current "Data Length" and "Balance"
 ```
 
 - First deploy: the wallet pays that rent once. During the deploy the CLI also fills a buffer account of the same size, refunded when the deploy finishes, so hold about twice the rent at that moment.
