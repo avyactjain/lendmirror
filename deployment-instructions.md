@@ -47,10 +47,23 @@ Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator 
 
 ```bash
 npx lm solana program extend <PROGRAM_ID> 500000     # only if step 1 showed the new .so is bigger than the account
-npx lm solana program deploy --program-id target/deploy/lendmirror-keypair.json target/deploy/lendmirror.so --use-rpc --max-sign-attempts 20 --with-compute-unit-price 50000   # upload the program
+npx lm solana program deploy --program-id <PROGRAM_ID> target/deploy/lendmirror.so --use-rpc --max-sign-attempts 100 --with-compute-unit-price 300000   # upgrade the existing program in place
 ```
 
+Pass the program id as an address, never `target/deploy/lendmirror-keypair.json`. That keypair is the Devnet program's; on mainnet it would create a second program at the Devnet address instead of upgrading yours. Mainnet drops uploads sent with a low priority fee ("Max retries exceeded"); if a deploy stops halfway, `npx lm solana program close --buffers` refunds the SOL parked in the half-written buffer, then rerun.
+
 `<PROGRAM_ID>`: Devnet `GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1`, mainnet `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ`.
+
+Publish the IDL so explorers decode the program's accounts and instructions. `anchor build` writes the `address` field as the `declare_id!` expression text, so upload a copy with the real id:
+
+```bash
+node -e "const i=require('./target/idl/lendmirror.json');i.address='<PROGRAM_ID>';require('fs').writeFileSync('target/idl/lendmirror.onchain.json',JSON.stringify(i))"   # copy with the real program id
+npx lm anchor idl init <PROGRAM_ID> --filepath target/idl/lendmirror.onchain.json --priority-fee 300000 --provider.cluster "$RPC_URL_SOLANA_MAINNET" --provider.wallet "$SOLANA_KEYPAIR_PATH_MAINNET"   # first time
+npx lm anchor idl upgrade <PROGRAM_ID> --filepath target/idl/lendmirror.onchain.json --priority-fee 300000 --provider.cluster "$RPC_URL_SOLANA_MAINNET" --provider.wallet "$SOLANA_KEYPAIR_PATH_MAINNET"   # after every later program upgrade
+npx lm anchor idl fetch <PROGRAM_ID> --provider.cluster "$RPC_URL_SOLANA_MAINNET" | head -c 200   # check: starts with the program id
+```
+
+The upgrade authority pays: rent for the compressed IDL (a fraction of a SOL) plus one transaction per 600-byte chunk. Use the Devnet variables for Devnet.
 
 ## 4. Deploy or upgrade the EVM contracts
 
@@ -69,6 +82,15 @@ The treasury does not exist on Arbitrum yet:
 ```bash
 npx hardhat deploy --tags LendMirrorTreasury   # deploy the treasury proxy; put the printed address into config/<type>.ts → treasury
 ```
+
+Verify the source on the explorer so its pages decode calls and show the code. Needs `ETHERSCAN_API_KEY` in `.env` (one Etherscan key covers Arbiscan and Sepolia) and the Hardhat 2 line of the plugin, `npm install --save-dev @nomicfoundation/hardhat-verify@^2` (version 3 is for Hardhat 3 and fails with an ESM error). If the command stalls after "Successfully submitted", the source matched; rerun it or check the explorer page. Manual fallback: upload `artifacts/<Contract>.standard-input.json`, written from `artifacts/contracts/<Contract>.sol/<Contract>.dbg.json`'s build info, as "Solidity (Standard-Json-Input)".
+
+```bash
+npx hardhat verify --network arbitrum <LENDMIRROR_IMPLEMENTATION> <LZ_ENDPOINT>   # LendMirror implementation; the constructor arg is the LayerZero endpoint
+npx hardhat verify --network arbitrum <TREASURY_IMPLEMENTATION>                  # treasury implementation, no constructor args
+```
+
+The proxies are OpenZeppelin's `ERC1967Proxy`, which the explorer matches on its own. On each proxy's page use "More Options → Is this a proxy?" so "Read/Write as Proxy" shows the implementation's functions.
 
 Do not use `lz:deploy` on a network that already has the proxy. It trusts its local records, deploys an implementation, skips the upgrade, and still prints success.
 

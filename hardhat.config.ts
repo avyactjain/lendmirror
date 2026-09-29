@@ -13,6 +13,7 @@ import 'hardhat-contract-sizer'
 import '@nomiclabs/hardhat-ethers'
 import 'hardhat-deploy-ethers'
 import '@layerzerolabs/toolbox-hardhat'
+import '@nomicfoundation/hardhat-verify'
 import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
 
 import { EndpointId } from '@layerzerolabs/lz-definitions'
@@ -75,6 +76,14 @@ const config: HardhatUserConfig = {
         deployer: {
             default: 0,
         },
+    },
+    // `npx hardhat verify --network <net> <address> [constructor args]`. One Etherscan API key
+    // covers Arbiscan and Sepolia (Etherscan API v2).
+    etherscan: {
+        apiKey: process.env.ETHERSCAN_API_KEY ?? '',
+    },
+    sourcify: {
+        enabled: false,
     },
 }
 

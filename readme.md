@@ -229,14 +229,14 @@ Not enforced, on purpose: wrapping does not verify the Jupiter position exists (
 | Piece                                                                          | Status                                                                                                                                    |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | Live Jupiter read (ticks, liquidation branches)                                | Built; `crates/jup-tick-parity` and `npm run test:jup-live` compare against Jupiter's SDK                                                 |
-| Snapshot send over LayerZero + Chainlink, once per refresh, newest wins on EVM | **Verified Devnet → Sepolia 2026-09-28**                                                                                                  |
+| Snapshot send over LayerZero + Chainlink, once per refresh, newest wins on EVM | **Verified Devnet → Sepolia 2026-09-28**. **Verified mainnet → Arbitrum 2026-09-29** on vault 95 / nft 34 (a smart-collateral vault): refresh, send, both copies match. Fees: LayerZero 0.0012 SOL, Chainlink 0.0017 SOL |
 | Sync every wrapped position                                                    | **Run on Devnet 2026-09-28**                                                                                                              |
-| NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, the level gate, and the level 2 borrow proven on a warped Jupiter mainnet fork. Devnet's Jupiter is an old build the SDK cannot decode (checked 2026-09-28), so the first live borrow is a small mainnet position after the mainnet upgrade |
-| Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury                                                                 |
+| NFT custody, levels, Jupiter `operate` CPI                                     | Built; custody, level 1 deposit, the level gate, and the level 2 borrow proven on a warped Jupiter mainnet fork. **Mainnet 2026-09-29, vault 95 / nft 34:** a wallet without the NFT is refused (`AccountNotInitialized` on `source_nft_ata`); the NFT holder deposits and becomes owner (tx `4CRg9SrV…`); the admin releases it back to that owner (tx `3qZzuKPo…`, first run anywhere). `operate` not yet run on mainnet; it only builds Jupiter's plain `operate`, so smart vaults (`operate_dex`) are not supported |
+| Token bridge, Circle CCTP (USDC)                                               | **Verified Devnet → Sepolia 2026-09-28**, end to end through the treasury. **Verified mainnet → Arbitrum 2026-09-30:** 1 USDC from wrapper 95/34 (bridged by the wrapper owner), claimed by the treasury, forwarded to the strategy `0x9Dee…` |
 | Token bridge, Chainlink CCIP (PST, USDC)                                       | **Verified Devnet → Sepolia 2026-09-28** with CCIP-BnM, end to end through the treasury                                                   |
 | Token bridge, LayerZero OFT (USDT0, USDai, sUSDai)                             | Built, unit-tested; **not tested on any network**                                                                                         |
 | EVM treasury                                                                   | Deployed on Sepolia, used in the Devnet run                                                                                               |
-| Mainnet                                                                        | Not upgraded; see Addresses                                                                                                               |
+| Mainnet                                                                        | Upgraded and wired 2026-09-29; LendMirror and treasury implementations verified on Arbiscan. See Addresses |
 
 
 Tokens in scope, and only these: **USDC, USDT, USDai, sUSDai, PST**. Which bridge carries each, with mints and lanes, is in `docs/bridge-providers.md`.
@@ -276,14 +276,37 @@ Files: `deployments/solana-testnet/OApp.json`, `deployments/sepolia/*.json`, `co
 
 ### Mainnet (`DEPLOYMENT_TYPE=mainnet`)
 
-| Item | Value |
-|---|---|
-| Solana program id | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` |
-| Solana Store (OApp) | `4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV` under the V1 seeds, created by `init_store` after the upgrade. The old program's Store `BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4` is abandoned |
-| Solana admin | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` |
-| Arbitrum LendMirror (proxy) | `0xb42E98c712B5CAf1e55dB8106262077515879EA2` |
-| Arbitrum implementation | `0xdAAE65Df8B96e9eE45eb756441B7942e5E128924` (old format; upgrade needed) |
-| Chainlink, CCTP, treasury | Not wired |
+Our contracts and keys:
+
+| What | Where | Address | Role | Status |
+|---|---|---|---|---|
+| LendMirror program | Solana | `9oySM9Jo4ZEXFcWYFbuPK1FeqwrDr6wmnAmenAybzHqQ` | the program; holds NFTs, operates positions, sends snapshots, bridges tokens | V1-seed build live since 2026-09-29, slot 451695916, 750,280 bytes |
+| Program data account | Solana | `EKeeTYJpf9Z46cRxehg5M16m2fpvT8DcxicojbM92Kkt` | holds the program bytes | 3.81 SOL of rent |
+| Solana wallet | Solana | `B8HnbEgetyiAdvkbgZR7LsChh93KR3jWuSw6xSQxt1hL` | upgrade authority; Store admin (permanent); the only snapshotter and sender | set 2026-09-29 |
+| Store | Solana | `4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV` | PDA `["LendMirrorStoreV1"]`; our LayerZero identity, admin and allowlists | created 2026-09-29 (tx `4Go72E1T…`), registered with LayerZero, send config for Arbitrum initialized |
+| LayerZero peer account | Solana | `6mfKavvXreuM559b6uJKtzXwmRsLNkuiAA5EQSCAx9hF` | PDA `["LendMirrorPeerV1", store, 30110 be]`; says the Arbitrum proxy is our peer | set 2026-09-29 |
+| Chainlink snapshot route | Solana | PDA `["LendMirrorCcipRouteV1"]` | Chainlink router, fee quoter, RMN, Arbitrum selector, proxy as receiver | set 2026-09-29 |
+| USDC bridge route | Solana | `Ft1MQnTNf6XZBARxVdeu2WBBti6DW8SrVaFimXstp4Xj` | USDC to Arbitrum (42161) over Circle CCTP, receiver and claimer = treasury, cap 10 USDC per transaction | set 2026-09-29 |
+| Bridge signer / CCIP payer | Solana | `D6RLag1KgbK8Fe8URR2zXFaZXKBnnx6tLPuL1sUuaLNG` | empty PDA `["LendMirrorCcipPayerV1"]`; signs every Chainlink send and token bridge, pays their SOL fees | allowed as sender on the proxy and the treasury; exists once funded |
+| Address lookup table | Solana | `FK2PwZSMdxGNhrdYnZkxALYATBH1SvBonz9vmVb69LAa` | makes the send transactions fit | created 2026-09-29 |
+| LendMirror proxy | Arbitrum | `0xb42E98c712B5CAf1e55dB8106262077515879EA2` | receives snapshots; LayerZero peer and Chainlink receiver | upgraded 2026-09-29; peer = Store `4FUx…` (tx `0xc0abee1e…`); Chainlink route set (tx `0xada20bae…`) |
+| LendMirror implementation | Arbitrum | `0xe9E61B9aC26ED2CEBC2F21fbD76F7e6cfDa43032` | code behind the proxy | live (upgrade tx `0x4e751484…`); previous `0xdAAE65Df…` retired |
+| LendMirrorTreasury proxy | Arbitrum | `0x736AAC431E66de7D07eb61738CA3598a53a24Ca0` | receives bridged tokens; the receiver of every bridge route; forwards only to owner-set strategies | deployed 2026-09-29; accepts Chainlink from `D6RLag…`; Circle transmitter set; USDC strategy = `0x9Dee…` (test) |
+| LendMirrorTreasury implementation | Arbitrum | `0xBED1911918D70c2E88b83f2C75b1763e2c49A795` | code behind the treasury proxy | live |
+| EVM wallet | Arbitrum | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` | owner of both proxies; the same key owns the Sepolia contracts | |
+
+Other parties' addresses we call:
+
+| What | Where | Address |
+|---|---|---|
+| Jupiter Lend Vaults, main market | Solana | `jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi` |
+| USDC | Solana | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| USDC | Arbitrum | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
+| LayerZero EndpointV2 | Arbitrum | `0x1a44076050125825900e736c501f859c50fE728c` |
+| Chainlink CCIP router | Solana / Arbitrum | `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C` / `0x141fa059441E0ca23ce184B6A78bafD2A517DdE8` |
+| Circle CCTP v2 | Solana / Arbitrum | `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe` / MessageTransmitterV2 `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` |
+
+Pathway: LayerZero Solana `30168` → Arbitrum `30110`; Chainlink selectors Solana `124615329519749607` → Arbitrum `4949039107694359620`. Retired: the old program's Store `BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4`. `deployments/arbitrum/LendMirror*.json` still records the retired implementation because the upgrade was done with `cast`; the proxy address in it is correct and the tasks read the ABI from the compiled contract.
 
 
 ---

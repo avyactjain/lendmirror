@@ -190,8 +190,7 @@ task('lz:oapp:solana:fund-authority-wsol', 'Wrap SOL into the wrapper authority\
             .add(createSyncNativeInstruction(ata))
         const sig = await sendAndConfirmTransaction(connection, tx, [web3JsKeypair])
         console.log(`fundAuthorityWsol: ${getExplorerTxLink(sig, eid === 40168)}`)
-        const bal = await connection.getTokenAccountBalance(ata)
-        console.log(`authority WSOL ATA ${ata.toBase58()} balance ${bal.value.amount}`)
+        console.log(`authority WSOL ATA ${ata.toBase58()} balance ${await readBalance(connection, ata)}`)
     })
 
 task('lz:oapp:solana:fund-authority-token', 'Move SPL tokens from the wallet into the wrapper authority\'s token account (Token or Token-2022)')
@@ -217,6 +216,21 @@ task('lz:oapp:solana:fund-authority-token', 'Move SPL tokens from the wallet int
             .add(createTransferCheckedInstruction(from, mintKey, to, web3JsKeypair.publicKey, BigInt(amount), decimals, [], tokenProgram))
         const sig = await sendAndConfirmTransaction(connection, tx, [web3JsKeypair])
         console.log(`fundAuthorityToken: ${getExplorerTxLink(sig, eid === 40168)}`)
-        const bal = await connection.getTokenAccountBalance(to)
-        console.log(`authority token account ${to.toBase58()} balance ${bal.value.amount}`)
+        console.log(`authority token account ${to.toBase58()} balance ${await readBalance(connection, to)}`)
     })
+
+/**
+ * Token balance, retried for a few seconds. The transaction is already confirmed when this runs,
+ * but an RPC pool can answer from a node that has not seen a brand-new account yet
+ * ("could not find account"). That is a display problem, not a failed transfer.
+ */
+async function readBalance(connection: Connection, account: PublicKey): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            return (await connection.getTokenAccountBalance(account, 'confirmed')).value.amount
+        } catch {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+    }
+    return 'not visible on this RPC yet; the transaction above is confirmed, check it on Solscan'
+}

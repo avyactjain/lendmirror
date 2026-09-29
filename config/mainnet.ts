@@ -13,7 +13,8 @@ const profile: DeploymentProfile = {
     // The old program's Store was BLoEaf2L5rZvEwZuVfFjAabHW4woM9Mr1XknBQCZkyf4.
     store: '4FUxAXWrm124DfXw3J8J1uQWhueygVvuuhTQgKNGKZRV',
     evmProxy: '0xb42E98c712B5CAf1e55dB8106262077515879EA2',
-    evmImplementation: '0xdAAE65Df8B96e9eE45eb756441B7942e5E128924',
+    // Upgraded 2026-09-29 (tx 0x4e751484…). Previous: 0xdAAE65Df8B96e9eE45eb756441B7942e5E128924.
+    evmImplementation: '0xe9E61B9aC26ED2CEBC2F21fbD76F7e6cfDa43032',
     lzEndpoint: '0x1a44076050125825900e736c501f859c50fE728c',
     // Chainlink directory (docs.chain.link/ccip/directory/mainnet), checked 2026-09-29.
     // Solana → Arbitrum One lane is listed.
@@ -39,8 +40,8 @@ const profile: DeploymentProfile = {
         evmMessageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64', // MessageTransmitterV2 on Arbitrum
         attestationApi: 'https://iris-api.circle.com',
     },
-    // Set after `npx hardhat deploy --tags LendMirrorTreasury` prints the proxy address.
-    treasury: '',
+    // LendMirrorTreasury proxy on Arbitrum, deployed 2026-09-29. Implementation 0xBED1911918D70c2E88b83f2C75b1763e2c49A795.
+    treasury: '0x736AAC431E66de7D07eb61738CA3598a53a24Ca0',
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_MAINNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_MAINNET',
