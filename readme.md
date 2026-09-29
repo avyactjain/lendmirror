@@ -264,7 +264,7 @@ Instructions (`src/lib.rs`): `init_store`, `set_peer_config`, `set_snapshotters`
 | Example wrapper (vault 1 / nft 29)                             | `4n4EThrVJEsPwyPrm5Zvcs4KG19hS3bu33c6zgaCY1xm`; its authority `ta2FFMT3aHMNhyAfcErWfw2C666R76eBkjWFJ5kST5E` |
 | Devnet USDC (Circle)                                           | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`                                                              |
 | Sepolia LendMirror (proxy, LayerZero peer, Chainlink receiver) | `0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514`                                                                |
-| Sepolia LendMirror implementation                              | `0x0011b8DE09Cee9d0eba8afaa26643623e511D93F`                                                                |
+| Sepolia LendMirror implementation                              | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` (upgraded 2026-09-29)                                                                |
 | Sepolia LendMirrorTreasury (proxy)                             | `0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C` (implementation `0x948297b2DD73D7Fd6D17E8c966705e2f9981F1D6`)  |
 | Sepolia owner / current USDC strategy                          | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87`                                                                |
 | Sepolia USDC (Circle)                                          | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`                                                                |

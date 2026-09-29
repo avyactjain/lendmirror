@@ -145,7 +145,7 @@ npx hardhat lz:deploy --ci --networks sepolia --tags LendMirror    # devnet prof
 npx hardhat lz:deploy --ci --networks arbitrum --tags LendMirror   # mainnet profile
 ```
 
-Always pass `--networks`. Without it the task deploys to every network in `hardhat.config.ts`, and the one that does not match `DEPLOYMENT_TYPE` fails with "Missing named deployer account" because only the active profile's key is loaded. On a network that already has the proxy, the task deploys a fresh implementation but does not upgrade the proxy, so use the upgrade commands below instead.
+Always pass `--networks`. Without it the task deploys to every network in `hardhat.config.ts`, and the one that does not match `DEPLOYMENT_TYPE` fails with "Missing named deployer account" because only the active profile's key is loaded. Use `lz:deploy` only for a new proxy. For an existing one it decides from its local record in `deployments/`, not from the chain; after any upgrade done by hand the record is stale, and it deploys an implementation and then skips the upgrade while still printing success.
 
 Writes `deployments/<evmNetwork>/LendMirror.json`. Put the proxy address into `config/<type>.ts` → `evmProxy`.
 
@@ -154,7 +154,10 @@ Upgrade of an existing proxy (Arbitrum today runs the old 200-byte format and mu
 ```bash
 npx lm forge create contracts/LendMirror.sol:LendMirror --broadcast --constructor-args <LZ_ENDPOINT>
 npx lm cast send <PROXY> "upgradeToAndCall(address,bytes)" <NEW_IMPLEMENTATION> 0x
+cast storage <PROXY> 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url <EVM_RPC>   # must print <NEW_IMPLEMENTATION>
 ```
+
+The last line reads the proxy's implementation slot (EIP-1967). Check it after every upgrade; it is the only proof the proxy moved.
 
 `<LZ_ENDPOINT>` is `config/<type>.ts` → `lzEndpoint` (Sepolia `0x6EDCE65403992e310A62460808c4b910D972f10f`, Arbitrum `0x1a44076050125825900e736c501f859c50fE728c`). Record the implementation in `evmImplementation`.
 

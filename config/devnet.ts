@@ -13,7 +13,7 @@ const profile: DeploymentProfile = {
     // The pre-V1 Store was BqsqziQ9VsD3o81zPCQuMfZebdn4eQUAtMjJxZLYhXdM.
     store: '4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz',
     evmProxy: '0xbE4c9C5DB8E2747C545B2591B3937764f1A2d514',
-    evmImplementation: '0x0011b8DE09Cee9d0eba8afaa26643623e511D93F',
+    evmImplementation: '0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6',
     lzEndpoint: '0x6EDCE65403992e310A62460808c4b910D972f10f',
     ccip: {
         router: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
