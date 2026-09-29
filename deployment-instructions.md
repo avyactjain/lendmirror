@@ -45,9 +45,46 @@ Use `npx lm <solana|forge|cast|anchor>` for anything that writes: it injects the
 
 ### Wallets and funds
 
-- Solana wallet: enough SOL for the program deploy (the `.so` is about 730 KB, so about 5 SOL of rent on a first deploy, plus fees; an upgrade only pays for growth). It must be the program's upgrade authority.
+- Solana wallet: enough SOL for the program deploy (see the estimate below) plus fees. It must be the program's upgrade authority.
 - EVM wallet: ETH for two proxy deployments and a few configuration transactions.
 - For the bridge checks: a little of the token you will bridge (Devnet: USDC from Circle's faucet, CCIP-BnM from Chainlink's faucet).
+
+### Estimate the cost
+
+Solana. The program lives in a data account that must hold rent for its size. Run after step 1 (the `.so` must exist):
+
+```bash
+SO=$(stat -f %z target/deploy/lendmirror.so)     # Linux: stat -c %s
+npx lm solana rent $SO                            # rent the program account needs for this size
+npx lm solana program show <PROGRAM_ID>           # upgrade only: current "Data Length" and "Balance"
+```
+
+- First deploy: the wallet pays that rent once. During the deploy the CLI also fills a buffer account of the same size, refunded when the deploy finishes, so hold about twice the rent at that moment.
+- Upgrade: free if the new `.so` fits in "Data Length". If it is bigger, `extend` charges the difference between the rent for the new size and the current balance. The buffer is again temporary.
+- Measured 2026-09-29: the `.so` is 730,272 bytes, rent 3.71 SOL. The mainnet program account holds 335,976 bytes and 1.71 SOL, so the upgrade needs about 2.0 SOL for `extend` plus 3.71 SOL parked in the buffer until it completes.
+
+EVM. Gas for a contract creation, times the current gas price. `npx lm cast estimate` does not work (the wrapper puts `--rpc-url` after `--create`), so this one uses bare `cast` with the RPC from `.env`; it only reads.
+
+```bash
+set -a && source .env && set +a
+RPC=$RPC_URL_EVM_DEVNET                           # or $RPC_URL_EVM_MAINNET
+BYTECODE=$(forge inspect contracts/LendMirror.sol:LendMirror bytecode)
+ARGS=$(cast abi-encode "constructor(address)" <LZ_ENDPOINT>)
+cast estimate --rpc-url $RPC --create "${BYTECODE}${ARGS#0x}"                          # gas, LendMirror implementation
+cast estimate --rpc-url $RPC --create "$(forge inspect contracts/LendMirrorTreasury.sol:LendMirrorTreasury bytecode)"   # gas, treasury implementation
+cast gas-price --rpc-url $RPC                                                          # wei per gas
+```
+
+Cost in ETH = gas × price ÷ 10^18 (`cast --to-unit <gas*price> ether`). Each proxy is a separate creation on top of its implementation. Gas seen on Sepolia:
+
+| Creation | Gas |
+| --- | --- |
+| `LendMirror` implementation | 3,200,050 (estimate for the current build; the earlier, smaller build used 2,021,446) |
+| `LendMirror` proxy | 284,039 |
+| `LendMirrorTreasury` implementation | 1,297,172 |
+| `LendMirrorTreasury` proxy | 334,413 |
+
+Configuration calls (peers, routes, strategies) are ordinary transactions, well under 100,000 gas each. Arbitrum gas prices are usually far below Ethereum's, so the full mainnet EVM side costs a fraction of an ETH; run the commands above on deploy day for the number.
 
 ## 1. Build
 
