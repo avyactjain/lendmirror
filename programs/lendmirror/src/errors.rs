@@ -35,4 +35,9 @@ pub enum LendMirrorError {
     WrongProvider,
     /// A provider account does not match what the route or the provider program expects.
     InvalidBridgeAccount,
+    /// `bridge_tokens_lz`: the next instruction in this transaction is not the issuer's send,
+    /// or its program, amount, destination, source account, options or compose do not match.
+    MissingBridgeSend,
+    /// `swap_to_usdc`: the swap allows more than 1% slippage, or quotes zero out.
+    SlippageTooHigh,
 }

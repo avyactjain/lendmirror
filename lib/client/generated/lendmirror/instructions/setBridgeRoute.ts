@@ -34,7 +34,7 @@ export type SetBridgeRouteInstructionData = {
     dstChainId: bigint
     provider: number
     providerProgram: PublicKey
-    /** LayerZero: the OFT token escrow. Zero otherwise. */
+    /** Unused since `bridge_tokens_lz`. Must be zero. */
     providerAux: PublicKey
     receiver: Uint8Array
     destinationCaller: Uint8Array
@@ -49,7 +49,7 @@ export type SetBridgeRouteInstructionDataArgs = {
     dstChainId: number | bigint
     provider: number
     providerProgram: PublicKey
-    /** LayerZero: the OFT token escrow. Zero otherwise. */
+    /** Unused since `bridge_tokens_lz`. Must be zero. */
     providerAux: PublicKey
     receiver: Uint8Array
     destinationCaller: Uint8Array

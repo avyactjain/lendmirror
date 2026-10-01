@@ -17,16 +17,16 @@ export type BridgeTokensParams = {
     maxFee: bigint
     /** CCTP only: 1000 fast, 2000 standard. Ignored by CCIP. */
     minFinalityThreshold: number
-    /** CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP. */
-    feeLamports: bigint
-    /** OFT only: least amount that may arrive (the OFT drops dust below its shared decimals). */
-    minAmount: bigint
     /**
-     * OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
-     * plus whatever the bridge signer already holds.
+     * CCIP only: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP.
+     * LayerZero does not use it either: there the caller's wallet pays its own fee directly.
      */
+    feeLamports: bigint
+    /** Unused since `bridge_tokens_lz` (the guard reads these from the issuer's send instead). */
+    minAmount: bigint
+    /** Unused since `bridge_tokens_lz`. */
     nativeFee: bigint
-    /** OFT only: executor options (destination gas). Empty means "use the peer's enforced options". */
+    /** Unused since `bridge_tokens_lz`. */
     options: Uint8Array
 }
 
@@ -39,16 +39,16 @@ export type BridgeTokensParamsArgs = {
     maxFee: number | bigint
     /** CCTP only: 1000 fast, 2000 standard. Ignored by CCIP. */
     minFinalityThreshold: number
-    /** CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP. */
-    feeLamports: number | bigint
-    /** OFT only: least amount that may arrive (the OFT drops dust below its shared decimals). */
-    minAmount: number | bigint
     /**
-     * OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
-     * plus whatever the bridge signer already holds.
+     * CCIP only: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP.
+     * LayerZero does not use it either: there the caller's wallet pays its own fee directly.
      */
+    feeLamports: number | bigint
+    /** Unused since `bridge_tokens_lz` (the guard reads these from the issuer's send instead). */
+    minAmount: number | bigint
+    /** Unused since `bridge_tokens_lz`. */
     nativeFee: number | bigint
-    /** OFT only: executor options (destination gas). Empty means "use the peer's enforced options". */
+    /** Unused since `bridge_tokens_lz`. */
     options: Uint8Array
 }
 

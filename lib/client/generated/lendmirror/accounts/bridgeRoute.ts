@@ -45,8 +45,8 @@ export type BridgeRouteAccountData = {
      */
     providerProgram: PublicKey
     /**
-     * Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
-     * peer addresses derive. Zero for CCTP and CCIP.
+     * Unused. Was the LayerZero escrow before `bridge_tokens_lz` stopped deriving provider
+     * accounts. Always zero; kept so existing routes decode.
      */
     providerAux: PublicKey
     /** Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32. */
@@ -61,7 +61,11 @@ export type BridgeRouteAccountData = {
      * destination chain selector, depending on `provider`.
      */
     domainOrSelector: bigint
-    /** CCIP only: gas for the destination `ccipReceive`. 0 for token-only transfers. */
+    /**
+     * CCIP: gas for the destination `ccipReceive` (0 for token-only transfers). LayerZero:
+     * the position of the token-source account in the issuer's `send` instruction, which the
+     * `bridge_tokens_lz` guard pins to the caller's token account (reused field, no new seed).
+     */
     gasLimit: bigint
     enabled: boolean
     /** Per-transaction cap in token base units. A wrong route can lose at most this much. */
@@ -81,8 +85,8 @@ export type BridgeRouteAccountDataArgs = {
      */
     providerProgram: PublicKey
     /**
-     * Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
-     * peer addresses derive. Zero for CCTP and CCIP.
+     * Unused. Was the LayerZero escrow before `bridge_tokens_lz` stopped deriving provider
+     * accounts. Always zero; kept so existing routes decode.
      */
     providerAux: PublicKey
     /** Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32. */
@@ -97,7 +101,11 @@ export type BridgeRouteAccountDataArgs = {
      * destination chain selector, depending on `provider`.
      */
     domainOrSelector: number | bigint
-    /** CCIP only: gas for the destination `ccipReceive`. 0 for token-only transfers. */
+    /**
+     * CCIP: gas for the destination `ccipReceive` (0 for token-only transfers). LayerZero:
+     * the position of the token-source account in the issuer's `send` instruction, which the
+     * `bridge_tokens_lz` guard pins to the caller's token account (reused field, no new seed).
+     */
     gasLimit: number | bigint
     enabled: boolean
     /** Per-transaction cap in token base units. A wrong route can lose at most this much. */

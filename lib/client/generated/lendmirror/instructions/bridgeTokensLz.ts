@@ -6,65 +6,67 @@
  * @see https://github.com/kinobi-so/kinobi
  */
 
-import { Context, Pda, PublicKey, Signer, TransactionBuilder, transactionBuilder } from '@metaplex-foundation/umi'
+import {
+    Context,
+    Pda,
+    PublicKey,
+    Signer,
+    TransactionBuilder,
+    publicKey,
+    transactionBuilder,
+} from '@metaplex-foundation/umi'
 import { Serializer, bytes, mapSerializer, struct } from '@metaplex-foundation/umi/serializers'
 import { ResolvedAccount, ResolvedAccountsWithIndices, getAccountMetasAndSigners } from '../shared'
 import { BridgeTokensParams, BridgeTokensParamsArgs, getBridgeTokensParamsSerializer } from '../types'
 
 // Accounts.
-export type BridgeTokensOftInstructionAccounts = {
-    /** Pays rent for any account the provider creates (CCTP event data, ATAs). */
+export type BridgeTokensLzInstructionAccounts = {
+    /** Signs the issuer's send and pays its LayerZero fee; also rent payer for `authority_ata`. */
     authority?: Signer
     store: PublicKey | Pda
     wrapper: PublicKey | Pda
     ondemand?: PublicKey | Pda
     wrapperAuthority: PublicKey | Pda
-    bridgeSigner: PublicKey | Pda
     bridgeRoute: PublicKey | Pda
-    /** `mut` because Circle's `deposit_for_burn` burns from this mint (its IDL marks it writable). */
     mint: PublicKey | Pda
-    /** The wrapper authority's token account. Where borrowed or withdrawn tokens land. */
+    /** The wrapper authority's token account. Where borrowed or withdrawn tokens sit. */
     wrapperAta: PublicKey | Pda
-    /** The bridge signer's token account. The provider pulls or burns from here. */
-    bridgeAta: PublicKey | Pda
+    /** The caller's own token account: the issuer's send must pull from exactly here. */
+    authorityAta: PublicKey | Pda
+    instructionsSysvar?: PublicKey | Pda
     tokenProgram?: PublicKey | Pda
     associatedTokenProgram: PublicKey | Pda
     systemProgram?: PublicKey | Pda
-    oftProgram: PublicKey | Pda
-    peer: PublicKey | Pda
-    oftStore: PublicKey | Pda
-    tokenEscrow: PublicKey | Pda
-    eventAuthority: PublicKey | Pda
 }
 
 // Data.
-export type BridgeTokensOftInstructionData = { discriminator: Uint8Array; params: BridgeTokensParams }
+export type BridgeTokensLzInstructionData = { discriminator: Uint8Array; params: BridgeTokensParams }
 
-export type BridgeTokensOftInstructionDataArgs = { params: BridgeTokensParamsArgs }
+export type BridgeTokensLzInstructionDataArgs = { params: BridgeTokensParamsArgs }
 
-export function getBridgeTokensOftInstructionDataSerializer(): Serializer<
-    BridgeTokensOftInstructionDataArgs,
-    BridgeTokensOftInstructionData
+export function getBridgeTokensLzInstructionDataSerializer(): Serializer<
+    BridgeTokensLzInstructionDataArgs,
+    BridgeTokensLzInstructionData
 > {
-    return mapSerializer<BridgeTokensOftInstructionDataArgs, any, BridgeTokensOftInstructionData>(
-        struct<BridgeTokensOftInstructionData>(
+    return mapSerializer<BridgeTokensLzInstructionDataArgs, any, BridgeTokensLzInstructionData>(
+        struct<BridgeTokensLzInstructionData>(
             [
                 ['discriminator', bytes({ size: 8 })],
                 ['params', getBridgeTokensParamsSerializer()],
             ],
-            { description: 'BridgeTokensOftInstructionData' }
+            { description: 'BridgeTokensLzInstructionData' }
         ),
-        (value) => ({ ...value, discriminator: new Uint8Array([145, 38, 251, 70, 172, 37, 181, 56]) })
-    ) as Serializer<BridgeTokensOftInstructionDataArgs, BridgeTokensOftInstructionData>
+        (value) => ({ ...value, discriminator: new Uint8Array([232, 37, 117, 54, 145, 210, 62, 106]) })
+    ) as Serializer<BridgeTokensLzInstructionDataArgs, BridgeTokensLzInstructionData>
 }
 
 // Args.
-export type BridgeTokensOftInstructionArgs = BridgeTokensOftInstructionDataArgs
+export type BridgeTokensLzInstructionArgs = BridgeTokensLzInstructionDataArgs
 
 // Instruction.
-export function bridgeTokensOft(
+export function bridgeTokensLz(
     context: Pick<Context, 'identity' | 'programs'>,
-    input: BridgeTokensOftInstructionAccounts & BridgeTokensOftInstructionArgs
+    input: BridgeTokensLzInstructionAccounts & BridgeTokensLzInstructionArgs
 ): TransactionBuilder {
     // Program ID.
     const programId = context.programs.getPublicKey('lendmirror', '')
@@ -76,11 +78,11 @@ export function bridgeTokensOft(
         wrapper: { index: 2, isWritable: false as boolean, value: input.wrapper ?? null },
         ondemand: { index: 3, isWritable: false as boolean, value: input.ondemand ?? null },
         wrapperAuthority: { index: 4, isWritable: false as boolean, value: input.wrapperAuthority ?? null },
-        bridgeSigner: { index: 5, isWritable: true as boolean, value: input.bridgeSigner ?? null },
-        bridgeRoute: { index: 6, isWritable: false as boolean, value: input.bridgeRoute ?? null },
-        mint: { index: 7, isWritable: true as boolean, value: input.mint ?? null },
-        wrapperAta: { index: 8, isWritable: true as boolean, value: input.wrapperAta ?? null },
-        bridgeAta: { index: 9, isWritable: true as boolean, value: input.bridgeAta ?? null },
+        bridgeRoute: { index: 5, isWritable: false as boolean, value: input.bridgeRoute ?? null },
+        mint: { index: 6, isWritable: false as boolean, value: input.mint ?? null },
+        wrapperAta: { index: 7, isWritable: true as boolean, value: input.wrapperAta ?? null },
+        authorityAta: { index: 8, isWritable: true as boolean, value: input.authorityAta ?? null },
+        instructionsSysvar: { index: 9, isWritable: false as boolean, value: input.instructionsSysvar ?? null },
         tokenProgram: { index: 10, isWritable: false as boolean, value: input.tokenProgram ?? null },
         associatedTokenProgram: {
             index: 11,
@@ -88,19 +90,17 @@ export function bridgeTokensOft(
             value: input.associatedTokenProgram ?? null,
         },
         systemProgram: { index: 12, isWritable: false as boolean, value: input.systemProgram ?? null },
-        oftProgram: { index: 13, isWritable: false as boolean, value: input.oftProgram ?? null },
-        peer: { index: 14, isWritable: true as boolean, value: input.peer ?? null },
-        oftStore: { index: 15, isWritable: true as boolean, value: input.oftStore ?? null },
-        tokenEscrow: { index: 16, isWritable: true as boolean, value: input.tokenEscrow ?? null },
-        eventAuthority: { index: 17, isWritable: false as boolean, value: input.eventAuthority ?? null },
     } satisfies ResolvedAccountsWithIndices
 
     // Arguments.
-    const resolvedArgs: BridgeTokensOftInstructionArgs = { ...input }
+    const resolvedArgs: BridgeTokensLzInstructionArgs = { ...input }
 
     // Default values.
     if (!resolvedAccounts.authority.value) {
         resolvedAccounts.authority.value = context.identity
+    }
+    if (!resolvedAccounts.instructionsSysvar.value) {
+        resolvedAccounts.instructionsSysvar.value = publicKey('Sysvar1nstructions1111111111111111111111111')
     }
     if (!resolvedAccounts.tokenProgram.value) {
         resolvedAccounts.tokenProgram.value = context.programs.getPublicKey(
@@ -124,8 +124,8 @@ export function bridgeTokensOft(
     const [keys, signers] = getAccountMetasAndSigners(orderedAccounts, 'programId', programId)
 
     // Data.
-    const data = getBridgeTokensOftInstructionDataSerializer().serialize(
-        resolvedArgs as BridgeTokensOftInstructionDataArgs
+    const data = getBridgeTokensLzInstructionDataSerializer().serialize(
+        resolvedArgs as BridgeTokensLzInstructionDataArgs
     )
 
     // Bytes Created On Chain.

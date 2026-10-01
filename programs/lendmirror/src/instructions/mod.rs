@@ -10,6 +10,7 @@ pub mod send_position_snapshot;
 pub mod set_allowlists;
 pub mod set_ccip_route;
 pub mod set_peer_config;
+pub mod swap_to_usdc;
 pub mod wrap_position;
 
 pub use bridge_tokens::*;
@@ -23,4 +24,5 @@ pub use send_position_snapshot::*;
 pub use set_allowlists::*;
 pub use set_ccip_route::*;
 pub use set_peer_config::*;
+pub use swap_to_usdc::*;
 pub use wrap_position::*;
