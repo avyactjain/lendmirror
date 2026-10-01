@@ -70,7 +70,11 @@ const profile: DeploymentProfile = {
                 { key: 'YFTh5kYhf64N5Xd1oXBe4TKjdggEnE1cveT9vwqfH9w', w: true },
                 { key: '5JZFgHYyVYuNk3BXYbKHiSzrk6EEVV9FLFPJmYvuPfis', w: false },
                 { key: 'B4Ri6MzmKCTZE8ccJgE4vNASFKrxqf9KitPMNFGgiBaA', w: false },
-                { key: 'FLzbyvv18stMVyK9p81Gg9uhwFXxptpqA4vdpnT555RH', w: false },
+                // The captured send carried a compose message, so it listed the compose-type
+                // enforced-options PDA here. Our sends never compose: this is the send-type one
+                // (["EnforcedOptions", store, 30110 be, u16 1]), as the program itself demands
+                // (checked by simulation; the compose-type account made it fail ConstraintSeeds).
+                { key: 'FFBcrBSRN9iC76Y3jd6bjJAy6CgGfycwZbLVihzsrYGr', w: false },
                 { key: '9bud53CNkxxpWkveVJzCZxUxhASSWGAsLjFsZXivndGh', w: false },
                 { key: 'G4LEeN7fsJjTL9Q8GDGrZ9PhKnSQTjHJnVJr41qvd1Ls', w: false },
                 { key: 'FX56iS2Yve2bnweDNrx6F6Fo2DCg2hGCtxzRSwPtDZBn', w: true },
