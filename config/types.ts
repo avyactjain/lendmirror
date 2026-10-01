@@ -39,6 +39,46 @@ export type CctpProfile = {
     attestationApi: string
 }
 
+/** One LayerZero-bridged token: what `bridge_tokens_lz` and the issuer's send template need. */
+export type LzTokenProfile = {
+    symbol: string
+    mint: string
+    decimals: number
+    /** The issuer's own bridge program on Solana (none of them is LayerZero's standard OFT). */
+    issuerProgram: string
+    /** Position of the sender's token account in the issuer's `send`. Stored as the route's
+     * `gas_limit`; the program pins this slot to the caller's token account. */
+    tokenSourceIndex: number
+    /** Token program that owns the mint (classic Token or Token-2022). */
+    tokenProgram: string
+    /** min_amount_ld = amount - amount * minUnderBps / 10000. The program allows at most 50. */
+    minUnderBps: number
+    /** Options bytes for the send: [] or the bare v2 header [0,3]. Anything else is refused. */
+    options: number[]
+    /** Cap on the LayerZero fee in lamports. Only the real quoted fee is charged. */
+    nativeFeeCapLamports: bigint
+    /** The issuer's address lookup table, used by the template transaction. */
+    lookupTable: string
+    /** The template send's signer. Replaced by our wallet everywhere it appears. */
+    templateSigner: string
+    /** A slot derived from the sender, re-derived for our wallet: PDA([...seeds, signer]).
+     * Null when no slot depends on who sends. */
+    senderPda: { index: number; seedPrefix: string; seedBase: string } | null
+    /** Full account list of a real mainnet send on this lane, address + writability. The
+     * signer, token-source and sender-PDA slots are substituted at build time; the rest are
+     * lane constants (store, peer, endpoint, message library, verifiers, price feed). */
+    accounts: { key: string; w: boolean }[]
+    /** ERC20 that arrives on the EVM chain, for the treasury's set-strategy. */
+    evmToken: string
+}
+
+/** Jupiter v6, for `swap_to_usdc`. */
+export type JupiterProfile = {
+    program: string
+    /** Swap API base, e.g. https://lite-api.jup.ag/swap/v1 */
+    swapApi: string
+}
+
 export type DeploymentProfile = {
     type: DeploymentType
     /** LayerZero Solana eid. */
@@ -60,6 +100,10 @@ export type DeploymentProfile = {
     cctp: CctpProfile | null
     /** UUPS proxy of LendMirrorTreasury on the EVM chain. Empty until deployed. */
     treasury: string
+    /** Tokens bridged over LayerZero through their issuers' programs. Empty on Devnet. */
+    lzTokens: LzTokenProfile[]
+    /** Jupiter swap, for swap_to_usdc. Null on Devnet (Jupiter v6 is mainnet only). */
+    jupiter: JupiterProfile | null
     /** Env var names. Secrets stay in .env. */
     env: {
         solanaKeypairPath: string

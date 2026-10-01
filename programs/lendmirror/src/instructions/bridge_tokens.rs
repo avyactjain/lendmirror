@@ -705,13 +705,18 @@ impl BridgeTokensLz<'_> {
 ///
 /// `min_amount_ld` may sit up to 0.5% under `amount` (USDT0 charges 0.03% on arrival; the
 /// others charge nothing today). Executor options and compose messages are refused: the peers'
-/// enforced options already carry the destination gas, and the treasury composes nothing.
+/// enforced options already carry the destination gas, and the treasury composes nothing. The
+/// two-byte `0x0003` is LayerZero's v2 options header with nothing after it, so it also means
+/// "no options" (USDT0's own app sends exactly that); anything longer is a real option.
 fn check_lz_send(route: &BridgeRoute, amount: u64, send: &OftSendParams) -> Result<()> {
     require!(u64::from(send.dst_eid) == route.domain_or_selector, LendMirrorError::MissingBridgeSend);
     require!(send.to == route.receiver, LendMirrorError::MissingBridgeSend);
     require!(send.amount_ld == amount, LendMirrorError::MissingBridgeSend);
     require!(send.min_amount_ld >= amount - amount / 200, LendMirrorError::MissingBridgeSend);
-    require!(send.options.is_empty(), LendMirrorError::MissingBridgeSend);
+    require!(
+        send.options.is_empty() || send.options == [0x00, 0x03],
+        LendMirrorError::MissingBridgeSend
+    );
     require!(send.compose_msg.is_none(), LendMirrorError::MissingBridgeSend);
     Ok(())
 }
@@ -789,7 +794,11 @@ mod tests {
 
         let mut p = good.clone();
         p.options = vec![0, 3];
-        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "caller options");
+        assert!(check_lz_send(&r, 1_000_000, &p).is_ok(), "bare v2 header means no options");
+        p.options = vec![0, 3, 1];
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "a real option");
+        p.options = vec![0, 4];
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "not the v2 header");
 
         let mut p = good;
         p.compose_msg = Some(vec![1]);

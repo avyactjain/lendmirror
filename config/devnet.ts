@@ -38,6 +38,8 @@ const profile: DeploymentProfile = {
         attestationApi: 'https://iris-api-sandbox.circle.com',
     },
     treasury: '0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C',
+    lzTokens: [],
+    jupiter: null,
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_DEVNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_DEVNET',

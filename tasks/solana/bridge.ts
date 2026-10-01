@@ -1,4 +1,5 @@
-import { generateSigner, publicKey, transactionBuilder } from '@metaplex-foundation/umi'
+import { Umi, generateSigner, publicKey, transactionBuilder } from '@metaplex-foundation/umi'
+import { fromWeb3JsInstruction, toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters'
 import bs58 from 'bs58'
 import { task, types } from 'hardhat/config'
 
@@ -12,11 +13,53 @@ import {
     bridgeRouteAddress,
     bridgeTokensCcip,
     bridgeTokensCctp,
-    bridgeTokensOft,
+    bridgeTokensLz,
     setBridgeRoute,
 } from '../../lib/client/bridge'
+import { buildIssuerSend } from '../../lib/client/lzSend'
 import { getProfile, requireCcip, resolveSolanaEid } from '../common/deployment'
-import { TransactionType, addComputeUnitInstructions, deriveConnection, getExplorerTxLink, getSolanaDeployment } from '.'
+
+import {
+    TransactionType,
+    addComputeUnitInstructions,
+    deriveConnection,
+    getExplorerTxLink,
+    getSolanaDeployment,
+} from '.'
+
+/** "USDT" / "USDai" / "sUSDai" / "usdc" / a raw mint → the mint, plus the LZ profile if any. */
+function resolveMint(profile: ReturnType<typeof getProfile>, raw: string) {
+    if (raw === 'usdc') {
+        if (!profile.cctp) throw new Error('No USDC mint in the profile; pass the mint itself.')
+        return { mint: profile.cctp.usdcMint, lzToken: undefined }
+    }
+    const bySymbol = profile.lzTokens.find((t) => t.symbol.toLowerCase() === raw.toLowerCase())
+    const byMint = profile.lzTokens.find((t) => t.mint === raw)
+    const lzToken = bySymbol ?? byMint
+    return { mint: lzToken?.mint ?? raw, lzToken }
+}
+
+/** Simulate the built transaction without sending and print what it would do. */
+async function dryRun(
+    connection: import('@solana/web3.js').Connection,
+    umi: Umi,
+    txBuilder: ReturnType<typeof transactionBuilder>
+) {
+    const built = await txBuilder.buildWithLatestBlockhash(umi)
+    const web3Tx = toWeb3JsTransaction(built)
+    const size = web3Tx.serialize().length
+    const sim = await connection.simulateTransaction(web3Tx, { sigVerify: false, replaceRecentBlockhash: true })
+    console.log('--- dry run, nothing sent ---')
+    console.log('transaction size:', size, 'bytes (limit 1232)')
+    console.log('compute units:', sim.value.unitsConsumed ?? 'unknown')
+    if (sim.value.err) {
+        console.log('simulation FAILED:', JSON.stringify(sim.value.err))
+    } else {
+        console.log('simulation ok')
+    }
+    for (const line of sim.value.logs ?? []) console.log(' ', line)
+    if (sim.value.err) throw new Error('Dry run failed; see the logs above.')
+}
 
 /**
  * Token bridging tasks.
@@ -28,12 +71,14 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addParam('mint', 'Token mint (base58). "usdc" = profile CCTP USDC mint', undefined, types.string)
     .addParam('provider', 'cctp, ccip, or oft (LayerZero)', undefined, types.string)
-    .addOptionalParam('oftProgram', 'oft only: the token\'s OFT program id', '', types.string)
-    .addOptionalParam('escrow', 'oft only: the OFT token escrow account', '', types.string)
-    .addOptionalParam('dstEid', 'oft only: LayerZero endpoint id of the destination (Arbitrum 30110, Ethereum 30101)', undefined, types.int)
     .addOptionalParam('chainId', 'EVM chain id. Default: Sepolia 11155111 on devnet', undefined, types.int)
     .addOptionalParam('receiver', 'EVM treasury address. Default: profile.treasury', '', types.string)
-    .addOptionalParam('destinationCaller', 'CCTP only: EVM address allowed to claim. Default: receiver. "any" = anyone', '', types.string)
+    .addOptionalParam(
+        'destinationCaller',
+        'CCTP only: EVM address allowed to claim. Default: receiver. "any" = anyone',
+        '',
+        types.string
+    )
     .addOptionalParam('maxAmount', 'Per-tx cap in base units', '1000000000', types.string)
     .addOptionalParam('enabled', 'true or false', 'true', types.string)
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
@@ -43,23 +88,26 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
         const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
         const instance = new lendmirror.LendMirror(publicKey(getSolanaDeployment(eid).programId))
         const receiver = args.receiver || profile.treasury
-        if (!receiver) throw new Error('No treasury address. Deploy LendMirrorTreasury and set profile.treasury, or pass --receiver.')
+        if (!receiver)
+            throw new Error(
+                'No treasury address. Deploy LendMirrorTreasury and set profile.treasury, or pass --receiver.'
+            )
         const chainId = BigInt(args.chainId ?? (profile.type === 'devnet' ? 11155111 : 42161))
-        const mint = args.mint === 'usdc' ? profile.cctp?.usdcMint : args.mint
-        if (!mint) throw new Error('No USDC mint in the profile; pass --mint.')
+        const { mint, lzToken } = resolveMint(profile, args.mint)
 
         let provider: number
         let providerProgram: string
-        let providerAux = ''
         let domainOrSelector: bigint
+        let gasLimit = 0n
         if (args.provider === 'oft') {
-            if (!args.oftProgram || !args.escrow || args.dstEid === undefined) {
-                throw new Error('--provider oft needs --oft-program, --escrow, and --dst-eid')
-            }
+            // Everything comes from the profile's captured lane data (config/<type>.ts lzTokens).
+            if (!lzToken) throw new Error(`--provider oft: ${args.mint} is not in the profile's lzTokens.`)
             provider = PROVIDER_LZ_OFT
-            providerProgram = args.oftProgram
-            providerAux = args.escrow
-            domainOrSelector = BigInt(args.dstEid)
+            providerProgram = lzToken.issuerProgram
+            domainOrSelector = 30110n // Arbitrum; every captured lane is Solana → Arbitrum
+            // For LayerZero the route's gas_limit field carries the position of the sender's
+            // token account in the issuer's send, which the program pins.
+            gasLimit = BigInt(lzToken.tokenSourceIndex)
         } else if (args.provider === 'cctp') {
             if (!profile.cctp) throw new Error('No CCTP config in the profile.')
             provider = PROVIDER_CCTP
@@ -73,7 +121,9 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
         } else {
             throw new Error('--provider must be cctp, ccip, or oft')
         }
-        const destinationCaller = args.destinationCaller === 'any' ? '' : args.destinationCaller || receiver
+        // Only CCTP reads destination_caller; store zeros elsewhere.
+        const destinationCaller =
+            args.provider !== 'cctp' || args.destinationCaller === 'any' ? '' : args.destinationCaller || receiver
 
         let txBuilder = transactionBuilder().add(
             setBridgeRoute(instance, umiWalletSigner, {
@@ -81,31 +131,57 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
                 dstChainId: chainId,
                 provider,
                 providerProgram,
-                providerAux,
                 receiver,
                 destinationCaller,
                 domainOrSelector,
-                gasLimit: 0n,
+                gasLimit,
                 enabled: args.enabled === 'true',
                 maxAmountPerTx: BigInt(args.maxAmount),
             })
         )
-        txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, args.computeUnitPriceScaleFactor, TransactionType.SetAuthority)
+        txBuilder = await addComputeUnitInstructions(
+            connection,
+            umi,
+            eid,
+            txBuilder,
+            umiWalletSigner,
+            args.computeUnitPriceScaleFactor,
+            TransactionType.SetAuthority
+        )
         const tx = await txBuilder.sendAndConfirm(umi)
         console.log(`setBridgeRoute: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
         console.log('route', bridgeRouteAddress(String(instance.programId), mint, chainId).toBase58())
-        console.log({ mint, chainId: chainId.toString(), provider: args.provider, receiver, destinationCaller: destinationCaller || 'anyone' })
+        console.log({
+            mint,
+            chainId: chainId.toString(),
+            provider: args.provider,
+            receiver,
+            destinationCaller: destinationCaller || 'anyone',
+        })
+        if (lzToken)
+            console.log(
+                `Treasury side: set a strategy for ${lzToken.symbol} on Arbitrum (${lzToken.evmToken}) before forwarding.`
+            )
     })
 
-task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper to the EVM treasury (route decides how and where)')
+task(
+    'lz:oapp:solana:bridge-tokens',
+    'Level >= 1: bridge tokens from a wrapper to the EVM treasury (route decides how and where)'
+)
     .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
     .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
     .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
     .addParam('mint', 'Token mint (base58). "usdc" = profile CCTP USDC mint', undefined, types.string)
     .addParam('amount', 'Base units to bridge', undefined, types.string)
     .addOptionalParam('chainId', 'EVM chain id. Default: Sepolia 11155111 on devnet', undefined, types.int)
-    .addOptionalParam('fast', 'CCTP fast transfer: pass the max fee in base units. Default: standard, no fee', '', types.string)
+    .addOptionalParam(
+        'fast',
+        'CCTP fast transfer: pass the max fee in base units. Default: standard, no fee',
+        '',
+        types.string
+    )
     .addOptionalParam('fundLamports', 'CCIP only: SOL moved onto the bridge signer for the fee', 50_000_000, types.int)
+    .addFlag('dryRun', 'Build and simulate everything, print the result, send nothing')
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(async (args) => {
         const { PublicKey } = await import('@solana/web3.js')
@@ -116,15 +192,20 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
         const programId = getSolanaDeployment(eid).programId
         const instance = new lendmirror.LendMirror(publicKey(programId))
         const chainId = BigInt(args.chainId ?? (profile.type === 'devnet' ? 11155111 : 42161))
-        const mint = args.mint === 'usdc' ? profile.cctp?.usdcMint : args.mint
-        if (!mint) throw new Error('No USDC mint in the profile; pass --mint.')
+        const { mint, lzToken } = resolveMint(profile, args.mint)
 
         const routeInfo = await connection.getAccountInfo(bridgeRouteAddress(programId, mint, chainId))
         if (!routeInfo) throw new Error('No BridgeRoute for this mint and chain. Run set-bridge-route first.')
         const route = lendmirror.accounts.getBridgeRouteAccountDataSerializer().deserialize(routeInfo.data)[0]
         const [wrapper] = instance.pda.wrapper(args.vaultId, args.nftId)
         const ondemand = await instance.ondemandIfAttached(umi.rpc, wrapper)
-        const common = { vaultId: args.vaultId, nftId: args.nftId, mint, dstChainId: chainId, amount: BigInt(args.amount) }
+        const common = {
+            vaultId: args.vaultId,
+            nftId: args.nftId,
+            mint,
+            dstChainId: chainId,
+            amount: BigInt(args.amount),
+        }
 
         let txBuilder = transactionBuilder()
         const extraLookupTables: ReturnType<typeof publicKey>[] = []
@@ -157,34 +238,185 @@ task('lz:oapp:solana:bridge-tokens', 'Level >= 1: bridge tokens from a wrapper t
             txBuilder = txBuilder.add(built.instruction)
             extraLookupTables.push(built.lookupTable)
         } else if (route.provider === PROVIDER_LZ_OFT) {
-            const receiver = '0x' + Buffer.from(route.receiver).subarray(12).toString('hex')
-            const built = await bridgeTokensOft(
-                instance,
-                umi.rpc,
-                umiWalletSigner,
-                {
-                    ...common,
-                    oftProgram: String(route.providerProgram),
-                    tokenEscrow: String(route.providerAux),
-                    dstEid: Number(route.domainOrSelector),
-                    receiver,
-                },
-                ondemand
+            // Two instructions, in this exact order: our release, then the issuer's send. The
+            // program reads the send through the instructions sysvar and refuses anything that
+            // does not go, whole, to the route's receiver. The wallet pays the LayerZero fee.
+            if (!lzToken) throw new Error('This mint has no LayerZero lane in the profile (config lzTokens).')
+            const { getAssociatedTokenAddressSync } = await import('@solana/spl-token')
+            const walletPk = new PublicKey(umiWalletSigner.publicKey)
+            const tokenSource = getAssociatedTokenAddressSync(
+                new PublicKey(mint),
+                walletPk,
+                false,
+                new PublicKey(lzToken.tokenProgram)
             )
-            console.log('LayerZero fee:', built.nativeFee.toString(), 'lamports; amount arriving:', built.amountReceived.toString())
-            txBuilder = txBuilder.add(built.instruction)
+            txBuilder = txBuilder.add(
+                bridgeTokensLz(instance, umiWalletSigner, { ...common, tokenProgram: lzToken.tokenProgram }, ondemand)
+            )
+            const sendIx = buildIssuerSend({
+                token: lzToken,
+                signer: walletPk,
+                tokenSource,
+                receiver: route.receiver,
+                amount: common.amount,
+            })
+            txBuilder = txBuilder.add({
+                instruction: fromWeb3JsInstruction(sendIx),
+                signers: [umiWalletSigner],
+                bytesCreatedOnChain: 0,
+            })
+            extraLookupTables.push(publicKey(lzToken.lookupTable))
+            console.log(
+                `${lzToken.symbol}: fee cap ${lzToken.nativeFeeCapLamports} lamports, paid by the wallet; arrives as ${lzToken.evmToken} on Arbitrum.`
+            )
         } else {
             throw new Error(`Route provider ${route.provider} has no instruction (Wormhole NTT is reserved).`)
         }
-        txBuilder = await addComputeUnitInstructions(connection, umi, eid, txBuilder, umiWalletSigner, args.computeUnitPriceScaleFactor, TransactionType.SendMessage, extraLookupTables)
+        txBuilder = await addComputeUnitInstructions(
+            connection,
+            umi,
+            eid,
+            txBuilder,
+            umiWalletSigner,
+            args.computeUnitPriceScaleFactor,
+            TransactionType.SendMessage,
+            extraLookupTables
+        )
+        if (args.dryRun) {
+            await dryRun(connection, umi, txBuilder)
+            return
+        }
         const tx = await txBuilder.sendAndConfirm(umi)
         const sig = bs58.encode(tx.signature)
         console.log(`bridgeTokens: ${getExplorerTxLink(sig, eid === 40168)}`)
         if (route.provider === PROVIDER_CCTP) {
-            console.log('Next: wait for Circle attestation, then `npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash', sig + '`')
+            console.log(
+                'Next: wait for Circle attestation, then `npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash',
+                sig + '`'
+            )
         }
         if (route.provider === PROVIDER_LZ_OFT) {
             const { getLayerZeroScanLink } = await import('../utils')
             console.log('LayerZero:', getLayerZeroScanLink(sig, profile.type === 'devnet'))
         }
+    })
+
+task(
+    'lz:oapp:solana:swap-to-usdc',
+    'Admin/sender: swap a wrapper-held token into USDC through Jupiter, staying in program custody'
+)
+    .addOptionalParam('eid', 'Solana endpoint ID. Default: DEPLOYMENT_TYPE profile.', undefined, types.int)
+    .addOptionalParam('vaultId', 'Jupiter vault id', 1, types.int)
+    .addOptionalParam('nftId', 'Jupiter position nft id', 29, types.int)
+    .addParam('mint', 'Token to sell (symbol from the profile or a mint), e.g. PST', undefined, types.string)
+    .addParam('amount', 'Base units to sell', undefined, types.string)
+    .addOptionalParam('slippageBps', 'Allowed slippage in bps (program cap: 100)', 50, types.int)
+    .addOptionalParam('chainId', 'Chain id of the USDC route that authorizes the output mint', undefined, types.int)
+    .addFlag('dryRun', 'Build and simulate everything, print the result, send nothing')
+    .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
+    .setAction(async (args) => {
+        const { PublicKey } = await import('@solana/web3.js')
+        const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } = await import('@solana/spl-token')
+        const eid = resolveSolanaEid(args.eid)
+        const profile = getProfile()
+        if (!profile.jupiter) throw new Error('No Jupiter config in this profile (mainnet only).')
+        if (!profile.cctp) throw new Error('No USDC (CCTP) config in this profile.')
+        const { connection, umi, umiWalletSigner } = await deriveConnection(eid)
+        const programId = getSolanaDeployment(eid).programId
+        const instance = new lendmirror.LendMirror(publicKey(programId))
+        const chainId = BigInt(args.chainId ?? (profile.type === 'devnet' ? 11155111 : 42161))
+        const { mint } = resolveMint(profile, args.mint)
+        const usdc = profile.cctp.usdcMint
+        const [wrapper] = instance.pda.wrapper(args.vaultId, args.nftId)
+        const [wrapperAuthority] = instance.pda.wrapperAuthority(wrapper)
+        const authorityPk = new PublicKey(wrapperAuthority)
+
+        // Both mints' owning token programs, read from chain (PST is classic; stay general).
+        const mintInfo = await connection.getAccountInfo(new PublicKey(mint))
+        if (!mintInfo) throw new Error(`Mint ${mint} not found.`)
+        const sourceTokenProgram = mintInfo.owner
+
+        // Jupiter quote + swap instruction, forced onto the plain `route` form the program
+        // checks: no shared accounts (custody pin), direct routes (call depth).
+        const quoteUrl =
+            `${profile.jupiter.swapApi}/quote?inputMint=${mint}&outputMint=${usdc}` +
+            `&amount=${args.amount}&slippageBps=${args.slippageBps}&onlyDirectRoutes=true`
+        const quote = await (await fetch(quoteUrl)).json()
+        if (quote.error) throw new Error(`Jupiter quote failed: ${quote.error}`)
+        console.log(`quote: ${args.amount} in -> ${quote.outAmount} USDC out (impact ${quote.priceImpactPct}%)`)
+        const swapResponse = await (
+            await fetch(`${profile.jupiter.swapApi}/swap-instructions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    quoteResponse: quote,
+                    userPublicKey: authorityPk.toBase58(),
+                    useSharedAccounts: false,
+                    wrapAndUnwrapSol: false,
+                }),
+            })
+        ).json()
+        if (swapResponse.error) throw new Error(`Jupiter swap-instructions failed: ${swapResponse.error}`)
+        const swapIx = swapResponse.swapInstruction
+
+        const ondemand = await instance.ondemandIfAttached(umi.rpc, wrapper)
+        const ix = lendmirror.instructions
+            .swapToUsdc(
+                { identity: umiWalletSigner, programs: instance.programRepo },
+                {
+                    authority: umiWalletSigner,
+                    store: instance.pda.oapp()[0],
+                    wrapper,
+                    ondemand,
+                    wrapperAuthority,
+                    sourceMint: publicKey(mint),
+                    destinationMint: publicKey(usdc),
+                    destinationRoute: publicKey(bridgeRouteAddress(programId, usdc, chainId).toBase58()),
+                    sourceAta: publicKey(
+                        getAssociatedTokenAddressSync(
+                            new PublicKey(mint),
+                            authorityPk,
+                            true,
+                            sourceTokenProgram
+                        ).toBase58()
+                    ),
+                    destinationAta: publicKey(
+                        getAssociatedTokenAddressSync(new PublicKey(usdc), authorityPk, true).toBase58()
+                    ),
+                    jupiterProgram: publicKey(profile.jupiter.program),
+                    sourceTokenProgram: publicKey(sourceTokenProgram.toBase58()),
+                    destinationTokenProgram: publicKey(TOKEN_PROGRAM_ID),
+                    // Kinobi inlines the one-field params struct.
+                    data: Uint8Array.from(Buffer.from(swapIx.data, 'base64')),
+                }
+            )
+            .addRemainingAccounts(
+                // Jupiter's accounts in Jupiter's order. The wrapper authority signs inside the
+                // program; nothing signs from outside.
+                swapIx.accounts.map((a: { pubkey: string; isWritable: boolean }) => ({
+                    pubkey: publicKey(a.pubkey),
+                    isSigner: false,
+                    isWritable: a.isWritable,
+                }))
+            ).items[0]
+
+        let txBuilder = transactionBuilder().add(ix)
+        const extraLookupTables = (swapResponse.addressLookupTableAddresses ?? []).map((a: string) => publicKey(a))
+        txBuilder = await addComputeUnitInstructions(
+            connection,
+            umi,
+            eid,
+            txBuilder,
+            umiWalletSigner,
+            args.computeUnitPriceScaleFactor,
+            TransactionType.SendMessage,
+            extraLookupTables
+        )
+        if (args.dryRun) {
+            await dryRun(connection, umi, txBuilder)
+            return
+        }
+        const tx = await txBuilder.sendAndConfirm(umi)
+        console.log(`swapToUsdc: ${getExplorerTxLink(bs58.encode(tx.signature), eid === 40168)}`)
+        console.log("USDC landed in the wrapper authority's USDC account. Bridge it with bridge-tokens --mint usdc.")
     })
