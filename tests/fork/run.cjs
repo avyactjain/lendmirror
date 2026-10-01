@@ -82,6 +82,34 @@ const cloneFlags = readFileSync(path.join(__dirname, 'clone-flags.txt'), 'utf8')
     .split('\n')
     .filter(Boolean)
     .flatMap((line) => line.trim().split(/\s+/))
+// The USDai LayerZero lane (issuer program, message library, executor, verifiers, price feed,
+// lane accounts, lookup table). Regenerate with tests/fork/dump-lz-accounts.ts.
+const lzCloneFlags = readFileSync(path.join(__dirname, 'lz-clone-flags.txt'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => line.trim().split(/\s+/))
+
+/**
+ * `--account` flag that gives `owner` a funded USDai (Token-2022) account at genesis. Built
+ * from a real mainnet account's bytes (tests/fork/usdai-account.json) so the extension TLV the
+ * mint demands (transfer hook state, etc.) is present; only the owner and amount bytes change.
+ */
+function usdaiAccountFlag(owner) {
+    const { PublicKey } = require('@solana/web3.js')
+    const mint = new PublicKey('USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A')
+    const token2022 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+    const ataProgram = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+    const ownerKey = new PublicKey(owner)
+    const [ata] = PublicKey.findProgramAddressSync([ownerKey.toBuffer(), token2022.toBuffer(), mint.toBuffer()], ataProgram)
+    const fixture = JSON.parse(readFileSync(path.join(__dirname, 'usdai-account.json'), 'utf8'))
+    const data = Buffer.from(fixture.data, 'base64')
+    ownerKey.toBuffer().copy(data, 32)
+    data.writeBigUInt64LE(1_000_000_000n, 64) // 1,000 USDai
+    const file = path.join(os.tmpdir(), 'lendmirror-fork-wallet-usdai.json')
+    const account = { lamports: 3_000_000, data: [data.toString('base64'), 'base64'], owner: token2022.toBase58(), executable: false, rentEpoch: 0, space: data.length }
+    writeFileSync(file, JSON.stringify({ pubkey: ata.toBase58(), account }))
+    return ['--account', ata.toBase58(), file]
+}
 
 const args = [
     '--reset',
@@ -94,7 +122,9 @@ const args = [
     '--clone', LZ_ENDPOINT_SETTINGS,
     '--clone-upgradeable-program', MPL_TOKEN_METADATA,
     ...cloneFlags,
+    ...lzCloneFlags,
     ...usdcAccountFlag(walletPubkey),
+    ...usdaiAccountFlag(walletPubkey),
 ]
 console.log(`starting ${validatorVersion} with ${cloneFlags.length / 2} cloned Jupiter entries${canWarp ? ', warped to mainnet slot' : ' (no warp: borrow step will skip)'}`)
 const validator = spawn(VALIDATOR, args, { stdio: ['ignore', 'inherit', 'inherit'] })
@@ -124,7 +154,7 @@ function waitForRpc(attempts = 300) {
         await new Promise((r) => setTimeout(r, 3000))
         const mocha = spawnSync(
             'npx',
-            ['ts-mocha', '-p', './tsconfig.json', '-t', '600000', 'tests/fork/custody.fork.test.ts'],
+            ['ts-mocha', '-p', './tsconfig.json', '-t', '600000', 'tests/fork/custody.fork.test.ts', 'tests/fork/bridge-lz.fork.test.ts'],
             {
                 stdio: 'inherit',
                 env: {
