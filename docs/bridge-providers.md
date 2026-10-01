@@ -1,63 +1,106 @@
 # Bridge providers: Solana → EVM
 
 What carries each token from the Solana program to the EVM treasury, and what is verified.
+Everything here was checked on 2026-10-01: Chainlink's lanes API, the issuers' programs read
+on mainnet, real sends decoded, and our builders simulated against live mainnet (read-only).
 
-Every provider's Solana-side send takes a 32-byte destination and a source token account.
-The program never lets the caller choose either: the destination comes from an admin-set
-`BridgeRoute` account and the source is a program-owned token account. See
+Every route is admin-set (`BridgeRoute`): the destination is never a caller parameter, and
+tokens leave only from program-owned accounts. See
 `programs/lendmirror/src/instructions/bridge_tokens.rs`.
 
-Status legend: **built** = instruction exists and is unit-tested; **devnet** = exercised on Devnet;
-**matrix** = researched, no code yet; **unknown** = needs an answer from the team.
+## The map, verified
 
-## Tokens
+| Token  | Solana mint                                                           | Bridge                                                        | Arrives on Arbitrum as                                                    | Status                                                                                                       |
+| ------ | --------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| USDC   | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`                        | Circle CCTP v2 (`bridge_tokens_cctp`)                         | USDC                                                                      | **Proven on mainnet** (Test Run, 1 USDC)                                                                     |
+| USDT   | `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` (Tether's native mint) | USDT0 "Legacy Mesh" over LayerZero, via `bridge_tokens_lz`    | USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, minus 0.03%           | Send simulated clean on live mainnet; fork-proven mechanism                                                  |
+| USDai  | `USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A` (Token-2022)            | USD.AI's `console_oft` over LayerZero, via `bridge_tokens_lz` | USDai `0x0A1a1A107E45b7Ced86833863f482BC5f4ed82EF` (18 decimals), no fee  | **Fork-proven end to end** (burn + queue); send simulated clean on live mainnet                              |
+| sUSDai | `sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE` (Token-2022)            | same program as USDai, via `bridge_tokens_lz`                 | sUSDai `0x0B2b2B2076d95dda7817e785989fE353fe955ef9` (18 decimals), no fee | Send simulated clean on live mainnet; same lane shape as USDai                                               |
+| PST    | `59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw`                        | Jupiter swap into USDC (`swap_to_usdc`), then Circle          | USDC                                                                      | Swap quote + instruction layout verified read-only (1 PST ≈ 1.135 USDC, ~0% impact, Jupiter Lend's own pool) |
 
-Token list confirmed on 2026-09-28: **USDC, USDT, USDai, sUSDai, PST**. Chainlink listing checked
-against the CCIP directory data (`smartcontractkit/documentation`, `ccip/v1_2_0/mainnet/tokens.json`
-and `lanes.json`), not against search summaries.
+Why not the obvious rails, checked three ways (Chainlink's APIs, the registries, the chain):
 
-| Token | Solana mint | Chainlink CCIP on Solana? | Rail to EVM | Destinations from Solana | Status |
-|---|---|---|---|---|---|
-| USDC | mainnet `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, devnet `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` | **Yes** (pool type `usdc`, which is Chainlink's CCTP-backed pool) | Circle CCTP v2 directly, or CCIP | CCTP: Ethereum, Arbitrum, Base, Optimism, Avalanche, Polygon and more. CCIP lanes: Ethereum, Arbitrum, Base, Optimism, Unichain, Avalanche, Polygon | **devnet** both ways: CCTP with Devnet USDC, CCIP with CCIP-BnM (same instruction and pool shape) |
-| USDT | mainnet `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` | **No.** CCIP lists USDT on Ethereum, Base, Optimism, Sonic and a few others, but has no Solana entry | USDT0 (LayerZero OFT) | per USDT0's Solana pathways (verify) | **built** (`bridge_tokens_oft`); needs the USDT0 Solana OFT program id and escrow for the route |
-| USDai | `USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A` (LayerZero OFT spoke) | **No** (not in the directory) | LayerZero OFT. Hub: Arbitrum. Spokes: Ethereum, Base, Plasma, Solana | Arbitrum hub, and whichever spoke pathways USD.AI enabled (the meeting note "only Arbitrum" matches the hub) | **built** (`bridge_tokens_oft`); needs USD.AI's Solana OFT program id and escrow for the route |
-| sUSDai | `sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE` (LayerZero OFT spoke) | **No** | LayerZero OFT, same layout as USDai | same as USDai | **built** (`bridge_tokens_oft`), same inputs as USDai |
-| PST (PayFi Strategy Token) | `59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw` (6 decimals, `lockRelease` pool) | **Yes** | CCIP | Ethereum mainnet and Arc mainnet. The directory shows **no Polygon lane for PST**; the meeting note said "PST only to Polygon", so confirm the intended destination | **built**; the instruction is proven on Devnet with CCIP-BnM (`bridge_tokens_ccip`, `--provider ccip`) |
+- **Chainlink does not carry USDT, USDai or sUSDai out of Solana at all.** Its Solana→Arbitrum
+  lane exists but lists neither. PST it carries only to Ethereum and Arc; PST is on no
+  Solana→Arbitrum lane, no LayerZero OFT, no Wormhole deployment, and has no contract on
+  Arbitrum. So PST can reach Arbitrum only as USDC.
+- **LayerZero carries the other three, but no issuer uses LayerZero's standard OFT program.**
+  USDT0's Legacy Mesh and USD.AI's `console_oft` are custom programs with their own account
+  lists (decoded from real sends; USD.AI also publishes an IDL on-chain).
+- **Our program cannot CPI into them.** Their send already uses all five levels of Solana's
+  call-depth budget (issuer → endpoint → message library → executor/verifiers → price feed,
+  measured on real transactions). A CPI from us would be level six; Solana allows five.
+  SIMD-0268 would raise the limit to 8 but is inactive on every cluster (checked 2026-09-30).
 
-Devnet: CCIP-BnM `3PjyGzj1jGVgHSKS4VR1Hr1memm63PmN8L9rtPDKwzZ6` is the only burn-mint test token with a Solana Devnet lane; USDC also has a Devnet `usdc` pool. On 2026-09-28, 0.5 BnM went from wrapper (1, 29) through `bridge_tokens_ccip` to the Sepolia treasury and on to its strategy address (CCIP message `0xa4ab447e…`).
+## The same-transaction guard (`bridge_tokens_lz`)
 
-Summary: two of the five tokens go over Chainlink from Solana (USDC, PST). The other three (USDT as USDT0, USDai, sUSDai) are LayerZero OFTs and go through `bridge_tokens_oft`. For each OFT route the admin needs the token's OFT program id and its escrow account (the OFT store and peer derive from the escrow); `set-bridge-route --provider oft --oft-program … --escrow … --dst-eid 30110`.
+The issuer's send runs as its own instruction, right after ours, in one all-or-nothing
+transaction. Our instruction reads the transaction through the instructions sysvar and releases
+the tokens to the caller's token account only when the next instruction:
 
-## Circle CCTP or Chainlink for USDC?
+- is the route's issuer program, with the OFT `send` discriminator;
+- sends exactly the released amount, to exactly the route's receiver, on the route's lane;
+- pulls from the caller's token account, at the account position the route pins (`gas_limit`);
+- carries no executor options (the two-byte `0x0003` header counts as none) and no compose;
+- keeps `min_amount_ld` within 0.5% of the amount.
 
-Chainlink's Solana USDC pool is itself built on Circle CCTP (pool type `usdc`), so going through CCIP means CCTP plus Chainlink's routing, fee, and risk management on top. Using CCTP directly means fewer parties, no LINK/SOL CCIP fee, and Circle's own attestation, at the cost of claiming on the EVM side ourselves (`claimCctp`) unless the route leaves `destination_caller` empty. Both are built; the route's `provider` field picks one per token. Recommendation: CCTP directly for USDC (it is the canonical rail and the cheapest), CCIP for PST (its only rail), OFT for the rest. Either way Circle can freeze USDC at the mint; that is true of USDC on any bridge.
+Plus: our program must be called top-level (not through another program), and only once per
+transaction. If the send fails or is missing, the whole transaction reverts and nothing left
+the wrapper; there is no transaction in which the tokens end anywhere but the treasury.
+Flash-loan programs use the same sysvar pattern for "the repayment is later in this transaction".
+
+The caller's wallet signs the issuer send and pays the LayerZero fee in SOL (~0.001 SOL
+observed). Proven on a local fork of mainnet with the whole LayerZero stack cloned: the happy
+path burns the exact amount at call depth 5, and eight tampered pairings are refused
+(`tests/fork/bridge-lz.fork.test.ts`).
+
+Each lane lives in `config/mainnet.ts` (`lzTokens`): the full account list captured from a real
+send, the issuer's lookup table, and which slots are substituted (the signer, its token
+account, and USD.AI's per-sender rate-limit-exemption PDA). A stale template can only make the
+send fail, never redirect it — the program re-checks everything that moves money.
+
+Issuer facts worth knowing (read from the mints and stores):
+
+- USDai and sUSDai are Token-2022 mints whose issuer keeps a permanent delegate (it can move or
+  burn tokens in any account), a pause switch, and a transfer-hook slot (currently unset).
+  Route caps stay low on purpose. Outbound rate limit ~10M per hour per token, shared.
+- USDT0 locks native USDT in its escrow; its per-lane credit ledger caps outbound volume
+  (~294k USDT to Arbitrum at read time). The 0.03% fee is taken on Arbitrum at release.
+- USDT0 publishes no IDL; its builder comes from a decoded real send and is pinned by tests and
+  verified by live simulation. USDT goes last in testing for exactly this reason.
+
+## PST: swap, then Circle (`swap_to_usdc`)
+
+`swap_to_usdc` (admin or sender only; wrapper level 1 or 2) forwards a Jupiter v6 plain `route`
+call. The program pins Jupiter's authority, source and destination slots to the wrapper
+authority and its token accounts, requires the output mint to have an enabled bridge route,
+refuses platform fees, and caps slippage at 1%. Call depth: us → Jupiter → pool → token
+program (4 of 5). The client asks Jupiter's swap API for `onlyDirectRoutes` without shared
+accounts; slot layout verified against real mainnet `route` transactions. The USDC lands in the
+wrapper's own USDC account and leaves through the proven Circle path.
+
+Huma's own exits (for reference): a redemption queue (USDC to the depositing wallet, daily
+cap), and the on-chain PST/USDC pool that Jupiter routes through. We use the pool.
 
 ## Providers
 
-| Provider | Solana program | Instruction | Sender model | Fee | EVM receive |
-|---|---|---|---|---|---|
-| Circle CCTP v2 | TokenMessengerMinterV2 `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe`, MessageTransmitterV2 `CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC` (same ids on Devnet and mainnet) | `deposit_for_burn { amount, destination_domain, mint_recipient, destination_caller, max_fee, min_finality_threshold }` | Token account owner signs; our bridge signer PDA via `invoke_signed`. A fresh keypair signs as `message_sent_event_data`. | none (standard) or `max_fee` (fast) | USDC minted straight to `mint_recipient`. `LendMirrorTreasury.claimCctp(message, attestation)` calls `receiveMessage` when the route names the treasury as `destination_caller`. Attestation: `https://iris-api-sandbox.circle.com/v2/messages/5?transactionHash=…` (production: `iris-api.circle.com`). |
-| Chainlink CCIP | Router `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C` (Devnet), fee quoter `FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi`, RMN `RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7` | `ccip_send(dest_chain_selector, SVM2AnyMessage { receiver, data, token_amounts, fee_token, extra_args }, token_indexes)` | `authority` signs and pays; our bridge signer PDA (must hold no data). Per-token accounts come from the token admin registry and its lookup table. | SOL (native) | Router transfers tokens to the receiver contract, then calls `ccipReceive` with `destTokenAmounts`. `LendMirrorTreasury.ccipReceive` checks router, source selector, and sender. |
-| LayerZero OFT | per token: the issuer's OFT program; store PDA `["OFT", escrow]`, peer PDA `["Peer", store, dst_eid be]` | `send { dst_eid, to, amount_ld, min_amount_ld, options, compose_msg, native_fee, lz_token_fee }` | token source owner signs and pays the fee; our bridge signer PDA | SOL (quoted by the OFT's `quote_send`) | tokens credited to `to` on the destination; no compose | **built** (`bridge_tokens_oft`) |
-| Wormhole NTT | per token | `transfer` | token owner signs | SOL | NTT manager mints to recipient | reserved |
+| Provider                        | Solana program                                                                                              | How we drive it                                                                                   | Fee                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Circle CCTP v2                  | TokenMessengerMinterV2 `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe`                                       | CPI (`bridge_tokens_cctp`), bridge signer PDA signs                                               | none standard, `max_fee` fast |
+| Chainlink CCIP                  | Router `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`                                                       | CPI (`bridge_tokens_ccip`), bridge signer PDA signs and pays                                      | SOL                           |
+| LayerZero (issuer programs)     | USDT0 `Fuww9mfc8ntAwxPUzFia7VJFAdvLppyZwhPJoXySZXf7`, USD.AI `BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm` | same-transaction guard (`bridge_tokens_lz`); the caller's wallet signs the issuer's send and pays | SOL, ~0.001 observed          |
+| Jupiter v6 (swap, not a bridge) | `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`                                                               | CPI (`swap_to_usdc`), wrapper authority signs                                                     | pool fee inside the price     |
+| Wormhole NTT                    | —                                                                                                           | reserved (`PROVIDER_WORMHOLE_NTT = 4`), nothing implements it                                     | —                             |
 
 ## Chain ids and selectors used by routes
 
-| Destination | EVM chain id (route key) | CCTP domain | CCIP selector |
-|---|---|---|---|
-| Ethereum Sepolia | 11155111 | 0 | 16015286601757825753 |
-| Ethereum | 1 | 0 | 5009297550715157269 |
-| Arbitrum | 42161 | 3 | 4949039107694359620 |
-| Base | 8453 | 6 | 15971525489660198786 |
-| Polygon | 137 | 7 | 4051577828743386545 |
+| Destination      | EVM chain id (route key) | CCTP domain | CCIP selector        | LayerZero eid |
+| ---------------- | ------------------------ | ----------- | -------------------- | ------------- |
+| Ethereum Sepolia | 11155111                 | 0           | 16015286601757825753 | 40161         |
+| Ethereum         | 1                        | 0           | 5009297550715157269  | 30101         |
+| Arbitrum One     | 42161                    | 3           | 4949039107694359620  | 30110         |
+| Base             | 8453                     | 6           | 15971525489660198786 | 30184         |
+| Polygon          | 137                      | 7           | 4051577828743386545  | 30109         |
 
-Selectors for mainnet chains are from Chainlink's directory and should be re-checked there before a route is set.
-
-## Devnet experiment (planned order)
-
-1. Deploy `LendMirrorTreasury` on Sepolia (`npx hardhat deploy --tags LendMirrorTreasury`), set `profile.treasury`.
-2. `lz:oapp:solana:set-bridge-route --mint usdc --provider cctp` (receiver = treasury, destination caller = treasury).
-3. Fund the wrapper authority's USDC ATA on Devnet (Circle faucet USDC to the wallet, then a plain SPL transfer).
-4. `lz:oapp:solana:bridge-tokens --mint usdc --amount 1000000`.
-5. Wait for the sandbox attestation, then `lz:oapp:evm:treasury:claim-cctp --tx-hash <sig>`.
-6. `lz:oapp:evm:treasury:set-strategy --token <sepolia USDC> --strategy <addr>` and `lz:oapp:evm:treasury:forward --token <sepolia USDC>`.
+For a LayerZero route, the route's `domain_or_selector` holds the eid and `gas_limit` holds the
+token-source position in the issuer's send (USD.AI 9, USDT0 4).

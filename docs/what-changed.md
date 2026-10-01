@@ -82,12 +82,12 @@ Not possible. The program had no token code at all.
 **After:**
 Four new instructions.
 
-| Instruction | Who | What |
-|---|---|---|
-| `set_wrapper_level` | admin | 0 = mirror only. 1 = deposit and pay back. 2 = also withdraw and borrow. 3 and 4 = stored but everything is rejected until defined. |
-| `deposit_position_nft` | the NFT holder | moves the Jupiter position NFT from the holder's wallet into the authority PDA's token account; the holder becomes the wrapper owner |
-| `release_position_nft` | admin | moves it back to the wrapper owner (escape hatch; never to anyone else) |
-| `operate_position` | owner or OnDemand caller | calls Jupiter `operate_dex` (smart vaults only) with the authority PDA as signer and recipient, after checking the level and that every account Jupiter can pay into belongs to the PDA |
+| Instruction            | Who                      | What                                                                                                                                                                                    |
+| ---------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set_wrapper_level`    | admin                    | 0 = mirror only. 1 = deposit and pay back. 2 = also withdraw and borrow. 3 and 4 = stored but everything is rejected until defined.                                                     |
+| `deposit_position_nft` | the NFT holder           | moves the Jupiter position NFT from the holder's wallet into the authority PDA's token account; the holder becomes the wrapper owner                                                    |
+| `release_position_nft` | admin                    | moves it back to the wrapper owner (escape hatch; never to anyone else)                                                                                                                 |
+| `operate_position`     | owner or OnDemand caller | calls Jupiter `operate_dex` (smart vaults only) with the authority PDA as signer and recipient, after checking the level and that every account Jupiter can pay into belongs to the PDA |
 
 Why this is safe: Jupiter sends withdrawn collateral and borrowed tokens to the `recipient`.
 The program always passes its own PDA there, so those tokens can only land in a program-owned
@@ -125,11 +125,11 @@ carries it, which Ethereum address receives, and a per-transaction cap. Then any
 or higher runs one of three send routines, one per bridge company. Those instructions take an
 **amount only**. The destination comes from the route, so a caller cannot redirect funds.
 
-| Token | Bridge company | Instruction |
-|---|---|---|
-| USDC | Circle (CCTP) | `bridge_tokens_cctp` |
-| PST | Chainlink (CCIP) | `bridge_tokens_ccip` |
-| USDT (as USDT0), USDai, sUSDai | LayerZero (the issuer registered the token there; such a token is called an "OFT") | `bridge_tokens_oft` |
+| Token                          | Bridge company                                                                     | Instruction          |
+| ------------------------------ | ---------------------------------------------------------------------------------- | -------------------- |
+| USDC                           | Circle (CCTP)                                                                      | `bridge_tokens_cctp` |
+| PST                            | Chainlink (CCIP)                                                                   | `bridge_tokens_ccip` |
+| USDT (as USDT0), USDai, sUSDai | LayerZero (the issuer registered the token there; such a token is called an "OFT") | `bridge_tokens_oft`  |
 
 Only these five tokens are in scope.
 
@@ -177,14 +177,14 @@ Admin set lists. Snapshotters read Jupiter. OnDemand callers armed sends. Sender
 
 **After:**
 
-| Role | Can do |
-|---|---|
-| Admin | set peers, lists, Chainlink route, bridge routes, wrapper levels; release an NFT to its owner |
-| Snapshotter | wrap (becomes owner), refresh |
-| Sender (operator) | send any wrapper's snapshot, bridge from any level 1 or 2 wrapper |
-| Wrapper owner | attach OnDemand, refresh, operate, bridge. The NFT holder becomes owner by depositing the NFT |
-| OnDemand caller | refresh, send, operate, bridge for that wrapper |
-| Ethereum owner | peers and upgrades on `LendMirror`; strategies, allowed senders, upgrades on `LendMirrorTreasury` |
+| Role              | Can do                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| Admin             | set peers, lists, Chainlink route, bridge routes, wrapper levels; release an NFT to its owner     |
+| Snapshotter       | wrap (becomes owner), refresh                                                                     |
+| Sender (operator) | send any wrapper's snapshot, bridge from any level 1 or 2 wrapper                                 |
+| Wrapper owner     | attach OnDemand, refresh, operate, bridge. The NFT holder becomes owner by depositing the NFT     |
+| OnDemand caller   | refresh, send, operate, bridge for that wrapper                                                   |
+| Ethereum owner    | peers and upgrades on `LendMirror`; strategies, allowed senders, upgrades on `LendMirrorTreasury` |
 
 ---
 
@@ -210,5 +210,17 @@ Done since: on 29 September 2026 (UTC) the program and the Arbitrum contracts we
 
 - Operating positions works on smart vaults only (Jupiter's `operate_dex`); plain vaults such as vault 1 are not supported.
 - "Withdraw everything" and "pay back everything" through the program need Jupiter's `operate_perfect_dex`.
-- PST, USDT (USDT0), USDai and sUSDai have no mainnet route yet. PST has no Chainlink lane from Solana to Arbitrum, and the LayerZero tokens need their issuers' Solana program ids and escrows.
 - Wormhole NTT is a reserved bridge id with no instruction; no in-scope token needs it.
+
+Done since (2026-10-01, branch `feat/token-routes`): the remaining four tokens got their path
+to Arbitrum. No bridge carries USDT, USDai or sUSDai out of Solana from inside another program
+(their issuers' LayerZero sends already use all five call-depth levels), so `bridge_tokens_lz`
+replaced the never-used `bridge_tokens_oft`: the issuer's send runs beside our instruction in
+one all-or-nothing transaction, and the program releases tokens only after reading that
+transaction and checking the send goes, whole, to the treasury. PST exists on no bridge to
+Arbitrum at all, so `swap_to_usdc` swaps it into USDC inside program custody (Jupiter, pinned
+accounts, 1% slippage cap) and the proven Circle path takes over. Proven: 49 Rust unit tests,
+7 builder tests pinned to real mainnet sends, 23 fork tests including the full USDai
+burn-and-queue and eight refused tamperings, and read-only live-mainnet simulations of all
+three issuer sends. Awaiting the program upgrade and the admin routes; see
+`docs/bridge-providers.md`.

@@ -110,7 +110,8 @@ npx hardhat lz:oapp:evm:treasury:set-ccip-route                                 
 npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter                                 # treasury: Circle's contract for USDC claims
 npx hardhat lz:oapp:evm:treasury:set-strategy --token <ERC20> --strategy <ADDRESS>    # treasury: where each token is forwarded (one per token)
 npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp               # USDC goes over Circle to the treasury
-npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (PST on mainnet, CCIP-BnM on Devnet)
+npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (CCIP-BnM on Devnet)
+npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000    # a LayerZero token; the lane comes from config lzTokens (also: sUSDai, USDT)
 npx hardhat lz:oapp:solana:create-lookup-table                                        # pack the fixed accounts so sends fit in one transaction
 ```
 
@@ -130,6 +131,28 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <SOLANA_SIGNATURE>        
 npx hardhat lz:oapp:evm:treasury:forward --token <ERC20>                                               # move the treasury balance to the strategy
 ```
 
+A LayerZero token (USDT, USDai, sUSDai): same `bridge-tokens` call. The task sends two
+instructions — our release, then the issuer's own send — and the wallet pays the LayerZero fee
+(~0.001 SOL). Always dry-run first; it builds and simulates everything and sends nothing:
+
+```bash
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint USDai --amount 1000000 --dry-run   # simulate: logs, size, compute
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint USDai --amount 1000000             # the real send; watch it on layerzeroscan.com
+npx hardhat lz:oapp:evm:treasury:forward --token <ERC20_ON_ARBITRUM>                                           # after delivery (minutes)
+```
+
+The treasury needs a strategy per arriving token first (`treasury:set-strategy`); the Arbitrum
+addresses are in `config/mainnet.ts` under `lzTokens[].evmToken`. USDai and sUSDai arrive with
+18 decimals there, USD₮0 with 6.
+
+PST: swap it into USDC inside the program (admin/sender only), then bridge the USDC as usual:
+
+```bash
+npx hardhat lz:oapp:solana:swap-to-usdc --vault-id <V> --nft-id <N> --mint PST --amount 1000000 --dry-run   # quote + simulate, nothing sent
+npx hardhat lz:oapp:solana:swap-to-usdc --vault-id <V> --nft-id <N> --mint PST --amount 1000000             # the swap; USDC lands in the wrapper
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint usdc --amount <USDC_OUT>        # Circle, as in the Test Run
+```
+
 Mainnet only, with a small position (Jupiter on Devnet is an old build the SDK cannot read):
 
 ```bash
@@ -146,12 +169,12 @@ npx hardhat lz:oapp:solana:release-position-nft --vault-id <V> --nft-id <N>     
 
 ## Devnet state after the 2026-09-29 run
 
-| Item | Value |
-| --- | --- |
-| Store | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz` |
-| Bridge signer | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR` |
-| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` |
-| Wrapper vault 1 / nft 29 | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
+| Item                                | Value                                                  |
+| ----------------------------------- | ------------------------------------------------------ |
+| Store                               | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz`         |
+| Bridge signer                       | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR`         |
+| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6`           |
+| Wrapper vault 1 / nft 29            | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
 
 Wrappers created before the seed module (under `LendMirrorWrapperV1`) are left behind. The same vault and nft now get a fresh wrapper under `LendMirrorPositionWrapperV1`.
 
