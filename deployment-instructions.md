@@ -169,14 +169,38 @@ npx hardhat lz:oapp:solana:release-position-nft --vault-id <V> --nft-id <N>     
 
 ## Devnet state after the 2026-09-29 run
 
-| Item                                | Value                                                  |
-| ----------------------------------- | ------------------------------------------------------ |
-| Store                               | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz`         |
-| Bridge signer                       | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR`         |
-| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6`           |
-| Wrapper vault 1 / nft 29            | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
+| Item                                | Value                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| Store                               | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz`                                               |
+| Bridge signer                       | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR`                                               |
+| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6`                                                 |
+| Wrapper vault 1 / nft 29            | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 1 since 2026-10-02                      |
+| PYUSD route (LayerZero → Sepolia)   | `FDQpQiT8bKgYkpm2MzxH9rTUYeTTbZP7X5GiZcDW7ybk`, cap 2 PYUSD, receiver = the Sepolia treasury |
+| Sepolia treasury strategy for PYUSD | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` (tx `0x133dce7d…`)                              |
 
 Wrappers created before the seed module (under `LendMirrorWrapperV1`) are left behind. The same vault and nft now get a fresh wrapper under `LendMirrorPositionWrapperV1`.
+
+### Devnet LayerZero rehearsal (2026-10-02)
+
+The two-instruction bridge ran for real on devnet with PayPal's test PYUSD (public faucet at
+faucet.paxos.com; mint `CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM`, Token-2022), through
+Paxos's standard-OFT program to the Sepolia treasury. In order, after the program upgrade
+(slot 506593883) and a fresh IDL (`anchor idl close` then `init`: the old IDL account was too
+small and Anchor 0.31 has no resize):
+
+```bash
+npx hardhat lz:oapp:solana:set-bridge-route --mint PYUSD --provider oft --max-amount 2000000                          # route FDQpQiT8…
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id 1 --nft-id 29 --mint CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM --amount 2000000
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --dry-run   # 1,085 bytes, 351k CU, every step ok
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000             # tx 4sqEyPrn…: wrapper 2 → 1, wallet unchanged, depth 5
+npx hardhat lz:oapp:evm:treasury:set-strategy --network sepolia --token 0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9 --strategy 0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87
+npx hardhat lz:oapp:evm:treasury:forward --network sepolia --token 0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9             # after delivery (~10 min, Sepolia tx 0x3da16658…): tx 0xaa578945…
+```
+
+`.env` here held only devnet credentials with `DEPLOYMENT_TYPE=mainnet`; every command ran with
+`DEPLOYMENT_TYPE=devnet` in front (dotenv never overrides a set variable). Hardhat still wants
+the Arbitrum network URL defined, so a placeholder `RPC_URL_EVM_MAINNET` was passed.
 
 ## Do not
 
