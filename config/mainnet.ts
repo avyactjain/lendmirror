@@ -256,10 +256,6 @@ const profile: DeploymentProfile = {
             evmToken: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USD\u20ae0 on Arbitrum, 6 decimals
         },
     ],
-    jupiter: {
-        program: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
-        swapApi: 'https://lite-api.jup.ag/swap/v1',
-    },
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_MAINNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_MAINNET',

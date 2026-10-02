@@ -75,13 +75,6 @@ export type LzTokenProfile = {
     evmToken: string
 }
 
-/** Jupiter v6, for `swap_to_usdc`. */
-export type JupiterProfile = {
-    program: string
-    /** Swap API base, e.g. https://lite-api.jup.ag/swap/v1 */
-    swapApi: string
-}
-
 export type DeploymentProfile = {
     type: DeploymentType
     /** LayerZero Solana eid. */
@@ -105,8 +98,6 @@ export type DeploymentProfile = {
     treasury: string
     /** Tokens bridged over LayerZero through their issuers' programs. Empty on Devnet. */
     lzTokens: LzTokenProfile[]
-    /** Jupiter swap, for swap_to_usdc. Null on Devnet (Jupiter v6 is mainnet only). */
-    jupiter: JupiterProfile | null
     /** Env var names. Secrets stay in .env. */
     env: {
         solanaKeypairPath: string

@@ -27,7 +27,13 @@ export type BridgeTokensLzInstructionAccounts = {
     wrapper: PublicKey | Pda
     ondemand?: PublicKey | Pda
     wrapperAuthority: PublicKey | Pda
+    /**
+     * The route for (this token, this chain): must be a LayerZero route, switched on, and
+     * the amount must be under its cap. The route's receiver is where the tokens will go.
+     */
+
     bridgeRoute: PublicKey | Pda
+    /** The token's identity address (its "mint"). Must match the route's token. */
     mint: PublicKey | Pda
     /** The wrapper authority's token account. Where borrowed or withdrawn tokens sit. */
     wrapperAta: PublicKey | Pda

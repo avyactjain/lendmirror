@@ -146,14 +146,6 @@ The treasury needs a strategy per arriving token first (`treasury:set-strategy`)
 addresses are in `config/mainnet.ts` under `lzTokens[].evmToken`. USDai and sUSDai arrive with
 18 decimals there, USD₮0 with 6.
 
-PST: swap it into USDC inside the program (admin/sender only), then bridge the USDC as usual:
-
-```bash
-npx hardhat lz:oapp:solana:swap-to-usdc --vault-id <V> --nft-id <N> --mint PST --amount 1000000 --dry-run   # quote + simulate, nothing sent
-npx hardhat lz:oapp:solana:swap-to-usdc --vault-id <V> --nft-id <N> --mint PST --amount 1000000             # the swap; USDC lands in the wrapper
-npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint usdc --amount <USDC_OUT>        # Circle, as in the Test Run
-```
-
 Mainnet only, with a small position (Jupiter on Devnet is an old build the SDK cannot read):
 
 ```bash

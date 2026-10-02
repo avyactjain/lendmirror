@@ -30,32 +30,102 @@ export type SetBridgeRouteInstructionAccounts = {
 // Data.
 export type SetBridgeRouteInstructionData = {
     discriminator: Uint8Array
+    /**
+     * Which token: its identity address on Solana (USDC `EPjF…`, PYUSD `CXk2…`). Not a
+     * balance. With `dst_chain_id` it fixes the route's own address: one route per pair.
+     */
     mint: PublicKey
+    /**
+     * Which destination chain, by its EVM chain number (Arbitrum 42161, Ethereum 1,
+     * Sepolia 11155111). Only tells routes apart; the bridge's own numbering is below.
+     */
     dstChainId: bigint
+    /** Which bridge carries it: 1 Circle, 2 Chainlink, 3 LayerZero (`PROVIDER_*`). */
     provider: number
+    /**
+     * The Solana program that does the bridging: Circle's program, Chainlink's router, or
+     * for LayerZero the token issuer's own bridge program (the send beside ours must call it).
+     */
     providerProgram: PublicKey
-    /** Unused since `bridge_tokens_lz`. Must be zero. */
+    /** Unused since `bridge_tokens_lz`. Must be zero. Kept so old routes still read. */
     providerAux: PublicKey
+    /**
+     * Where the tokens land on the other chain: our treasury's 20-byte address, right-aligned
+     * in 32 bytes (12 zero bytes first). The one field no caller can ever override.
+     */
     receiver: Uint8Array
+    /**
+     * Circle only: who may collect on the EVM side (our treasury), or zeros for anyone.
+     * Zeros for Chainlink and LayerZero.
+     */
     destinationCaller: Uint8Array
+    /**
+     * The destination in the bridge's own numbering: Circle "domain" (Arbitrum 3), Chainlink
+     * "selector" (a long number), LayerZero "endpoint id" (Arbitrum 30110, Sepolia 40161).
+     */
     domainOrSelector: bigint
+    /**
+     * Chainlink: gas allowed on the EVM side (0 for a plain token transfer). LayerZero: reused
+     * as the position of the sender's token account in the issuer's send, so the guard can
+     * pin it (USD.AI 9, USDT0 4, standard OFT 3). Reused to avoid changing the record layout.
+     */
     gasLimit: bigint
+    /** On/off switch. Every bridge instruction refuses a disabled route. */
     enabled: boolean
+    /**
+     * Cap per transaction, in the token's smallest units (1_000_000 = 1 USDC). A wrong route
+     * can lose at most this much per call.
+     */
     maxAmountPerTx: bigint
 }
 
 export type SetBridgeRouteInstructionDataArgs = {
+    /**
+     * Which token: its identity address on Solana (USDC `EPjF…`, PYUSD `CXk2…`). Not a
+     * balance. With `dst_chain_id` it fixes the route's own address: one route per pair.
+     */
     mint: PublicKey
+    /**
+     * Which destination chain, by its EVM chain number (Arbitrum 42161, Ethereum 1,
+     * Sepolia 11155111). Only tells routes apart; the bridge's own numbering is below.
+     */
     dstChainId: number | bigint
+    /** Which bridge carries it: 1 Circle, 2 Chainlink, 3 LayerZero (`PROVIDER_*`). */
     provider: number
+    /**
+     * The Solana program that does the bridging: Circle's program, Chainlink's router, or
+     * for LayerZero the token issuer's own bridge program (the send beside ours must call it).
+     */
     providerProgram: PublicKey
-    /** Unused since `bridge_tokens_lz`. Must be zero. */
+    /** Unused since `bridge_tokens_lz`. Must be zero. Kept so old routes still read. */
     providerAux: PublicKey
+    /**
+     * Where the tokens land on the other chain: our treasury's 20-byte address, right-aligned
+     * in 32 bytes (12 zero bytes first). The one field no caller can ever override.
+     */
     receiver: Uint8Array
+    /**
+     * Circle only: who may collect on the EVM side (our treasury), or zeros for anyone.
+     * Zeros for Chainlink and LayerZero.
+     */
     destinationCaller: Uint8Array
+    /**
+     * The destination in the bridge's own numbering: Circle "domain" (Arbitrum 3), Chainlink
+     * "selector" (a long number), LayerZero "endpoint id" (Arbitrum 30110, Sepolia 40161).
+     */
     domainOrSelector: number | bigint
+    /**
+     * Chainlink: gas allowed on the EVM side (0 for a plain token transfer). LayerZero: reused
+     * as the position of the sender's token account in the issuer's send, so the guard can
+     * pin it (USD.AI 9, USDT0 4, standard OFT 3). Reused to avoid changing the record layout.
+     */
     gasLimit: number | bigint
+    /** On/off switch. Every bridge instruction refuses a disabled route. */
     enabled: boolean
+    /**
+     * Cap per transaction, in the token's smallest units (1_000_000 = 1 USDC). A wrong route
+     * can lose at most this much per call.
+     */
     maxAmountPerTx: number | bigint
 }
 

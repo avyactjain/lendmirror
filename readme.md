@@ -300,7 +300,6 @@ How to read the numbers: about 495 million pool shares are worth 1 USD in this p
 | The treasury pays out only to owner-set strategies.                    | `LendMirrorTreasury.forward`.                                                                                                                                                                                                                                          |
 | An NFT returns only to its wrapper owner.                              | `release_position_nft`: the destination is `wrapper.owner`.                                                                                                                                                                                                            |
 | A LayerZero token send cannot be redirected, resized or doubled.       | `bridge_tokens_lz`: the issuer's send in this same transaction must match the route's program, lane and receiver and the released amount exactly, pull from the caller's pinned account, carry no options and no compose; one release per transaction, top-level only. |
-| A swap cannot move funds out of custody or into an unbridgeable token. | `swap_to_usdc`: Jupiter's authority, source and destination slots are pinned to the wrapper authority's accounts, and the output mint must have an enabled bridge route. Admin or sender only, slippage capped at 1%.                                                  |
 
 Not enforced, on purpose: wrapping does not check that the Jupiter position exists (a wrapper for a missing position simply cannot be refreshed), and an allowed caller may bridge any amount up to the cap as often as it likes (the destination is fixed, so repeat calls cost fees, not funds).
 
@@ -310,13 +309,13 @@ The full list of review findings, fixed and open: [`docs/review.md`](docs/review
 
 ## 6. Tokens and bridges
 
-| Token      | Bridge the program uses                                       | Arrives on Arbitrum as     | Mainnet today                                                                                              |
-| ---------- | ------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **USDC**   | Circle CCTP                                                   | USDC                       | **Working.** Route set to the treasury, capped at 10 USDC per transaction. 1 USDC bridged in the Test Run. |
-| **USDT**   | LayerZero (USDT0's program), with the same-transaction guard  | USD₮0, minus 0.03%         | Built and fork-tested; awaiting the program upgrade and a route.                                           |
-| **USDai**  | LayerZero (USD.AI's program), with the same-transaction guard | USDai (18 decimals there)  | Built and fork-tested; awaiting the program upgrade and a route.                                           |
-| **sUSDai** | LayerZero (USD.AI's program), with the same-transaction guard | sUSDai (18 decimals there) | Built and fork-tested; awaiting the program upgrade and a route.                                           |
-| **PST**    | Jupiter swap into USDC inside the program, then Circle        | USDC                       | Built; PST exists on no bridge to Arbitrum, so it travels as USDC.                                         |
+| Token      | Bridge the program uses                                       | Arrives on Arbitrum as     | Mainnet today                                                                                                 |
+| ---------- | ------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **USDC**   | Circle CCTP                                                   | USDC                       | **Working.** Route set to the treasury, capped at 10 USDC per transaction. 1 USDC bridged in the Test Run.    |
+| **USDT**   | LayerZero (USDT0's program), with the same-transaction guard  | USD₮0, minus 0.03%         | Built and fork-tested; awaiting the program upgrade and a route.                                              |
+| **USDai**  | LayerZero (USD.AI's program), with the same-transaction guard | USDai (18 decimals there)  | Built and fork-tested; awaiting the program upgrade and a route.                                              |
+| **sUSDai** | LayerZero (USD.AI's program), with the same-transaction guard | sUSDai (18 decimals there) | Built and fork-tested; awaiting the program upgrade and a route.                                              |
+| **PST**    | Chainlink CCIP (planned: to Ethereum)                         | PST                        | Not set up. Chainlink carries PST from Solana only to Ethereum and Arc; an Ethereum treasury is needed first. |
 
 **Why the guard:** each LayerZero token is bridged by its issuer's own program, whose send already uses all five levels of Solana's program-call budget. Our program cannot sit on top (level six), so the issuer's send runs beside our instruction in one all-or-nothing transaction, and our program releases the tokens only after reading that very transaction and checking the send goes, whole, to the treasury. Wrong program, amount or destination: nothing moves. The pairing was proven on a local copy of mainnet, and each issuer send was simulated against live mainnet, read-only.
 
@@ -337,7 +336,6 @@ Adding one of these tokens is one admin command (`set-bridge-route`) plus a stra
 | Bridge USDC over Circle                                         | **Yes**                                              | Yes              |                                                |
 | Bridge a token over Chainlink                                   |                                                      | Yes, test token  |                                                |
 | Bridge a token over LayerZero (guard + issuer send)             | Send simulated for USDT, USDai and sUSDai, read-only |                  | Yes, 11 of 11 steps (USDai, burned and queued) |
-| Swap PST into USDC inside the program                           | Quote and layout checked, read-only                  |                  | Unit tests only                                |
 
 Jupiter's Devnet deployment is an old build that its SDK cannot read, so Jupiter operations are tested on a local copy of mainnet (`npm run test:fork`) and then on mainnet.
 
@@ -406,8 +404,6 @@ npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint USDai 
 npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint USDai --amount 1000000             # our release + the issuer's send, one transaction
 npx hardhat lz:oapp:evm:treasury:forward --token 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 
-# PST: swap into USDC inside the program (admin or sender), then bridge the USDC as above
-npx hardhat lz:oapp:solana:swap-to-usdc --vault-id 95 --nft-id 34 --mint PST --amount 1000000 --dry-run
 
 # Admin: a route per token (LayerZero lanes come from config/<network>.ts)
 npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000

@@ -184,13 +184,4 @@ pub mod lendmirror {
     pub fn bridge_tokens_lz(mut ctx: Context<BridgeTokensLz>, params: BridgeTokensParams) -> Result<()> {
         BridgeTokensLz::apply(&mut ctx, &params)
     }
-
-    // Admin or sender; wrapper level 1 or 2. Swap a wrapper-held token into a token that has a
-    // bridge route (PST into USDC), through Jupiter, output staying in the wrapper's custody.
-    pub fn swap_to_usdc<'info>(
-        mut ctx: Context<'_, '_, '_, 'info, SwapToUsdc<'info>>,
-        params: SwapToUsdcParams,
-    ) -> Result<()> {
-        SwapToUsdc::apply(&mut ctx, &params)
-    }
 }

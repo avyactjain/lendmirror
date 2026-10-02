@@ -324,19 +324,6 @@ export class MissingBridgeSendError extends ProgramError {
 codeToErrorMap.set(0x1787, MissingBridgeSendError)
 nameToErrorMap.set('MissingBridgeSend', MissingBridgeSendError)
 
-/** SlippageTooHigh:  */
-export class SlippageTooHighError extends ProgramError {
-    override readonly name: string = 'SlippageTooHigh'
-
-    readonly code: number = 0x1788 // 6024
-
-    constructor(program: Program, cause?: Error) {
-        super('', program, cause)
-    }
-}
-codeToErrorMap.set(0x1788, SlippageTooHighError)
-nameToErrorMap.set('SlippageTooHigh', SlippageTooHighError)
-
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

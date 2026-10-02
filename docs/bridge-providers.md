@@ -1,8 +1,9 @@
 # Bridge providers: Solana → EVM
 
 What carries each token from the Solana program to the EVM treasury, and what is verified.
-Everything here was checked on 2026-10-01: Chainlink's lanes API, the issuers' programs read
-on mainnet, real sends decoded, and our builders simulated against live mainnet (read-only).
+Everything here was checked on 2026-10-01/02: Chainlink's lanes API, the issuers' programs read
+on mainnet, real sends decoded, our builders simulated against live mainnet (read-only), and a
+real devnet run with PYUSD.
 
 Every route is admin-set (`BridgeRoute`): the destination is never a caller parameter, and
 tokens leave only from program-owned accounts. See
@@ -10,13 +11,13 @@ tokens leave only from program-owned accounts. See
 
 ## The map, verified
 
-| Token  | Solana mint                                                           | Bridge                                                        | Arrives on Arbitrum as                                                    | Status                                                                                                       |
-| ------ | --------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| USDC   | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`                        | Circle CCTP v2 (`bridge_tokens_cctp`)                         | USDC                                                                      | **Proven on mainnet** (Test Run, 1 USDC)                                                                     |
-| USDT   | `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` (Tether's native mint) | USDT0 "Legacy Mesh" over LayerZero, via `bridge_tokens_lz`    | USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, minus 0.03%           | Send simulated clean on live mainnet; fork-proven mechanism                                                  |
-| USDai  | `USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A` (Token-2022)            | USD.AI's `console_oft` over LayerZero, via `bridge_tokens_lz` | USDai `0x0A1a1A107E45b7Ced86833863f482BC5f4ed82EF` (18 decimals), no fee  | **Fork-proven end to end** (burn + queue); send simulated clean on live mainnet                              |
-| sUSDai | `sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE` (Token-2022)            | same program as USDai, via `bridge_tokens_lz`                 | sUSDai `0x0B2b2B2076d95dda7817e785989fE353fe955ef9` (18 decimals), no fee | Send simulated clean on live mainnet; same lane shape as USDai                                               |
-| PST    | `59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw`                        | Jupiter swap into USDC (`swap_to_usdc`), then Circle          | USDC                                                                      | Swap quote + instruction layout verified read-only (1 PST ≈ 1.135 USDC, ~0% impact, Jupiter Lend's own pool) |
+| Token  | Solana mint                                                           | Bridge                                                         | Arrives on Arbitrum as                                                    | Status                                                                                                |
+| ------ | --------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| USDC   | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`                        | Circle CCTP v2 (`bridge_tokens_cctp`)                          | USDC                                                                      | **Proven on mainnet** (Test Run, 1 USDC)                                                              |
+| USDT   | `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` (Tether's native mint) | USDT0 "Legacy Mesh" over LayerZero, via `bridge_tokens_lz`     | USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, minus 0.03%           | Send simulated clean on live mainnet; fork-proven mechanism                                           |
+| USDai  | `USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A` (Token-2022)            | USD.AI's `console_oft` over LayerZero, via `bridge_tokens_lz`  | USDai `0x0A1a1A107E45b7Ced86833863f482BC5f4ed82EF` (18 decimals), no fee  | **Fork-proven end to end** (burn + queue); send simulated clean on live mainnet                       |
+| sUSDai | `sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE` (Token-2022)            | same program as USDai, via `bridge_tokens_lz`                  | sUSDai `0x0B2b2B2076d95dda7817e785989fE353fe955ef9` (18 decimals), no fee | Send simulated clean on live mainnet; same lane shape as USDai                                        |
+| PST    | `59obFNBzyTBGowrkif5uK7ojS58vsuWz3ZCvg6tfZAGw`                        | Chainlink CCIP to **Ethereum** (`bridge_tokens_ccip`), planned | PST `0x22aE3D9a738471f405169Af055d31c687087d4c7` on Ethereum              | Needs an Ethereum treasury and a per-route selector in the tasks; the instruction is proven on Devnet |
 
 Why not the obvious rails, checked three ways (Chainlink's APIs, the registries, the chain):
 
@@ -69,28 +70,18 @@ Issuer facts worth knowing (read from the mints and stores):
 - USDT0 publishes no IDL; its builder comes from a decoded real send and is pinned by tests and
   verified by live simulation. USDT goes last in testing for exactly this reason.
 
-## PST: swap, then Circle (`swap_to_usdc`)
+## PST: Chainlink to Ethereum
 
-`swap_to_usdc` (admin or sender only; wrapper level 1 or 2) forwards a Jupiter v6 plain `route`
-call. The program pins Jupiter's authority, source and destination slots to the wrapper
-authority and its token accounts, requires the output mint to have an enabled bridge route,
-refuses platform fees, and caps slippage at 1%. Call depth: us → Jupiter → pool → token
-program (4 of 5). The client asks Jupiter's swap API for `onlyDirectRoutes` without shared
-accounts; slot layout verified against real mainnet `route` transactions. The USDC lands in the
-wrapper's own USDC account and leaves through the proven Circle path.
-
-Huma's own exits (for reference): a redemption queue (USDC to the depositing wallet, daily
-cap), and the on-chain PST/USDC pool that Jupiter routes through. We use the pool.
+Chainlink carries PST from Solana to Ethereum and Arc only. The decision is to accept Ethereum: deploy a second `LendMirrorTreasury` there, wire it (`treasury:set-ccip-route`, `treasury:set-strategy`), and write a PST route with `dst_chain_id = 1`, Chainlink's Ethereum selector `5009297550715157269`, and that treasury as receiver. `bridge_tokens_ccip` needs no change; the tasks need to take the selector from the chosen chain instead of the profile's Arbitrum one. A swap-into-USDC path was built and removed: it would have let an operator sell any wrapper asset at a price of their choosing.
 
 ## Providers
 
-| Provider                        | Solana program                                                                                              | How we drive it                                                                                   | Fee                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Circle CCTP v2                  | TokenMessengerMinterV2 `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe`                                       | CPI (`bridge_tokens_cctp`), bridge signer PDA signs                                               | none standard, `max_fee` fast |
-| Chainlink CCIP                  | Router `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`                                                       | CPI (`bridge_tokens_ccip`), bridge signer PDA signs and pays                                      | SOL                           |
-| LayerZero (issuer programs)     | USDT0 `Fuww9mfc8ntAwxPUzFia7VJFAdvLppyZwhPJoXySZXf7`, USD.AI `BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm` | same-transaction guard (`bridge_tokens_lz`); the caller's wallet signs the issuer's send and pays | SOL, ~0.001 observed          |
-| Jupiter v6 (swap, not a bridge) | `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`                                                               | CPI (`swap_to_usdc`), wrapper authority signs                                                     | pool fee inside the price     |
-| Wormhole NTT                    | —                                                                                                           | reserved (`PROVIDER_WORMHOLE_NTT = 4`), nothing implements it                                     | —                             |
+| Provider                    | Solana program                                                                                              | How we drive it                                                                                   | Fee                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Circle CCTP v2              | TokenMessengerMinterV2 `CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe`                                       | CPI (`bridge_tokens_cctp`), bridge signer PDA signs                                               | none standard, `max_fee` fast |
+| Chainlink CCIP              | Router `Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C`                                                       | CPI (`bridge_tokens_ccip`), bridge signer PDA signs and pays                                      | SOL                           |
+| LayerZero (issuer programs) | USDT0 `Fuww9mfc8ntAwxPUzFia7VJFAdvLppyZwhPJoXySZXf7`, USD.AI `BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm` | same-transaction guard (`bridge_tokens_lz`); the caller's wallet signs the issuer's send and pays | SOL, ~0.001 observed          |
+| Wormhole NTT                | —                                                                                                           | reserved (`PROVIDER_WORMHOLE_NTT = 4`), nothing implements it                                     | —                             |
 
 ## Chain ids and selectors used by routes
 

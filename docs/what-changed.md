@@ -218,8 +218,8 @@ to Arbitrum. No bridge carries USDT, USDai or sUSDai out of Solana from inside a
 replaced the never-used `bridge_tokens_oft`: the issuer's send runs beside our instruction in
 one all-or-nothing transaction, and the program releases tokens only after reading that
 transaction and checking the send goes, whole, to the treasury. PST exists on no bridge to
-Arbitrum at all, so `swap_to_usdc` swaps it into USDC inside program custody (Jupiter, pinned
-accounts, 1% slippage cap) and the proven Circle path takes over. Proven: 49 Rust unit tests,
+Arbitrum at all; it will go over Chainlink to Ethereum once an Ethereum treasury exists (a
+swap-to-USDC instruction was built and then removed as too much insider risk). Proven: 49 Rust unit tests,
 7 builder tests pinned to real mainnet sends, 23 fork tests including the full USDai
 burn-and-queue and eight refused tamperings, and read-only live-mainnet simulations of all
 three issuer sends. Awaiting the program upgrade and the admin routes; see

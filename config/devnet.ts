@@ -101,7 +101,6 @@ const profile: DeploymentProfile = {
             evmToken: '0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9', // PYUSD on Sepolia, 6 decimals
         },
     ],
-    jupiter: null,
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_DEVNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_DEVNET',
