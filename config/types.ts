@@ -39,6 +39,42 @@ export type CctpProfile = {
     attestationApi: string
 }
 
+/** One LayerZero-bridged token: what `bridge_tokens_lz` and the issuer's send template need. */
+export type LzTokenProfile = {
+    symbol: string
+    mint: string
+    decimals: number
+    /** The issuer's bridge program on Solana (LayerZero's standard OFT, or the issuer's own). */
+    issuerProgram: string
+    /** LayerZero endpoint id of the destination this lane goes to (Arbitrum 30110, Sepolia 40161).
+     * Stored in the route and written into the send; the program checks they match. */
+    dstEid: number
+    /** Position of the sender's token account in the issuer's `send`. Stored as the route's
+     * `gas_limit`; the program pins this slot to the caller's token account. */
+    tokenSourceIndex: number
+    /** Token program that owns the mint (classic Token or Token-2022). */
+    tokenProgram: string
+    /** min_amount_ld = amount - amount * minUnderBps / 10000. The program allows at most 50. */
+    minUnderBps: number
+    /** Options bytes for the send: [] or the bare v2 header [0,3]. Anything else is refused. */
+    options: number[]
+    /** Cap on the LayerZero fee in lamports. Only the real quoted fee is charged. */
+    nativeFeeCapLamports: bigint
+    /** The issuer's address lookup table, used by the template transaction. */
+    lookupTable: string
+    /** The template send's signer. Replaced by our wallet everywhere it appears. */
+    templateSigner: string
+    /** A slot derived from the sender, re-derived for our wallet: PDA([...seeds, signer]).
+     * Null when no slot depends on who sends. */
+    senderPda: { index: number; seedPrefix: string; seedBase: string } | null
+    /** Full account list of a real mainnet send on this lane, address + writability. The
+     * signer, token-source and sender-PDA slots are substituted at build time; the rest are
+     * lane constants (store, peer, endpoint, message library, verifiers, price feed). */
+    accounts: { key: string; w: boolean }[]
+    /** ERC20 that arrives on the EVM chain, for the treasury's set-strategy. */
+    evmToken: string
+}
+
 export type DeploymentProfile = {
     type: DeploymentType
     /** LayerZero Solana eid. */
@@ -60,6 +96,8 @@ export type DeploymentProfile = {
     cctp: CctpProfile | null
     /** UUPS proxy of LendMirrorTreasury on the EVM chain. Empty until deployed. */
     treasury: string
+    /** Tokens bridged over LayerZero through their issuers' programs. Empty on Devnet. */
+    lzTokens: LzTokenProfile[]
     /** Env var names. Secrets stay in .env. */
     env: {
         solanaKeypairPath: string

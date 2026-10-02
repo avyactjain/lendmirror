@@ -311,6 +311,19 @@ export class InvalidBridgeAccountError extends ProgramError {
 codeToErrorMap.set(0x1786, InvalidBridgeAccountError)
 nameToErrorMap.set('InvalidBridgeAccount', InvalidBridgeAccountError)
 
+/** MissingBridgeSend:  */
+export class MissingBridgeSendError extends ProgramError {
+    override readonly name: string = 'MissingBridgeSend'
+
+    readonly code: number = 0x1787 // 6023
+
+    constructor(program: Program, cause?: Error) {
+        super('', program, cause)
+    }
+}
+codeToErrorMap.set(0x1787, MissingBridgeSendError)
+nameToErrorMap.set('MissingBridgeSend', MissingBridgeSendError)
+
 /**
  * Attempts to resolve a custom program error from the provided error code.
  * @category Errors

@@ -1,16 +1,23 @@
 //! Token bridging out of a wrapper: `set_bridge_route` (admin) and the three provider
 //! instructions `bridge_tokens_cctp` (Circle), `bridge_tokens_ccip` (Chainlink), and
-//! `bridge_tokens_oft` (LayerZero).
+//! `bridge_tokens_lz` (LayerZero, via a same-transaction guard).
 //!
-//! Owns: who may bridge, the amount cap, the move from the wrapper authority's token account to
-//! the bridge signer's token account, and the provider CPIs. Does NOT own: the instruction bytes
+//! Owns: who may bridge, the amount cap, the move out of the wrapper authority's token account,
+//! the Circle/Chainlink CPIs, and the LayerZero guard. Does NOT own: the instruction bytes
 //! (`bridges.rs`, `send_ccip.rs`) or the route layout (`state/bridge_route.rs`).
 //!
 //! Invariants (fund safety):
 //!   - No instruction here takes a destination. The EVM receiver comes from `BridgeRoute`, which
 //!     only the Store admin writes.
-//!   - Tokens move wrapper-authority ATA → bridge-signer ATA → provider. Both ATAs belong to
-//!     PDAs of this program. No wallet is ever a token owner in this path.
+//!   - Circle/Chainlink: tokens move wrapper-authority ATA → bridge-signer ATA → provider. Both
+//!     ATAs belong to PDAs of this program. No wallet is ever a token owner in this path.
+//!   - LayerZero: our program cannot call the issuer's bridge (the call chain would be six
+//!     programs deep; Solana allows five), so the issuer's `send` runs as its own instruction
+//!     and `bridge_tokens_lz` releases the tokens only after verifying, through the
+//!     instructions sysvar, that this same all-or-nothing transaction contains that exact send:
+//!     right issuer program, right amount, destination fixed to the route's receiver. The
+//!     caller's wallet account holds the tokens for zero observable time: if the send fails or
+//!     is missing, the whole transaction reverts and nothing ever left the wrapper.
 //!   - The bridge signer is the same empty PDA that pays Chainlink fees (`LendMirrorCcipPayerV1`).
 //!     It must hold no data so the System program can debit it for fees.
 //!
@@ -20,13 +27,14 @@
 //!
 //! Typical call: hardhat `lz:oapp:solana:bridge-tokens --mint USDC --amount 1000000 --chain 11155111`.
 
-use crate::bridges::{cctp_deposit_for_burn_data, oft_send_data};
+use crate::bridges::{cctp_deposit_for_burn_data, decode_oft_send, OftSendParams};
 use crate::errors::LendMirrorError;
 use crate::instructions::send_ccip::{ccip_send_instruction_data, CcipTokenAmount};
 use crate::seeds::{BRIDGE_ROUTE_SEED, CCIP_PAYER_SEED, CCIP_ROUTE_SEED, ONDEMAND_SEED, STORE_SEED, WRAPPER_AUTH_SEED, WRAPPER_SEED};
 use crate::*;
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed, pubkey};
+use anchor_lang::solana_program::sysvar::instructions::{load_current_index_checked, load_instruction_at_checked};
+use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed, pubkey, sysvar};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{approve_checked, transfer_checked, ApproveChecked, Mint, TokenAccount, TokenInterface, TransferChecked};
 
@@ -54,19 +62,40 @@ pub struct SetBridgeRoute<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// The admin's form for one route: "this token may go to this chain, over this bridge, to
+/// this address, at most this much per call". Same fields as `BridgeRoute`, which stores them.
 #[derive(Clone, AnchorSerialize, AnchorDeserialize)]
 pub struct SetBridgeRouteParams {
+    /// Which token: its identity address on Solana (USDC `EPjF…`, PYUSD `CXk2…`). Not a
+    /// balance. With `dst_chain_id` it fixes the route's own address: one route per pair.
     pub mint: Pubkey,
+    /// Which destination chain, by its EVM chain number (Arbitrum 42161, Ethereum 1,
+    /// Sepolia 11155111). Only tells routes apart; the bridge's own numbering is below.
     pub dst_chain_id: u64,
+    /// Which bridge carries it: 1 Circle, 2 Chainlink, 3 LayerZero (`PROVIDER_*`).
     pub provider: u8,
+    /// The Solana program that does the bridging: Circle's program, Chainlink's router, or
+    /// for LayerZero the token issuer's own bridge program (the send beside ours must call it).
     pub provider_program: Pubkey,
-    /// LayerZero: the OFT token escrow. Zero otherwise.
+    /// Unused since `bridge_tokens_lz`. Must be zero. Kept so old routes still read.
     pub provider_aux: Pubkey,
+    /// Where the tokens land on the other chain: our treasury's 20-byte address, right-aligned
+    /// in 32 bytes (12 zero bytes first). The one field no caller can ever override.
     pub receiver: [u8; 32],
+    /// Circle only: who may collect on the EVM side (our treasury), or zeros for anyone.
+    /// Zeros for Chainlink and LayerZero.
     pub destination_caller: [u8; 32],
+    /// The destination in the bridge's own numbering: Circle "domain" (Arbitrum 3), Chainlink
+    /// "selector" (a long number), LayerZero "endpoint id" (Arbitrum 30110, Sepolia 40161).
     pub domain_or_selector: u64,
+    /// Chainlink: gas allowed on the EVM side (0 for a plain token transfer). LayerZero: reused
+    /// as the position of the sender's token account in the issuer's send, so the guard can
+    /// pin it (USD.AI 9, USDT0 4, standard OFT 3). Reused to avoid changing the record layout.
     pub gas_limit: u64,
+    /// On/off switch. Every bridge instruction refuses a disabled route.
     pub enabled: bool,
+    /// Cap per transaction, in the token's smallest units (1_000_000 = 1 USDC). A wrong route
+    /// can lose at most this much per call.
     pub max_amount_per_tx: u64,
 }
 
@@ -76,11 +105,15 @@ impl SetBridgeRoute<'_> {
             p.provider == PROVIDER_CCTP || p.provider == PROVIDER_CCIP || p.provider == PROVIDER_LZ_OFT,
             LendMirrorError::WrongProvider
         );
-        // LayerZero needs the escrow to derive the OFT store; the other two must not carry one.
-        require!(
-            (p.provider == PROVIDER_LZ_OFT) == (p.provider_aux != Pubkey::default()),
-            LendMirrorError::InvalidBridgeAccount
-        );
+        // No provider uses `provider_aux` any more (the LayerZero guard reads the issuer's own
+        // send instruction instead of deriving its accounts). Kept zero so old routes decode.
+        require!(p.provider_aux == Pubkey::default(), LendMirrorError::InvalidBridgeAccount);
+        // LayerZero reuses `gas_limit` as the position of the token-source account in the
+        // issuer's send instruction. Both known issuers put it past the signer and well inside
+        // the named accounts, so a zero (forgotten flag) is refused.
+        if p.provider == PROVIDER_LZ_OFT {
+            require!((1..=63).contains(&p.gas_limit), LendMirrorError::InvalidBridgeAccount);
+        }
         // A receiver of all zeros would burn the tokens on the far side, and an EVM address must
         // sit in the last 20 bytes: CCIP reads only those, CCTP and OFT read all 32.
         require!(p.receiver != [0u8; 32], LendMirrorError::InvalidBridgeAccount);
@@ -200,14 +233,14 @@ pub struct BridgeTokensParams {
     pub max_fee: u64,
     /// CCTP only: 1000 fast, 2000 standard. Ignored by CCIP.
     pub min_finality_threshold: u32,
-    /// CCIP and OFT: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP.
+    /// CCIP only: SOL moved onto the bridge signer to pay the bridge fee. Ignored by CCTP.
+    /// LayerZero does not use it either: there the caller's wallet pays its own fee directly.
     pub fee_lamports: u64,
-    /// OFT only: least amount that may arrive (the OFT drops dust below its shared decimals).
+    /// Unused since `bridge_tokens_lz` (the guard reads these from the issuer's send instead).
     pub min_amount: u64,
-    /// OFT only: LayerZero fee in lamports, from the OFT's quote. Must be <= `fee_lamports`
-    /// plus whatever the bridge signer already holds.
+    /// Unused since `bridge_tokens_lz`.
     pub native_fee: u64,
-    /// OFT only: executor options (destination gas). Empty means "use the peer's enforced options".
+    /// Unused since `bridge_tokens_lz`.
     pub options: Vec<u8>,
 }
 
@@ -532,128 +565,268 @@ impl<'info> BridgeTokensCcip<'info> {
 }
 
 // ----------------------------------------------------------------------------------------
-// LayerZero OFT (USDT0, USDai, sUSDai)
+// LayerZero (USDT over USDT0, USDai, sUSDai) — same-transaction guard
 // ----------------------------------------------------------------------------------------
 
-/// Send an OFT token to `route.receiver` through the token's own LayerZero OFT program.
+/// Release tokens for a LayerZero send that sits in this very transaction.
 ///
-/// Account names and order follow LayerZero's OFT program (`send`): signer, peer, oft_store,
-/// token_source, token_escrow, token_mint, token_program, event_authority, program, then the
-/// LayerZero Endpoint accounts in `remaining_accounts` (the OFT SDK assembles them with the OFT
-/// store as sender). The bridge signer is the OFT `signer`: it owns `token_source` and pays the
-/// LayerZero fee in SOL, so `fee_lamports` must cover `native_fee`.
-// `params` is declared on `BridgeCommon` only; see the note on `BridgeTokensCctp`.
+/// Why not a CPI like Circle and Chainlink: each of these tokens is bridged by its issuer's own
+/// program, and that program's send already uses all five levels of Solana's call-depth budget
+/// (issuer → endpoint → message library → executor/verifiers → price feed). Our program on top
+/// would be level six, which Solana refuses. So the transaction carries two instructions:
+///
+///   1. this one: the usual caller/level/route checks, then the guard below, then the move of
+///      `amount` from the wrapper authority's token account to the CALLER's token account;
+///   2. the issuer's `send`, signed by the caller's wallet, which pulls that exact amount and
+///      carries it to the route's receiver. The wallet pays the LayerZero fee in SOL.
+///
+/// The guard reads the transaction through the instructions sysvar and only releases when the
+/// NEXT instruction is the issuer program named by the route, is a `send` of exactly `amount`
+/// from exactly the caller's token account to exactly the route's receiver, with no executor
+/// options and no compose message. A transaction is all-or-nothing, so if the send fails, the
+/// release is rolled back too: the wallet owns the tokens for zero observable time, and there is
+/// no transaction in which they end up anywhere but the receiver. Flash-loan programs use the
+/// same sysvar trick to demand "the repayment is later in this transaction".
+// `params` is declared on no inner struct here; see the note on `BridgeTokensCctp`.
 #[derive(Accounts)]
-pub struct BridgeTokensOft<'info> {
-    pub common: BridgeCommon<'info>,
+#[instruction(params: BridgeTokensParams)]
+pub struct BridgeTokensLz<'info> {
+    /// Signs the issuer's send and pays its LayerZero fee; also rent payer for `authority_ata`.
+    #[account(mut)]
+    pub authority: Signer<'info>,
 
-    /// CHECK: the token's OFT program. Must be the route's provider program.
-    #[account(address = common.bridge_route.provider_program)]
-    pub oft_program: UncheckedAccount<'info>,
-    /// CHECK: OFT peer PDA ["Peer", oft_store, dst_eid be] under the OFT program (checked in apply).
-    #[account(mut)]
-    pub peer: UncheckedAccount<'info>,
-    /// CHECK: OFT store PDA ["OFT", token_escrow] under the OFT program (checked in apply).
-    #[account(mut)]
-    pub oft_store: UncheckedAccount<'info>,
-    /// CHECK: the OFT's escrow token account. Must be the route's `provider_aux`.
-    #[account(mut, address = common.bridge_route.provider_aux)]
-    pub token_escrow: UncheckedAccount<'info>,
-    /// CHECK: OFT program's event authority PDA ["__event_authority"].
-    pub event_authority: UncheckedAccount<'info>,
+    #[account(seeds = [STORE_SEED], bump = store.bump)]
+    pub store: Box<Account<'info, Store>>,
+
+    // Caller and level rules are the same as `BridgeCommon`'s.
+    #[account(
+        seeds = [
+            WRAPPER_SEED,
+            &wrapper.vault_id.to_le_bytes(),
+            &wrapper.nft_id.to_le_bytes()
+        ],
+        bump = wrapper.bump,
+        constraint = (
+            wrapper.is_owner(&authority.key())
+            || store.is_sender(&authority.key())
+            || ondemand.as_ref().is_some_and(|list| list.is_caller(&authority.key()))
+        ) @ LendMirrorError::Unauthorized,
+        constraint = (
+            wrapper.level == LEVEL_DEPOSIT_PAYBACK || wrapper.level == LEVEL_WITHDRAW_BORROW
+        ) @ LendMirrorError::LevelDenied
+    )]
+    pub wrapper: Box<Account<'info, PositionWrapper>>,
+
+    #[account(
+        seeds = [ONDEMAND_SEED, wrapper.key().as_ref()],
+        bump = ondemand.bump,
+        constraint = ondemand.wrapper == wrapper.key() @ LendMirrorError::Unauthorized
+    )]
+    pub ondemand: Option<Box<Account<'info, OnDemandStrategy>>>,
+
+    /// CHECK: empty PDA that owns `wrapper_ata`. Signs the release via `invoke_signed`.
+    #[account(seeds = [WRAPPER_AUTH_SEED, wrapper.key().as_ref()], bump = wrapper.authority_bump)]
+    pub wrapper_authority: UncheckedAccount<'info>,
+
+    /// The route for (this token, this chain): must be a LayerZero route, switched on, and
+    /// the amount must be under its cap. The route's receiver is where the tokens will go.
+    #[account(
+        seeds = [BRIDGE_ROUTE_SEED, mint.key().as_ref(), &params.dst_chain_id.to_le_bytes()],
+        bump = bridge_route.bump,
+        constraint = bridge_route.provider == PROVIDER_LZ_OFT @ LendMirrorError::WrongProvider,
+        constraint = bridge_route.enabled @ LendMirrorError::RouteDisabled,
+        constraint = params.amount <= bridge_route.max_amount_per_tx @ LendMirrorError::AmountTooLarge,
+        constraint = params.amount > 0 @ LendMirrorError::AmountTooLarge
+    )]
+    pub bridge_route: Box<Account<'info, BridgeRoute>>,
+
+    /// The token's identity address (its "mint"). Must match the route's token.
+    #[account(mint::token_program = token_program, address = bridge_route.mint @ LendMirrorError::InvalidBridgeAccount)]
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+
+    /// The wrapper authority's token account. Where borrowed or withdrawn tokens sit.
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = wrapper_authority,
+        associated_token::token_program = token_program
+    )]
+    pub wrapper_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// The caller's own token account: the issuer's send must pull from exactly here.
+    #[account(
+        init_if_needed,
+        payer = authority,
+        associated_token::mint = mint,
+        associated_token::authority = authority,
+        associated_token::token_program = token_program
+    )]
+    pub authority_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// CHECK: the instructions sysvar, fixed address. Lets the guard read this transaction.
+    #[account(address = sysvar::instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
-impl<'info> BridgeTokensOft<'info> {
-    pub fn apply(
-        ctx: &mut Context<'_, '_, '_, 'info, BridgeTokensOft<'info>>,
-        params: &BridgeTokensParams,
-    ) -> Result<()> {
-        let c = &ctx.accounts.common;
+impl BridgeTokensLz<'_> {
+    pub fn apply(ctx: &mut Context<BridgeTokensLz>, params: &BridgeTokensParams) -> Result<()> {
+        // Provider, enabled, cap, amount > 0 and the token match were all checked on the
+        // accounts above; from here on only the transaction itself is examined.
         let a = &ctx.accounts;
-        let route = &c.bridge_route;
-        require!(route.provider == PROVIDER_LZ_OFT, LendMirrorError::WrongProvider);
-        require!(c.bridge_signer.data_is_empty(), LendMirrorError::InvalidBridgeAccount);
-        // The bridge signer is shared by every wrapper. A caller must bring the SOL their send
-        // spends, and may not attach executor options (a native drop to their own EVM address
-        // would turn the shared PDA's SOL into their ETH). The peer's enforced options carry gas.
-        require!(params.fee_lamports >= params.native_fee, LendMirrorError::AmountTooLarge);
-        require!(params.options.is_empty(), LendMirrorError::InvalidBridgeAccount);
-        check_oft_pdas(a)?;
+        let route = &a.bridge_route;
 
-        c.pull_to_bridge_signer(params.amount)?;
-        if params.fee_lamports > 0 {
-            anchor_lang::solana_program::program::invoke(
-                &anchor_lang::solana_program::system_instruction::transfer(
-                    &c.authority.key(),
-                    &c.bridge_signer.key(),
-                    params.fee_lamports,
-                ),
-                &[
-                    c.authority.to_account_info(),
-                    c.bridge_signer.to_account_info(),
-                    c.system_program.to_account_info(),
-                ],
-            )?;
+        let sysvar_info = a.instructions_sysvar.to_account_info();
+        let current = load_current_index_checked(&sysvar_info)? as usize;
+        // Top-level only: if another program invoked us by CPI, the instruction at our index is
+        // that program, not us, and a hidden wrapper could pair one send with many releases.
+        let ours = load_instruction_at_checked(current, &sysvar_info)?;
+        require_keys_eq!(ours.program_id, crate::ID, LendMirrorError::MissingBridgeSend);
+        // One release per transaction, so one send can never cover two releases.
+        let mut index = 0usize;
+        while let Ok(ix) = load_instruction_at_checked(index, &sysvar_info) {
+            require!(index == current || ix.program_id != crate::ID, LendMirrorError::MissingBridgeSend);
+            index += 1;
         }
 
-        let data = oft_send_data(
-            route.domain_or_selector as u32,
-            route.receiver,
+        // The very next instruction must be the issuer's send, exactly as the route fixes it.
+        let send = load_instruction_at_checked(current + 1, &sysvar_info)
+            .map_err(|_| LendMirrorError::MissingBridgeSend)?;
+        require_keys_eq!(send.program_id, route.provider_program, LendMirrorError::MissingBridgeSend);
+        let send_params = decode_oft_send(&send.data).ok_or(LendMirrorError::MissingBridgeSend)?;
+        check_lz_send(route, params.amount, &send_params)?;
+        // The send must pull from the caller's token account. Its position among the send's
+        // accounts differs per issuer program, so the route stores it (in `gas_limit`).
+        let source = send
+            .accounts
+            .get(route.gas_limit as usize)
+            .ok_or(LendMirrorError::MissingBridgeSend)?;
+        require_keys_eq!(source.pubkey, a.authority_ata.key(), LendMirrorError::MissingBridgeSend);
+
+        // All checks passed: release. If the send later fails, this transfer unwinds with it.
+        let wrapper_key = a.wrapper.key();
+        let seeds: &[&[u8]] = &[WRAPPER_AUTH_SEED, wrapper_key.as_ref(), &[a.wrapper.authority_bump]];
+        transfer_checked(
+            CpiContext::new_with_signer(
+                a.token_program.to_account_info(),
+                TransferChecked {
+                    from: a.wrapper_ata.to_account_info(),
+                    mint: a.mint.to_account_info(),
+                    to: a.authority_ata.to_account_info(),
+                    authority: a.wrapper_authority.to_account_info(),
+                },
+                &[seeds],
+            ),
             params.amount,
-            params.min_amount,
-            &params.options,
-            params.native_fee,
-        );
-        let mut metas = vec![
-            AccountMeta::new(c.bridge_signer.key(), true), // signer: owns token_source, pays the fee
-            AccountMeta::new(a.peer.key(), false),
-            AccountMeta::new(a.oft_store.key(), false),
-            AccountMeta::new(c.bridge_ata.key(), false), // token_source
-            AccountMeta::new(a.token_escrow.key(), false),
-            AccountMeta::new(c.mint.key(), false), // token_mint
-            AccountMeta::new_readonly(c.token_program.key(), false),
-            AccountMeta::new_readonly(a.event_authority.key(), false),
-            AccountMeta::new_readonly(a.oft_program.key(), false), // program (event CPI)
-        ];
-        metas.extend(ctx.remaining_accounts.iter().map(|info| AccountMeta {
-            pubkey: info.key(),
-            is_signer: false,
-            is_writable: info.is_writable,
-        }));
-        let mut infos = vec![
-            c.bridge_signer.to_account_info(),
-            a.peer.to_account_info(),
-            a.oft_store.to_account_info(),
-            c.bridge_ata.to_account_info(),
-            a.token_escrow.to_account_info(),
-            c.mint.to_account_info(),
-            c.token_program.to_account_info(),
-            a.event_authority.to_account_info(),
-            a.oft_program.to_account_info(),
-        ];
-        infos.extend_from_slice(ctx.remaining_accounts);
-        let signer_seeds: &[&[u8]] = &[CCIP_PAYER_SEED, &[ctx.bumps.common.bridge_signer]];
-        invoke_signed(
-            &Instruction { program_id: route.provider_program, accounts: metas, data },
-            &infos,
-            &[signer_seeds],
-        )?;
-        Ok(())
+            a.mint.decimals,
+        )
     }
 }
 
-/// The store and peer must be the OFT program's PDAs for this escrow and destination, so a
-/// caller cannot point the send at a different OFT deployment or lane.
-fn check_oft_pdas(a: &BridgeTokensOft) -> Result<()> {
-    let route = &a.common.bridge_route;
-    let (expected_store, _) =
-        Pubkey::find_program_address(&[b"OFT", route.provider_aux.as_ref()], &route.provider_program);
-    require_keys_eq!(a.oft_store.key(), expected_store, LendMirrorError::InvalidBridgeAccount);
-    let dst_eid = route.domain_or_selector as u32;
-    let (expected_peer, _) = Pubkey::find_program_address(
-        &[b"Peer", expected_store.as_ref(), &dst_eid.to_be_bytes()],
-        &route.provider_program,
+/// The send's parameters against the route: destination, amount, and nothing extra.
+///
+/// `min_amount_ld` may sit up to 0.5% under `amount` (USDT0 charges 0.03% on arrival; the
+/// others charge nothing today). Executor options and compose messages are refused: the peers'
+/// enforced options already carry the destination gas, and the treasury composes nothing. The
+/// two-byte `0x0003` is LayerZero's v2 options header with nothing after it, so it also means
+/// "no options" (USDT0's own app sends exactly that); anything longer is a real option.
+fn check_lz_send(route: &BridgeRoute, amount: u64, send: &OftSendParams) -> Result<()> {
+    require!(u64::from(send.dst_eid) == route.domain_or_selector, LendMirrorError::MissingBridgeSend);
+    require!(send.to == route.receiver, LendMirrorError::MissingBridgeSend);
+    require!(send.amount_ld == amount, LendMirrorError::MissingBridgeSend);
+    require!(send.min_amount_ld >= amount - amount / 200, LendMirrorError::MissingBridgeSend);
+    require!(
+        send.options.is_empty() || send.options == [0x00, 0x03],
+        LendMirrorError::MissingBridgeSend
     );
-    require_keys_eq!(a.peer.key(), expected_peer, LendMirrorError::InvalidBridgeAccount);
+    require!(send.compose_msg.is_none(), LendMirrorError::MissingBridgeSend);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn route() -> BridgeRoute {
+        let mut receiver = [0u8; 32];
+        receiver[12..].copy_from_slice(&[0x73; 20]);
+        BridgeRoute {
+            mint: Pubkey::new_unique(),
+            dst_chain_id: 42161,
+            provider: PROVIDER_LZ_OFT,
+            provider_program: Pubkey::new_unique(),
+            provider_aux: Pubkey::default(),
+            receiver,
+            destination_caller: [0; 32],
+            domain_or_selector: 30110,
+            gas_limit: 9,
+            enabled: true,
+            max_amount_per_tx: 1_000_000,
+            bump: 255,
+        }
+    }
+
+    fn send(route: &BridgeRoute, amount: u64) -> OftSendParams {
+        OftSendParams {
+            dst_eid: route.domain_or_selector as u32,
+            to: route.receiver,
+            amount_ld: amount,
+            min_amount_ld: amount,
+            options: vec![],
+            compose_msg: None,
+            native_fee: 840_356,
+            lz_token_fee: 0,
+        }
+    }
+
+    #[test]
+    fn lz_guard_accepts_the_exact_send() {
+        let r = route();
+        assert!(check_lz_send(&r, 1_000_000, &send(&r, 1_000_000)).is_ok());
+    }
+
+    #[test]
+    fn lz_guard_allows_min_half_percent_under() {
+        let r = route();
+        let mut p = send(&r, 1_000_000);
+        p.min_amount_ld = 995_000; // exactly 0.5% under
+        assert!(check_lz_send(&r, 1_000_000, &p).is_ok());
+        p.min_amount_ld = 994_999;
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "more than 0.5% under");
+    }
+
+    #[test]
+    fn lz_guard_rejects_every_mismatch() {
+        let r = route();
+        let good = send(&r, 1_000_000);
+
+        let mut p = good.clone();
+        p.dst_eid = 30101; // Ethereum instead of Arbitrum
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "wrong lane");
+
+        let mut p = good.clone();
+        p.to[31] ^= 1;
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "wrong receiver");
+
+        let mut p = good.clone();
+        p.amount_ld = 999_999;
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "amount under the release");
+        p.amount_ld = 1_000_001;
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "amount over the release");
+
+        let mut p = good.clone();
+        p.options = vec![0, 3];
+        assert!(check_lz_send(&r, 1_000_000, &p).is_ok(), "bare v2 header means no options");
+        p.options = vec![0, 3, 1];
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "a real option");
+        p.options = vec![0, 4];
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "not the v2 header");
+
+        let mut p = good;
+        p.compose_msg = Some(vec![1]);
+        assert!(check_lz_send(&r, 1_000_000, &p).is_err(), "compose message");
+    }
 }
