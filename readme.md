@@ -261,26 +261,26 @@ How to read the numbers: about 495 million pool shares are worth 1 USD in this p
 
 ## 4. Who can do what
 
-| Who                                                   | Can                                                                                                                                                          | Cannot                                                                |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| **Upgrade authority** (the admin wallet today)        | Create the Store once. Upgrade the program.                                                                                                                  |                                                                       |
-| **Admin** (named when the Store was created, forever) | Set LayerZero and Chainlink connections, the allow lists, bridge routes and wrapper levels. Give an NFT back to its wrapper owner.                           | Change the admin. Send an NFT or tokens anywhere else.                |
-| **Snapshotter** (allow list)                          | Wrap a position and become its first owner. Refresh any wrapper.                                                                                             | Send, operate or bridge on wrappers it does not own.                  |
-| **Sender** (allow list)                               | Send any wrapper's snapshot. Bridge from any wrapper at level 1 or 2.                                                                                        | Operate a position.                                                   |
-| **NFT holder**                                        | Hand the NFT to a wrapper, and become that wrapper's owner.                                                                                                  |                                                                       |
-| **Wrapper owner**                                     | Refresh, operate and bridge that wrapper. Name up to 8 helpers on the wrapper's OnDemand list.                                                               | Raise its own level. Choose a bridge destination.                     |
-| **OnDemand helper** (per wrapper)                     | Refresh, send, operate and bridge that one wrapper.                                                                                                          | Anything on other wrappers.                                           |
-| **Anyone**                                            | Send tokens into a wrapper's token account. On Arbitrum, claim a Circle transfer and forward the treasury's balance. Both only move funds along fixed paths. | Run any program instruction above.                                    |
-| **EVM owner**                                         | Upgrade both Arbitrum contracts. Set peers, allowed senders, and each token's strategy.                                                                      | Take tokens from the treasury except by setting itself as a strategy. |
+| Who                                                   | Can                                                                                                                                                                                                                        | Cannot                                                                               |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Upgrade authority** (the admin wallet today)        | Create the Store once. Upgrade the program.                                                                                                                                                                                |                                                                                      |
+| **Admin** (named when the Store was created, forever) | Set the LayerZero and Chainlink connections, the allow lists, the token routes (where each token may be bridged to) and wrapper levels. Give a position NFT back to its wrapper owner.                                     | Change the admin. Move an NFT or tokens anywhere else.                               |
+| **Snapshotter** (allow list)                          | Wrap a position and become its first owner. Refresh any wrapper (re-read it from Jupiter).                                                                                                                                 | Mirror a snapshot, operate a position, or bridge tokens on wrappers it does not own. |
+| **Sender** (allow list)                               | Mirror any wrapper's snapshot to Arbitrum (over LayerZero and Chainlink). Bridge tokens out of any wrapper at level 1 or 2, to the treasury only.                                                                          | Operate a position (supply, borrow, pay back, withdraw).                             |
+| **NFT holder**                                        | Hand the NFT to a wrapper, and become that wrapper's owner.                                                                                                                                                                |                                                                                      |
+| **Wrapper owner**                                     | Refresh that wrapper, operate its position (within its level), and bridge its tokens to the treasury. Name up to 8 helpers on the wrapper's OnDemand list.                                                                 | Raise its own level. Choose where bridged tokens go.                                 |
+| **OnDemand helper** (per wrapper)                     | On that one wrapper: refresh it, mirror its snapshot, operate its position, bridge its tokens.                                                                                                                             | Anything on other wrappers.                                                          |
+| **Anyone**                                            | Transfer tokens into a wrapper's token account (a plain token transfer). On Arbitrum, claim a Circle transfer for the treasury and forward the treasury's balance to its strategy. Both only move funds along fixed paths. | Run any program instruction above.                                                   |
+| **EVM owner**                                         | Upgrade both Arbitrum contracts. Set peers, allowed senders, and each token's strategy.                                                                                                                                    | Take tokens from the treasury except by setting itself as a strategy.                |
 
 **Levels**, set per wrapper by the admin:
 
-| Level | Allows                                                                           |
-| ----- | -------------------------------------------------------------------------------- |
-| 0     | Mirror only. The start for every wrapper.                                        |
-| 1     | Supply collateral, pay back debt, bridge tokens. Only moves that lower the risk. |
-| 2     | Level 1, plus withdraw collateral and borrow.                                    |
-| 3, 4  | Stored but not defined yet: everything is refused.                               |
+| Level | Allows                                                                                                         |
+| ----- | -------------------------------------------------------------------------------------------------------------- |
+| 0     | Mirror only. The start for every wrapper.                                                                      |
+| 1     | Supply collateral, pay back debt, bridge the wrapper's tokens to the treasury. Only moves that lower the risk. |
+| 2     | Level 1, plus withdraw collateral and borrow.                                                                  |
+| 3, 4  | Stored but not defined yet: everything is refused.                                                             |
 
 ---
 
