@@ -628,15 +628,20 @@ pub struct BridgeTokensLz<'info> {
     #[account(seeds = [WRAPPER_AUTH_SEED, wrapper.key().as_ref()], bump = wrapper.authority_bump)]
     pub wrapper_authority: UncheckedAccount<'info>,
 
+    /// The route for (this token, this chain): must be a LayerZero route, switched on, and
+    /// the amount must be under its cap. The route's receiver is where the tokens will go.
     #[account(
         seeds = [BRIDGE_ROUTE_SEED, mint.key().as_ref(), &params.dst_chain_id.to_le_bytes()],
         bump = bridge_route.bump,
+        constraint = bridge_route.provider == PROVIDER_LZ_OFT @ LendMirrorError::WrongProvider,
         constraint = bridge_route.enabled @ LendMirrorError::RouteDisabled,
-        constraint = params.amount <= bridge_route.max_amount_per_tx @ LendMirrorError::AmountTooLarge
+        constraint = params.amount <= bridge_route.max_amount_per_tx @ LendMirrorError::AmountTooLarge,
+        constraint = params.amount > 0 @ LendMirrorError::AmountTooLarge
     )]
     pub bridge_route: Box<Account<'info, BridgeRoute>>,
 
-    #[account(mint::token_program = token_program)]
+    /// The token's identity address (its "mint"). Must match the route's token.
+    #[account(mint::token_program = token_program, address = bridge_route.mint @ LendMirrorError::InvalidBridgeAccount)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The wrapper authority's token account. Where borrowed or withdrawn tokens sit.
@@ -669,11 +674,10 @@ pub struct BridgeTokensLz<'info> {
 
 impl BridgeTokensLz<'_> {
     pub fn apply(ctx: &mut Context<BridgeTokensLz>, params: &BridgeTokensParams) -> Result<()> {
+        // Provider, enabled, cap, amount > 0 and the token match were all checked on the
+        // accounts above; from here on only the transaction itself is examined.
         let a = &ctx.accounts;
         let route = &a.bridge_route;
-        require!(route.provider == PROVIDER_LZ_OFT, LendMirrorError::WrongProvider);
-        require!(route.mint == a.mint.key(), LendMirrorError::InvalidBridgeAccount);
-        require!(params.amount > 0, LendMirrorError::AmountTooLarge);
 
         let sysvar_info = a.instructions_sysvar.to_account_info();
         let current = load_current_index_checked(&sysvar_info)? as usize;
