@@ -62,19 +62,40 @@ pub struct SetBridgeRoute<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// The admin's form for one route: "this token may go to this chain, over this bridge, to
+/// this address, at most this much per call". Same fields as `BridgeRoute`, which stores them.
 #[derive(Clone, AnchorSerialize, AnchorDeserialize)]
 pub struct SetBridgeRouteParams {
+    /// Which token: its identity address on Solana (USDC `EPjF…`, PYUSD `CXk2…`). Not a
+    /// balance. With `dst_chain_id` it fixes the route's own address: one route per pair.
     pub mint: Pubkey,
+    /// Which destination chain, by its EVM chain number (Arbitrum 42161, Ethereum 1,
+    /// Sepolia 11155111). Only tells routes apart; the bridge's own numbering is below.
     pub dst_chain_id: u64,
+    /// Which bridge carries it: 1 Circle, 2 Chainlink, 3 LayerZero (`PROVIDER_*`).
     pub provider: u8,
+    /// The Solana program that does the bridging: Circle's program, Chainlink's router, or
+    /// for LayerZero the token issuer's own bridge program (the send beside ours must call it).
     pub provider_program: Pubkey,
-    /// Unused since `bridge_tokens_lz`. Must be zero.
+    /// Unused since `bridge_tokens_lz`. Must be zero. Kept so old routes still read.
     pub provider_aux: Pubkey,
+    /// Where the tokens land on the other chain: our treasury's 20-byte address, right-aligned
+    /// in 32 bytes (12 zero bytes first). The one field no caller can ever override.
     pub receiver: [u8; 32],
+    /// Circle only: who may collect on the EVM side (our treasury), or zeros for anyone.
+    /// Zeros for Chainlink and LayerZero.
     pub destination_caller: [u8; 32],
+    /// The destination in the bridge's own numbering: Circle "domain" (Arbitrum 3), Chainlink
+    /// "selector" (a long number), LayerZero "endpoint id" (Arbitrum 30110, Sepolia 40161).
     pub domain_or_selector: u64,
+    /// Chainlink: gas allowed on the EVM side (0 for a plain token transfer). LayerZero: reused
+    /// as the position of the sender's token account in the issuer's send, so the guard can
+    /// pin it (USD.AI 9, USDT0 4, standard OFT 3). Reused to avoid changing the record layout.
     pub gas_limit: u64,
+    /// On/off switch. Every bridge instruction refuses a disabled route.
     pub enabled: bool,
+    /// Cap per transaction, in the token's smallest units (1_000_000 = 1 USDC). A wrong route
+    /// can lose at most this much per call.
     pub max_amount_per_tx: u64,
 }
 
