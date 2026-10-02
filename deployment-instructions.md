@@ -12,7 +12,7 @@ export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH" # Ancho
 set -a && source .env && set +a                                          # only needed for the bare `cast` lines below
 ```
 
-`.env` needs `DEPLOYMENT_TYPE=devnet` or `mainnet`, plus for that network: `SOLANA_KEYPAIR_PATH_*`, `EVM_PRIVATE_KEY_*`, `RPC_URL_SOLANA_*`, `RPC_URL_EVM_*`. The Solana key must be the program's upgrade authority.
+`.env` needs `DEPLOYMENT_TYPE=devnet` or `mainnet`, plus for that network: `SOLANA_KEYPAIR_PATH_*`, `EVM_PRIVATE_KEY_*`, `RPC_URL_SOLANA_*`, `RPC_URL_EVM_*`. The Solana key must be the program's upgrade authority. To run one command against the other network without editing the file, put `DEPLOYMENT_TYPE=devnet` (or `mainnet`) in front of it; a variable already set in the shell wins over `.env`. Hardhat also insists that the Arbitrum network has a URL, so with mainnet lines removed, pass a placeholder `RPC_URL_EVM_MAINNET=https://arb1.arbitrum.io/rpc` the same way.
 
 ## 1. Estimate the cost
 
@@ -36,12 +36,13 @@ EVM gas measured on Sepolia: `LendMirror` implementation 3.2M, treasury implemen
 npx lm build -- --features no-log-ix-name   # compile the Solana program for this network's program id
 npm run gen:api                             # regenerate the TypeScript client from the new IDL (always after a build)
 npx hardhat compile                         # compile the EVM contracts
-cargo test -p lendmirror                    # 42 Rust unit tests
+cargo test -p lendmirror                    # 49 Rust unit tests
 forge test                                  # 21 Solidity tests
-npx lm anchor test --skip-build             # 23 tests on a local validator
+npx lm anchor test --skip-build             # 30 tests on a local validator
+npx hardhat test tests/lz-send.test.ts      # 8 tests: the LayerZero send builders against real mainnet and devnet sends
 ```
 
-Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs custody, supply, borrow, payback, withdraw and release on smart vault 95, against cloned Jupiter mainnet accounts. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
+Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs 23 tests: custody, supply, borrow, payback, withdraw and release on smart vault 95, then the LayerZero pairing (our release + USD.AI's real send, and eight refused tamperings) against cloned mainnet accounts. It funds the test wallet at genesis, so it needs no faucet. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
 
 ## 3. Deploy or upgrade the Solana program
 

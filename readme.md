@@ -368,10 +368,11 @@ The local tests load the program at the Devnet address, so build it stamped with
 LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name
 npm run gen:api                                       # regenerate the TypeScript client from the IDL
 npx hardhat compile                                   # the Arbitrum contracts
-cargo test -p lendmirror                              # 42 unit tests
+cargo test -p lendmirror                              # 49 unit tests
 forge test                                            # 21 contract tests
-RPC_URL_SOLANA_MAINNET= anchor test --skip-build      # 23 tests on a local validator
-SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork   # vault 95 on a local copy of mainnet
+RPC_URL_SOLANA_MAINNET= anchor test --skip-build      # 30 tests on a local validator
+npx hardhat test tests/lz-send.test.ts                # 8: the LayerZero send builders against real transactions
+SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork   # 23: vault 95 and the LayerZero pairing on a local copy of mainnet
 ```
 
 To deploy, rebuild for your network with `npx lm build -- --features no-log-ix-name`, which stamps the profile's program id, and check the id inside the binary as the runbook shows.
@@ -398,10 +399,18 @@ npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-act
 npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --debt-action payback --debt-amount 900000
 npx hardhat lz:oapp:solana:operate-position --vault-id 95 --nft-id 34 --col-action withdraw --col-token1 500000
 
-# Bridge to Arbitrum
+# Bridge to Arbitrum (the route decides the bridge; the caller only gives an amount)
 npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint usdc --amount 1000000
 npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <solana signature>     # Circle only, once Circle has attested
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint USDai --amount 1000000 --dry-run   # LayerZero: simulate first, send nothing
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 95 --nft-id 34 --mint USDai --amount 1000000             # our release + the issuer's send, one transaction
 npx hardhat lz:oapp:evm:treasury:forward --token 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
+
+# PST: swap into USDC inside the program (admin or sender), then bridge the USDC as above
+npx hardhat lz:oapp:solana:swap-to-usdc --vault-id 95 --nft-id 34 --mint PST --amount 1000000 --dry-run
+
+# Admin: a route per token (LayerZero lanes come from config/<network>.ts)
+npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000
 ```
 
 In `operate-position`, smart legs take `--col-token0/1` or `--debt-token0/1`, normal legs `--col-amount` or `--debt-amount`. Amounts are always positive; the action gives the direction.
@@ -489,14 +498,14 @@ The full list: [`docs/review.md`](docs/review.md).
 
 ## 12. Repo map
 
-| Path                         | What is there                                                                             |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `programs/lendmirror/`       | The Solana program (Anchor). `ARCHITECTURE.md` maps every file.                           |
-| `contracts/`                 | The Arbitrum contracts: `LendMirror.sol`, `LendMirrorTreasury.sol`, the snapshot decoder. |
-| `lib/client/`                | TypeScript client: generated instruction builders, Jupiter and bridge helpers, seeds.     |
-| `tasks/`                     | Hardhat tasks for every step above (`tasks/solana`, `tasks/evm`).                         |
-| `config/`                    | One profile per network: `devnet.ts`, `mainnet.ts`.                                       |
-| `deployments/`               | Recorded deployment addresses per network.                                                |
-| `tests/`                     | Local validator tests; `tests/fork/` runs vault 95 on a local copy of mainnet.            |
-| `deployment-instructions.md` | The runbook, from build to mainnet.                                                       |
-| `docs/`                      | `what-changed.md`, `bridge-providers.md`, `review.md`.                                    |
+| Path                         | What is there                                                                                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `programs/lendmirror/`       | The Solana program (Anchor). `ARCHITECTURE.md` maps every file.                                                                         |
+| `contracts/`                 | The Arbitrum contracts: `LendMirror.sol`, `LendMirrorTreasury.sol`, the snapshot decoder.                                               |
+| `lib/client/`                | TypeScript client: generated instruction builders, Jupiter and bridge helpers (`lzSend.ts` builds the issuers' LayerZero sends), seeds. |
+| `tasks/`                     | Hardhat tasks for every step above (`tasks/solana`, `tasks/evm`).                                                                       |
+| `config/`                    | One profile per network: `devnet.ts`, `mainnet.ts`. `lzTokens` holds each LayerZero lane, captured from a real send.                    |
+| `deployments/`               | Recorded deployment addresses per network.                                                                                              |
+| `tests/`                     | Local validator tests, the send-builder tests; `tests/fork/` runs vault 95 and the LayerZero pairing on a local copy of mainnet.        |
+| `deployment-instructions.md` | The runbook, from build to mainnet.                                                                                                     |
+| `docs/`                      | `what-changed.md`, `bridge-providers.md`, `review.md`.                                                                                  |
