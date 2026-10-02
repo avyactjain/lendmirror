@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js'
 import { expect } from 'chai'
 
+import devnet from '../config/devnet'
 import mainnet from '../config/mainnet'
 import { buildIssuerSend, lzMinAmount, oftSendData } from '../lib/client/lzSend'
 
@@ -9,12 +10,13 @@ import { buildIssuerSend, lzMinAmount, oftSendData } from '../lib/client/lzSend'
  *   USDai  4MH2cvvP6nhTouuPRjTVrPecFVc2N4uh6ZhoLVcNqoeKAK8fVKLWABVcXW2NDvYwLzoNzF5BpfxsTeEJKmgCj5Sm
  *   sUSDai w9q6nMmpVcFkBYhYHXkHa5C62fUQmxLgbSeTW6eBgUpdpMoD7aarCWd9ck25bQWTW26mdmGivoaERUtAz8vbNnc
  *   USDT   2u38YgKHvKKj2mDw4781Q9bJUxXp2L9qHKvDu26yNK5V2GyeuDwF7VJr9PVMjzcQYy6c5EtouHmzgA76yqGRUaB9
+ *   PYUSD  Ub8L1qraJ3dkJpUCUtUQzVNSWD6EjCfzpurE2mFtSevwfxDA5L8QnKYSACvmKmzBojFiMxV33fdWAkQAsp4ZLyU (devnet)
  * Rebuilding each template with its own original signer must reproduce the captured list
  * exactly, including USD.AI's per-sender rate-limit-exemption PDA.
  */
 describe('LayerZero issuer send builder', () => {
     const token = (symbol: string) => {
-        const t = mainnet.lzTokens.find((x) => x.symbol === symbol)
+        const t = [...mainnet.lzTokens, ...devnet.lzTokens].find((x) => x.symbol === symbol)
         if (!t) throw new Error(`${symbol} missing from config`)
         return t
     }
@@ -47,7 +49,7 @@ describe('LayerZero issuer send builder', () => {
         )
     })
 
-    for (const symbol of ['USDai', 'sUSDai', 'USDT']) {
+    for (const symbol of ['USDai', 'sUSDai', 'USDT', 'PYUSD']) {
         it(`rebuilds the captured ${symbol} account list from its own template signer`, () => {
             const t = token(symbol)
             const ix = buildIssuerSend({
@@ -58,13 +60,16 @@ describe('LayerZero issuer send builder', () => {
                 amount: 1n,
             })
             expect(ix.programId.toBase58()).to.equal(t.issuerProgram)
+            expect(ix.data.readUInt32LE(8), 'dst eid').to.equal(t.dstEid)
             expect(ix.keys.length).to.equal(t.accounts.length)
             ix.keys.forEach((k, i) => {
                 expect(k.pubkey.toBase58(), `account ${i}`).to.equal(t.accounts[i].key)
                 expect(k.isWritable, `writability ${i}`).to.equal(t.accounts[i].w)
             })
             // Only the wallet signs; the program's guard pins the slots that matter.
-            expect(ix.keys.filter((k) => k.isSigner).every((k) => k.pubkey.toBase58() === t.templateSigner)).to.equal(true)
+            expect(ix.keys.filter((k) => k.isSigner).every((k) => k.pubkey.toBase58() === t.templateSigner)).to.equal(
+                true
+            )
         })
     }
 

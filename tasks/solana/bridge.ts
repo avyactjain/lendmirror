@@ -104,7 +104,7 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
             if (!lzToken) throw new Error(`--provider oft: ${args.mint} is not in the profile's lzTokens.`)
             provider = PROVIDER_LZ_OFT
             providerProgram = lzToken.issuerProgram
-            domainOrSelector = 30110n // Arbitrum; every captured lane is Solana → Arbitrum
+            domainOrSelector = BigInt(lzToken.dstEid)
             // For LayerZero the route's gas_limit field carries the position of the sender's
             // token account in the issuer's send, which the program pins.
             gasLimit = BigInt(lzToken.tokenSourceIndex)
@@ -316,7 +316,8 @@ task(
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(async (args) => {
         const { PublicKey } = await import('@solana/web3.js')
-        const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } = await import('@solana/spl-token')
+        const { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } =
+            await import('@solana/spl-token')
         const eid = resolveSolanaEid(args.eid)
         const profile = getProfile()
         if (!profile.jupiter) throw new Error('No Jupiter config in this profile (mainnet only).')
@@ -386,6 +387,7 @@ task(
                     jupiterProgram: publicKey(profile.jupiter.program),
                     sourceTokenProgram: publicKey(sourceTokenProgram.toBase58()),
                     destinationTokenProgram: publicKey(TOKEN_PROGRAM_ID),
+                    associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
                     // Kinobi inlines the one-field params struct.
                     data: Uint8Array.from(Buffer.from(swapIx.data, 'base64')),
                 }

@@ -44,8 +44,11 @@ export type LzTokenProfile = {
     symbol: string
     mint: string
     decimals: number
-    /** The issuer's own bridge program on Solana (none of them is LayerZero's standard OFT). */
+    /** The issuer's bridge program on Solana (LayerZero's standard OFT, or the issuer's own). */
     issuerProgram: string
+    /** LayerZero endpoint id of the destination this lane goes to (Arbitrum 30110, Sepolia 40161).
+     * Stored in the route and written into the send; the program checks they match. */
+    dstEid: number
     /** Position of the sender's token account in the issuer's `send`. Stored as the route's
      * `gas_limit`; the program pins this slot to the caller's token account. */
     tokenSourceIndex: number

@@ -53,6 +53,7 @@ const profile: DeploymentProfile = {
             mint: 'USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A',
             decimals: 6,
             issuerProgram: 'BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm', // USD.AI "console_oft"
+            dstEid: 30110,
             tokenSourceIndex: 9,
             tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
             minUnderBps: 0, // no bridge fee, shared decimals == local, nothing is dropped
@@ -129,6 +130,7 @@ const profile: DeploymentProfile = {
             mint: 'sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE',
             decimals: 6,
             issuerProgram: 'BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm',
+            dstEid: 30110,
             tokenSourceIndex: 9,
             tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
             minUnderBps: 0,
@@ -200,6 +202,7 @@ const profile: DeploymentProfile = {
             mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // Tether's native USDT
             decimals: 6,
             issuerProgram: 'Fuww9mfc8ntAwxPUzFia7VJFAdvLppyZwhPJoXySZXf7', // USDT0 Legacy Mesh
+            dstEid: 30110,
             tokenSourceIndex: 4,
             tokenProgram: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
             minUnderBps: 40, // USDT0 takes 0.03% on arrival; leave headroom under the program's 0.5%

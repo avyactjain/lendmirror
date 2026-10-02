@@ -92,7 +92,7 @@ export function buildIssuerSend(args: {
         return { pubkey, isWritable: w, isSigner: key === token.templateSigner }
     })
     const data = oftSendData({
-        dstEid: 30110, // checked against the route by the program; all our lanes are Arbitrum
+        dstEid: token.dstEid, // the route carries the same eid; the program checks they match
         to: args.receiver,
         amountLd: args.amount,
         minAmountLd: lzMinAmount(args.amount, token.minUnderBps),
