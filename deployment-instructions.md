@@ -198,6 +198,16 @@ npx hardhat lz:oapp:evm:treasury:set-strategy --network sepolia --token 0xCaC524
 npx hardhat lz:oapp:evm:treasury:forward --network sepolia --token 0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9             # after delivery (~10 min, Sepolia tx 0x3da16658…): tx 0xaa578945…
 ```
 
+The guard was then shown refusing on the live network, with the wrapper's balance untouched
+(`--tamper amount|receiver|no-send` builds a deliberately wrong pairing; the program answers
+`MissingBridgeSend`, error 6023, and the transaction never lands):
+
+```bash
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper amount      # send one unit less than released
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper receiver    # send somewhere else
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper no-send     # release with no send
+```
+
 `.env` here held only devnet credentials with `DEPLOYMENT_TYPE=mainnet`; every command ran with
 `DEPLOYMENT_TYPE=devnet` in front (dotenv never overrides a set variable). Hardhat still wants
 the Arbitrum network URL defined, so a placeholder `RPC_URL_EVM_MAINNET` was passed.

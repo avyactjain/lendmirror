@@ -182,6 +182,12 @@ task(
     )
     .addOptionalParam('fundLamports', 'CCIP only: SOL moved onto the bridge signer for the fee', 50_000_000, types.int)
     .addFlag('dryRun', 'Build and simulate everything, print the result, send nothing')
+    .addOptionalParam(
+        'tamper',
+        'LayerZero only, for proving the guard on a live network: "amount" (send 1 unit less), "receiver" (send elsewhere), "no-send" (release alone). The program must refuse.',
+        '',
+        types.string
+    )
     .addOptionalParam('computeUnitPriceScaleFactor', 'Compute unit price scale factor', 4, types.float)
     .setAction(async (args) => {
         const { PublicKey } = await import('@solana/web3.js')
@@ -253,18 +259,25 @@ task(
             txBuilder = txBuilder.add(
                 bridgeTokensLz(instance, umiWalletSigner, { ...common, tokenProgram: lzToken.tokenProgram }, ondemand)
             )
+            // `--tamper` builds a deliberately wrong pairing so the refusal can be shown live.
+            const tamperedReceiver = Uint8Array.from(route.receiver)
+            if (args.tamper === 'receiver') tamperedReceiver[31] ^= 1
             const sendIx = buildIssuerSend({
                 token: lzToken,
                 signer: walletPk,
                 tokenSource,
-                receiver: route.receiver,
-                amount: common.amount,
+                receiver: tamperedReceiver,
+                amount: args.tamper === 'amount' ? common.amount - 1n : common.amount,
             })
-            txBuilder = txBuilder.add({
-                instruction: fromWeb3JsInstruction(sendIx),
-                signers: [umiWalletSigner],
-                bytesCreatedOnChain: 0,
-            })
+            if (args.tamper !== 'no-send') {
+                txBuilder = txBuilder.add({
+                    instruction: fromWeb3JsInstruction(sendIx),
+                    signers: [umiWalletSigner],
+                    bytesCreatedOnChain: 0,
+                })
+            }
+            if (args.tamper)
+                console.log(`TAMPERED (${args.tamper}): the program must refuse this with MissingBridgeSend.`)
             extraLookupTables.push(publicKey(lzToken.lookupTable))
             console.log(
                 `${lzToken.symbol}: fee cap ${lzToken.nativeFeeCapLamports} lamports, paid by the wallet; arrives as ${lzToken.evmToken} on LayerZero eid ${lzToken.dstEid}.`
