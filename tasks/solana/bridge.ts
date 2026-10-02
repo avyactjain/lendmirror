@@ -160,7 +160,7 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
         })
         if (lzToken)
             console.log(
-                `Treasury side: set a strategy for ${lzToken.symbol} on Arbitrum (${lzToken.evmToken}) before forwarding.`
+                `Treasury side: set a strategy for ${lzToken.symbol} (${lzToken.evmToken}, LayerZero eid ${lzToken.dstEid}) before forwarding.`
             )
     })
 
@@ -267,7 +267,7 @@ task(
             })
             extraLookupTables.push(publicKey(lzToken.lookupTable))
             console.log(
-                `${lzToken.symbol}: fee cap ${lzToken.nativeFeeCapLamports} lamports, paid by the wallet; arrives as ${lzToken.evmToken} on Arbitrum.`
+                `${lzToken.symbol}: fee cap ${lzToken.nativeFeeCapLamports} lamports, paid by the wallet; arrives as ${lzToken.evmToken} on LayerZero eid ${lzToken.dstEid}.`
             )
         } else {
             throw new Error(`Route provider ${route.provider} has no instruction (Wormhole NTT is reserved).`)
