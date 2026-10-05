@@ -219,8 +219,8 @@ replaced the never-used `bridge_tokens_oft`: the issuer's send runs beside our i
 one all-or-nothing transaction, and the program releases tokens only after reading that
 transaction and checking the send goes, whole, to the treasury. PST exists on no bridge to
 Arbitrum at all; it will go over Chainlink to Ethereum once an Ethereum treasury exists (a
-swap-to-USDC instruction was built and then removed as too much insider risk). Proven: 49 Rust unit tests,
-7 builder tests pinned to real mainnet sends, 23 fork tests including the full USDai
+swap-to-USDC instruction was built and then removed as too much insider risk). Proven: 47 Rust unit tests,
+12 send-builder tests against real sends, 23 fork tests including the full USDai
 burn-and-queue and eight refused tamperings, and read-only live-mainnet simulations of all
 three issuer sends. Awaiting the program upgrade and the admin routes; see
 `docs/bridge-providers.md`.

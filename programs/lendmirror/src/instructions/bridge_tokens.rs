@@ -25,7 +25,7 @@
 //! (operator), and the wrapper's level must be 1 or 2. Bridging only ever sends funds to our own contract,
 //! so it is the one "write" a level 1 wrapper may do besides deposit and payback.
 //!
-//! Typical call: hardhat `lz:oapp:solana:bridge-tokens --mint USDC --amount 1000000 --chain 11155111`.
+//! Typical call: hardhat `lz:oapp:solana:bridge-tokens --mint USDC --amount 1000000 --chain-id 11155111`.
 
 use crate::bridges::{cctp_deposit_for_burn_data, decode_oft_send, OftSendParams};
 use crate::errors::LendMirrorError;
