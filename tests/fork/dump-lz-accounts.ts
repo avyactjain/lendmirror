@@ -15,6 +15,7 @@ import { writeFileSync } from 'node:fs'
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import mainnet from '../../config/mainnet'
+import { CAPTURED_SENDS } from '../fixtures/lz-sends'
 
 const SKIP = new Set([
     '11111111111111111111111111111111',
@@ -34,9 +35,10 @@ async function main() {
     if (!token) throw new Error('USDai missing from config')
 
     const keys = new Set<string>([token.mint, token.lookupTable, token.issuerProgram])
-    for (const a of token.accounts) {
-        // The template signer's slots are replaced by the test wallet; skip them.
-        if (a.key !== token.templateSigner) keys.add(a.key)
+    // Every account a real USDai send touched (tests/fixtures/lz-sends.ts), minus the sender's own.
+    const captured = CAPTURED_SENDS.USDai
+    for (const a of captured.accounts) {
+        if (a.key !== captured.signer && a.key !== captured.tokenSource) keys.add(a.key)
     }
 
     const programs: string[] = []

@@ -494,14 +494,14 @@ The full list: [`docs/review.md`](docs/review.md).
 
 ## 12. Repo map
 
-| Path                         | What is there                                                                                                                           |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `programs/lendmirror/`       | The Solana program (Anchor). `ARCHITECTURE.md` maps every file.                                                                         |
-| `contracts/`                 | The Arbitrum contracts: `LendMirror.sol`, `LendMirrorTreasury.sol`, the snapshot decoder.                                               |
-| `lib/client/`                | TypeScript client: generated instruction builders, Jupiter and bridge helpers (`lzSend.ts` builds the issuers' LayerZero sends), seeds. |
-| `tasks/`                     | Hardhat tasks for every step above (`tasks/solana`, `tasks/evm`).                                                                       |
-| `config/`                    | One profile per network: `devnet.ts`, `mainnet.ts`. `lzTokens` holds each LayerZero lane, captured from a real send.                    |
-| `deployments/`               | Recorded deployment addresses per network.                                                                                              |
-| `tests/`                     | Local validator tests, the send-builder tests; `tests/fork/` runs vault 95 and the LayerZero pairing on a local copy of mainnet.        |
-| `deployment-instructions.md` | The runbook, from build to mainnet.                                                                                                     |
-| `docs/`                      | `what-changed.md`, `bridge-providers.md`, `review.md`.                                                                                  |
+| Path                         | What is there                                                                                                                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `programs/lendmirror/`       | The Solana program (Anchor). `ARCHITECTURE.md` maps every file.                                                                                                                                     |
+| `contracts/`                 | The Arbitrum contracts: `LendMirror.sol`, `LendMirrorTreasury.sol`, the snapshot decoder.                                                                                                           |
+| `lib/client/`                | TypeScript client: generated instruction builders, Jupiter and bridge helpers (`lzSend.ts` builds the issuers' LayerZero sends: the issuer's accounts by rule, LayerZero's through its SDK), seeds. |
+| `tasks/`                     | Hardhat tasks for every step above (`tasks/solana`, `tasks/evm`).                                                                                                                                   |
+| `config/`                    | One profile per network: `devnet.ts`, `mainnet.ts`. `lzTokens` says, per LayerZero token and destination, which issuer program to call and how.                                                     |
+| `deployments/`               | Recorded deployment addresses per network.                                                                                                                                                          |
+| `tests/`                     | Local validator tests, the send-builder tests; `tests/fork/` runs vault 95 and the LayerZero pairing on a local copy of mainnet.                                                                    |
+| `deployment-instructions.md` | The runbook, from build to mainnet.                                                                                                                                                                 |
+| `docs/`                      | `what-changed.md`, `bridge-providers.md`, `review.md`.                                                                                                                                              |

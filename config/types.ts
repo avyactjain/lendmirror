@@ -39,39 +39,57 @@ export type CctpProfile = {
     attestationApi: string
 }
 
-/** One LayerZero-bridged token: what `bridge_tokens_lz` and the issuer's send template need. */
+/**
+ * How to call one issuer's bridge program. The client works out the full account list of the
+ * issuer's `send` from this: the issuer's own accounts by the rules of its program, and the
+ * LayerZero accounts with LayerZero's SDK, which reads them from chain.
+ *
+ * - `standard-oft`: LayerZero's standard program (Paxos's PYUSD deployment). Everything derives
+ *   from the escrow account.
+ * - `usdt0`: Tether's USDT0 program. Its store, peer and credits accounts sit at fixed addresses
+ *   under the program; only the escrow is given here.
+ * - `usdai`: USD.AI's program (USDai and sUSDai). Its pause, fee and rate-limit records follow
+ *   rules USD.AI does not publish, so their addresses are listed. They were read from a real
+ *   send and are the same for every sender.
+ */
+export type LzIssuer =
+    | { kind: 'standard-oft'; escrow: string }
+    | { kind: 'usdt0'; escrow: string }
+    | {
+          kind: 'usdai'
+          store: string
+          pauseConfig: string
+          feeConfig: string
+          defaultRateLimit: string
+          rateLimit: string
+          /** Where the issuer collects its fee, if it ever charges one. From its store. */
+          feeDeposit: string
+      }
+
+/** One token that leaves Solana over LayerZero, to one destination chain. */
 export type LzTokenProfile = {
     symbol: string
+    /** The token's address on Solana (its "mint"). */
     mint: string
     decimals: number
-    /** The issuer's bridge program on Solana (LayerZero's standard OFT, or the issuer's own). */
+    /** The issuer's bridge program on Solana. Written into the route; the send must call it. */
     issuerProgram: string
-    /** LayerZero endpoint id of the destination this lane goes to (Arbitrum 30110, Sepolia 40161).
-     * Stored in the route and written into the send; the program checks they match. */
+    /** LayerZero's id for the destination chain (Arbitrum 30110, Sepolia 40161). Written into
+     * the route and into the send; the program checks they match. */
     dstEid: number
-    /** Position of the sender's token account in the issuer's `send`. Stored as the route's
-     * `gas_limit`; the program pins this slot to the caller's token account. */
-    tokenSourceIndex: number
-    /** Token program that owns the mint (classic Token or Token-2022). */
+    /** Token program that owns the token (classic Token or Token-2022). */
     tokenProgram: string
-    /** min_amount_ld = amount - amount * minUnderBps / 10000. The program allows at most 50. */
+    /** How the issuer's program wants to be called. */
+    issuer: LzIssuer
+    /** "Minimum that must arrive" = amount - amount * minUnderBps / 10000. The program allows at most 50. */
     minUnderBps: number
-    /** Options bytes for the send: [] or the bare v2 header [0,3]. Anything else is refused. */
+    /** Extra delivery options for the send: [] or the bare header [0,3]. Anything else is refused. */
     options: number[]
-    /** Cap on the LayerZero fee in lamports. Only the real quoted fee is charged. */
+    /** The most SOL (in lamports) the sender agrees to pay LayerZero. Only the real fee is charged. */
     nativeFeeCapLamports: bigint
-    /** The issuer's address lookup table, used by the template transaction. */
+    /** The issuer's address lookup table: lets ~40 accounts fit in one transaction. */
     lookupTable: string
-    /** The template send's signer. Replaced by our wallet everywhere it appears. */
-    templateSigner: string
-    /** A slot derived from the sender, re-derived for our wallet: PDA([...seeds, signer]).
-     * Null when no slot depends on who sends. */
-    senderPda: { index: number; seedPrefix: string; seedBase: string } | null
-    /** Full account list of a real mainnet send on this lane, address + writability. The
-     * signer, token-source and sender-PDA slots are substituted at build time; the rest are
-     * lane constants (store, peer, endpoint, message library, verifiers, price feed). */
-    accounts: { key: string; w: boolean }[]
-    /** ERC20 that arrives on the EVM chain, for the treasury's set-strategy. */
+    /** The token that arrives on the EVM chain, for the treasury's set-strategy. */
     evmToken: string
 }
 

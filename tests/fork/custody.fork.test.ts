@@ -53,7 +53,10 @@ const PDA_FUNDING = 30_000_000n // 30 USDC moved into the wrapper authority's ac
 const SUPPLY = 20_000_000n // 20 USDC supplied as smart collateral (pool token1)
 const BORROW = 5_000_000n // 5 USDC
 const PAYBACK = 2_000_000n // 2 USDC
-const WITHDRAW = 5_000_000n // 5 USDC of collateral
+// 4 USDC of collateral. With the vault's state on 2026-10-05, withdrawing exactly 5 lands this small
+// position on a tick boundary where Jupiter's SDK and its program round differently
+// (VaultTickMismatch, every time, retries included). Another amount avoids the boundary.
+const WITHDRAW = 4_000_000n
 
 const loadEsm = new Function('s', 'return import(s)') as (s: string) => Promise<{
     getInitPositionIx: (p: {

@@ -55,10 +55,16 @@ observed). Proven on a local fork of mainnet with the whole LayerZero stack clon
 path burns the exact amount at call depth 5, and eight tampered pairings are refused
 (`tests/fork/bridge-lz.fork.test.ts`).
 
-Each lane lives in `config/mainnet.ts` (`lzTokens`): the full account list captured from a real
-send, the issuer's lookup table, and which slots are substituted (the signer, its token
-account, and USD.AI's per-sender rate-limit-exemption PDA). A stale template can only make the
-send fail, never redirect it — the program re-checks everything that moves money.
+Each token and destination has a short entry in `config/mainnet.ts` (`lzTokens`): the issuer's
+program, the destination id, and how that issuer's program is called. The client works out the
+send's 40 to 50 accounts from it (`lib/client/lzSend.ts`): the issuer's own accounts by the rules
+of its program (USD.AI's pause, fee and rate-limit records are listed, since USD.AI does not
+publish their rule), and LayerZero's accounts with LayerZero's SDK, which reads the issuer's
+verifiers and executor from chain. Real sends copied from chain sit in
+`tests/fixtures/lz-sends.ts`, and the tests require the built list to equal them account for
+account. A wrong entry can only make the send fail, never redirect it: the program re-checks
+the program id, amount, destination and source account, and the issuers themselves refuse a
+send whose peer, store, escrow or token does not match (checked by simulation on mainnet).
 
 Issuer facts worth knowing (read from the mints and stores):
 

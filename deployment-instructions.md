@@ -112,7 +112,7 @@ npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter                           
 npx hardhat lz:oapp:evm:treasury:set-strategy --token <ERC20> --strategy <ADDRESS>    # treasury: where each token is forwarded (one per token)
 npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp               # USDC goes over Circle to the treasury
 npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (CCIP-BnM on Devnet)
-npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000    # a LayerZero token; the lane comes from config lzTokens (also: sUSDai, USDT)
+npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000    # a LayerZero token; issuer program and destination come from config lzTokens (also: sUSDai, USDT)
 npx hardhat lz:oapp:solana:create-lookup-table                                        # pack the fixed accounts so sends fit in one transaction
 ```
 

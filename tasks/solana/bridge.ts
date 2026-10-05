@@ -16,7 +16,7 @@ import {
     bridgeTokensLz,
     setBridgeRoute,
 } from '../../lib/client/bridge'
-import { buildIssuerSend } from '../../lib/client/lzSend'
+import { buildIssuerSend, tokenSourceIndex } from '../../lib/client/lzSend'
 import { getProfile, requireCcip, resolveSolanaEid } from '../common/deployment'
 
 import {
@@ -100,14 +100,14 @@ task('lz:oapp:solana:set-bridge-route', 'Admin: fix the bridge provider and EVM 
         let domainOrSelector: bigint
         let gasLimit = 0n
         if (args.provider === 'oft') {
-            // Everything comes from the profile's captured lane data (config/<type>.ts lzTokens).
+            // Which issuer program and which destination come from the profile (config/<type>.ts lzTokens).
             if (!lzToken) throw new Error(`--provider oft: ${args.mint} is not in the profile's lzTokens.`)
             provider = PROVIDER_LZ_OFT
             providerProgram = lzToken.issuerProgram
             domainOrSelector = BigInt(lzToken.dstEid)
             // For LayerZero the route's gas_limit field carries the position of the sender's
             // token account in the issuer's send, which the program pins.
-            gasLimit = BigInt(lzToken.tokenSourceIndex)
+            gasLimit = BigInt(tokenSourceIndex(lzToken))
         } else if (args.provider === 'cctp') {
             if (!profile.cctp) throw new Error('No CCTP config in the profile.')
             provider = PROVIDER_CCTP
@@ -262,7 +262,8 @@ task(
             // `--tamper` builds a deliberately wrong pairing so the refusal can be shown live.
             const tamperedReceiver = Uint8Array.from(route.receiver)
             if (args.tamper === 'receiver') tamperedReceiver[31] ^= 1
-            const sendIx = buildIssuerSend({
+            const sendIx = await buildIssuerSend({
+                rpc: umi.rpc, // only to read LayerZero's settings for this token and destination
                 token: lzToken,
                 signer: walletPk,
                 tokenSource,

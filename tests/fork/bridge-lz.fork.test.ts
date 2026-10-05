@@ -38,7 +38,7 @@ import { expect } from 'chai'
 import mainnet from '../../config/mainnet'
 import { lendmirror } from '../../lib/client'
 import { PROVIDER_LZ_OFT, bridgeTokensLz, setBridgeRoute } from '../../lib/client/bridge'
-import { buildIssuerSend } from '../../lib/client/lzSend'
+import { buildIssuerSend, tokenSourceIndex } from '../../lib/client/lzSend'
 
 const PROGRAM_ID = 'GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1'
 const VAULT_ID = 95
@@ -133,7 +133,7 @@ describe('bridge_tokens_lz on a mainnet fork (USDai over the cloned LayerZero st
                 receiver: TREASURY,
                 destinationCaller: '',
                 domainOrSelector: 30110n,
-                gasLimit: BigInt(usdai.tokenSourceIndex),
+                gasLimit: BigInt(tokenSourceIndex(usdai)),
                 enabled: true,
                 maxAmountPerTx: CAP,
             }),
@@ -143,7 +143,7 @@ describe('bridge_tokens_lz on a mainnet fork (USDai over the cloned LayerZero st
     it('release + issuer send in one transaction: burned on Solana, headed to the treasury', async () => {
         const supplyBefore = BigInt((await connection.getTokenSupply(MINT)).value.amount)
         const walletBefore = await balance(walletUsdai)
-        const signature = await send([ourIx(AMOUNT)], [sendIx({})])
+        const signature = await send([ourIx(AMOUNT)], [await sendIx({})])
         const tx = await connection.getTransaction(signature, {
             maxSupportedTransactionVersion: 0,
             commitment: 'confirmed',
@@ -164,41 +164,44 @@ describe('bridge_tokens_lz on a mainnet fork (USDai over the cloned LayerZero st
     })
 
     it('a send of a different amount is refused', async () => {
-        await expectError(send([ourIx(AMOUNT)], [sendIx({ amount: AMOUNT - 1n })]), 'MissingBridgeSend')
+        await expectError(send([ourIx(AMOUNT)], [await sendIx({ amount: AMOUNT - 1n })]), 'MissingBridgeSend')
     })
 
     it('a send to a different receiver is refused', async () => {
         const wrong = Uint8Array.from(receiver32)
         wrong[31] ^= 1
-        await expectError(send([ourIx(AMOUNT)], [sendIx({ receiver: wrong })]), 'MissingBridgeSend')
+        await expectError(send([ourIx(AMOUNT)], [await sendIx({ receiver: wrong })]), 'MissingBridgeSend')
     })
 
     it('a send with caller options is refused', async () => {
         await expectError(
-            send([ourIx(AMOUNT)], [sendIx({ options: [0, 3, 1, 0, 17, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 134, 160] })]),
+            send(
+                [ourIx(AMOUNT)],
+                [await sendIx({ options: [0, 3, 1, 0, 17, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 134, 160] })]
+            ),
             'MissingBridgeSend'
         )
     })
 
     it('two releases around one send are refused', async () => {
-        await expectError(send([ourIx(AMOUNT), ourIx(AMOUNT)], [sendIx({})]), 'MissingBridgeSend')
+        await expectError(send([ourIx(AMOUNT), ourIx(AMOUNT)], [await sendIx({})]), 'MissingBridgeSend')
     })
 
     it('an amount over the route cap is refused', async () => {
-        await expectError(send([ourIx(CAP + 1n)], [sendIx({ amount: CAP + 1n })]), 'AmountTooLarge')
+        await expectError(send([ourIx(CAP + 1n)], [await sendIx({ amount: CAP + 1n })]), 'AmountTooLarge')
     })
 
     it('level 0 is refused, level 1 allowed again', async () => {
         await send([instance.setWrapperLevel(signer, VAULT_ID, nftId, 0)])
-        await expectError(send([ourIx(AMOUNT)], [sendIx({})]), 'LevelDenied')
+        await expectError(send([ourIx(AMOUNT)], [await sendIx({})]), 'LevelDenied')
         await send([instance.setWrapperLevel(signer, VAULT_ID, nftId, 1)])
     })
 
     it('a disabled route is refused', async () => {
         await setRoute(false)
-        await expectError(send([ourIx(AMOUNT)], [sendIx({})]), 'RouteDisabled')
+        await expectError(send([ourIx(AMOUNT)], [await sendIx({})]), 'RouteDisabled')
         await setRoute(true)
-        const signature = await send([ourIx(AMOUNT)], [sendIx({})])
+        const signature = await send([ourIx(AMOUNT)], [await sendIx({})])
         expect(signature).to.be.a('string')
         expect(await balance(wrapperUsdai)).to.equal(FUNDING - 2n * AMOUNT)
     })
@@ -219,8 +222,14 @@ describe('bridge_tokens_lz on a mainnet fork (USDai over the cloned LayerZero st
         )
     }
 
-    function sendIx(over: { amount?: bigint; receiver?: Uint8Array; options?: number[] }): TransactionInstruction {
+    /** USD.AI's send for this wallet. LayerZero's accounts are read from the fork itself. */
+    function sendIx(over: {
+        amount?: bigint
+        receiver?: Uint8Array
+        options?: number[]
+    }): Promise<TransactionInstruction> {
         return buildIssuerSend({
+            rpc: umi.rpc,
             token: over.options ? { ...usdai, options: over.options } : usdai,
             signer: wallet.publicKey,
             tokenSource: walletUsdai,
@@ -239,7 +248,7 @@ describe('bridge_tokens_lz on a mainnet fork (USDai over the cloned LayerZero st
                 receiver: TREASURY,
                 destinationCaller: '',
                 domainOrSelector: 30110n,
-                gasLimit: BigInt(usdai.tokenSourceIndex),
+                gasLimit: BigInt(tokenSourceIndex(usdai)),
                 enabled,
                 maxAmountPerTx: CAP,
             }),

@@ -38,10 +38,8 @@ const profile: DeploymentProfile = {
         attestationApi: 'https://iris-api-sandbox.circle.com',
     },
     treasury: '0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C',
-    // PayPal's test PYUSD: a public faucet, LayerZero's standard OFT program (Paxos's
-    // deployment), peer to Sepolia. Captured from a real devnet send (Ub8L1qraJ3dk…,
-    // 2026-05-28): the full account list, the lookup table, and where the sender's token
-    // account sits. The signer and token-source slots are swapped for ours at build time.
+    // PayPal's test PYUSD: a public faucet (faucet.paxos.com), LayerZero's standard program in
+    // Paxos's deployment, and a two-way link to Sepolia. Used to rehearse the LayerZero bridge.
     lzTokens: [
         {
             symbol: 'PYUSD',
@@ -49,55 +47,12 @@ const profile: DeploymentProfile = {
             decimals: 6,
             issuerProgram: 'paxosVkYuJBKUQoZGAidRA47Qt4uidqG5fAt5kmr1nR',
             dstEid: 40161, // Sepolia
-            tokenSourceIndex: 3, // standard OFT: signer, peer, store, token_source, escrow, mint, ...
             tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
             minUnderBps: 0, // burn-and-mint, no fee, shared decimals == local
             options: [], // the peer's enforced options carry 183,500 gas on Sepolia
             nativeFeeCapLamports: 50_000_000n, // devnet fees are quoted higher; only the real fee is charged
             lookupTable: '9thqPdbR27A1yLWw2spwJLySemiGMXxPnEvfmXVk4KuK',
-            templateSigner: '9WBhc3GQxwVYqGvsAjsF2XBmkeZqeG6AKBBd5hFnHEA4',
-            senderPda: null,
-            accounts: [
-                { key: '9WBhc3GQxwVYqGvsAjsF2XBmkeZqeG6AKBBd5hFnHEA4', w: true },
-                { key: 'CFKsqjcfikSM3wS1V1cXYLCgdVqZzjycPTE8gJkkMMFB', w: true },
-                { key: 'M8YxJ7TSL9TgPxudiUQsDc8MkF9mYzRae3iHySZS9Ly', w: true },
-                { key: 'Gn5KKNhqjKkP2Upzrho93ndHfJ3ujCbwXDFYADSxwAbT', w: true },
-                { key: 'EXJZbFNmPhrNkJxJ3tq8RyGHzzxPcxNQxSgx6HUHoRfU', w: true },
-                { key: 'CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM', w: true },
-                { key: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', w: false },
-                { key: 'AxW3SBxJUHeYFEd9KWPdqX1aBKUhgKZV9hLCC4oKfVzx', w: false },
-                { key: 'paxosVkYuJBKUQoZGAidRA47Qt4uidqG5fAt5kmr1nR', w: false },
-                { key: '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6', w: false },
-                { key: 'M8YxJ7TSL9TgPxudiUQsDc8MkF9mYzRae3iHySZS9Ly', w: true },
-                { key: '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH', w: false },
-                { key: '4GN92jRi2FqxaJ7zg94emD2m5sNcJMKKCWcgfkDhGfct', w: false },
-                { key: 'HpdCPY94sruXSQ2hXk42BtTPkAYLZamT8rmZtoTzdY4h', w: false },
-                { key: '526PeNZfw8kSnDU4nmzJFVJzJWNhwmZykEyJr5XWz5Fv', w: false },
-                { key: '2uk9pQh3tB5ErV7LGQJcbWjb4KeJ2UJki5qJZ8QG56G3', w: false },
-                { key: 'Bk3qAx4245fMKgxde21GvUCQKRf9yayCqVZNuXFQ83Up', w: true },
-                { key: 'F8E8QGhKmHEx2esh5LpVizzcP4cHYhzXdXTwg9w3YYY2', w: false },
-                { key: '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6', w: false },
-                { key: '2XgGZG4oP29U3w5h4nTk1V2LFHL23zKDPJjs3psGzLKQ', w: false },
-                { key: '2Z6GUMLNC7RXhnaeL7nTinSfkdtkH2EewmhrgwAPmipb', w: false },
-                { key: '4ksWk8ssnGZgMo61LKddc6X2XzkJZVfFhP2C1z2CG5U2', w: false },
-                { key: '9WBhc3GQxwVYqGvsAjsF2XBmkeZqeG6AKBBd5hFnHEA4', w: true },
-                { key: '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH', w: false },
-                { key: '11111111111111111111111111111111', w: false },
-                { key: '7n1YeBMVEUCJ4DscKAcpVQd6KXU7VpcEcc15ZuMcL4U3', w: false },
-                { key: '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH', w: false },
-                { key: '6doghB248px58JSSwG4qejQ46kFMW4AMj7vzJnWZHNZn', w: false },
-                { key: 'AwrbHeCyniXaQhiJZkLhgWdUCteeWSGaSN1sTfLiY7xK', w: true },
-                { key: '8ahPGPjEbpgGaZx2NV1iG5Shj7TDwvsjkEDcGWjt94TP', w: false },
-                { key: 'CSFsUupvJEQQd1F4SsXGACJaxQX4eropQMkGV2696eeQ', w: false },
-                { key: '2riPXyzsFhSasZTxbEeWuuvHu4P5c49x4ARJQ4wgLiTF', w: false },
-                { key: '4HxXbLv37XrivKukEbofybpHr7C8HUGJzd4B5T9USpGh', w: true },
-                { key: '8ahPGPjEbpgGaZx2NV1iG5Shj7TDwvsjkEDcGWjt94TP', w: false },
-                { key: 'CSFsUupvJEQQd1F4SsXGACJaxQX4eropQMkGV2696eeQ', w: false },
-                { key: 'HtEYV4xB4wvsj5fgTkcfuChYpvGYzgzwvNhgDZQNh7wW', w: false },
-                { key: '4VDjp6XQaxoZf5RGwiPU9NR1EXSZn2TP4ATMmiSzLfhb', w: true },
-                { key: '8ahPGPjEbpgGaZx2NV1iG5Shj7TDwvsjkEDcGWjt94TP', w: false },
-                { key: 'CSFsUupvJEQQd1F4SsXGACJaxQX4eropQMkGV2696eeQ', w: false },
-            ],
+            issuer: { kind: 'standard-oft', escrow: 'EXJZbFNmPhrNkJxJ3tq8RyGHzzxPcxNQxSgx6HUHoRfU' },
             evmToken: '0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9', // PYUSD on Sepolia, 6 decimals
         },
     ],
