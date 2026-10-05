@@ -39,6 +39,60 @@ export type CctpProfile = {
     attestationApi: string
 }
 
+/**
+ * How to call one issuer's bridge program. The client works out the full account list of the
+ * issuer's `send` from this: the issuer's own accounts by the rules of its program, and the
+ * LayerZero accounts with LayerZero's SDK, which reads them from chain.
+ *
+ * - `standard-oft`: LayerZero's standard program (Paxos's PYUSD deployment). Everything derives
+ *   from the escrow account.
+ * - `usdt0`: Tether's USDT0 program. Its store, peer and credits accounts sit at fixed addresses
+ *   under the program; only the escrow is given here.
+ * - `usdai`: USD.AI's program (USDai and sUSDai). Its pause, fee and rate-limit records follow
+ *   rules USD.AI does not publish, so their addresses are listed. They were read from a real
+ *   send and are the same for every sender.
+ */
+export type LzIssuer =
+    | { kind: 'standard-oft'; escrow: string }
+    | { kind: 'usdt0'; escrow: string }
+    | {
+          kind: 'usdai'
+          store: string
+          pauseConfig: string
+          feeConfig: string
+          defaultRateLimit: string
+          rateLimit: string
+          /** Where the issuer collects its fee, if it ever charges one. From its store. */
+          feeDeposit: string
+      }
+
+/** One token that leaves Solana over LayerZero, to one destination chain. */
+export type LzTokenProfile = {
+    symbol: string
+    /** The token's address on Solana (its "mint"). */
+    mint: string
+    decimals: number
+    /** The issuer's bridge program on Solana. Written into the route; the send must call it. */
+    issuerProgram: string
+    /** LayerZero's id for the destination chain (Arbitrum 30110, Sepolia 40161). Written into
+     * the route and into the send; the program checks they match. */
+    dstEid: number
+    /** Token program that owns the token (classic Token or Token-2022). */
+    tokenProgram: string
+    /** How the issuer's program wants to be called. */
+    issuer: LzIssuer
+    /** "Minimum that must arrive" = amount - amount * minUnderBps / 10000. The program allows at most 50. */
+    minUnderBps: number
+    /** Extra delivery options for the send: [] or the bare header [0,3]. Anything else is refused. */
+    options: number[]
+    /** The most SOL (in lamports) the sender agrees to pay LayerZero. Only the real fee is charged. */
+    nativeFeeCapLamports: bigint
+    /** The issuer's address lookup table: lets ~40 accounts fit in one transaction. */
+    lookupTable: string
+    /** The token that arrives on the EVM chain, for the treasury's set-strategy. */
+    evmToken: string
+}
+
 export type DeploymentProfile = {
     type: DeploymentType
     /** LayerZero Solana eid. */
@@ -60,6 +114,8 @@ export type DeploymentProfile = {
     cctp: CctpProfile | null
     /** UUPS proxy of LendMirrorTreasury on the EVM chain. Empty until deployed. */
     treasury: string
+    /** Tokens bridged over LayerZero through their issuers' programs. Empty on Devnet. */
+    lzTokens: LzTokenProfile[]
     /** Env var names. Secrets stay in .env. */
     env: {
         solanaKeypairPath: string

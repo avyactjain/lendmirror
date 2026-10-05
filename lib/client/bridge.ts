@@ -5,20 +5,18 @@
  * Fund safety recap: the program reads the EVM receiver from the BridgeRoute account, so
  * nothing in these builders lets a caller choose a destination.
  */
-import { AccountMeta, PublicKey as UmiPublicKey, RpcInterface, Signer, WrappedInstruction, publicKey } from '@metaplex-foundation/umi'
+import { AccountMeta, Signer, PublicKey as UmiPublicKey, WrappedInstruction, publicKey } from '@metaplex-foundation/umi'
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { OftPDA, oft } from '@layerzerolabs/oft-v2-solana-sdk'
-import { createNoopSigner } from '@metaplex-foundation/umi'
-
-import { ccipPayerAddress, ccipRouteAddress, ccipSendAccounts, CcipRouteAccount } from './ccip'
+import { CcipRouteAccount, ccipPayerAddress, ccipRouteAddress, ccipSendAccounts } from './ccip'
 import { LendMirror, instructions } from './lendmirror'
 import { SEEDS } from './seeds'
 
 export const PROVIDER_CCTP = 1
 export const PROVIDER_CCIP = 2
-/** LayerZero OFT: the token's issuer registered it with LayerZero (USDT0, USDai, sUSDai). */
+/** LayerZero: the token's issuer bridges it over LayerZero (USDT via USDT0, USDai, sUSDai).
+ * Served by `bridge_tokens_lz` plus the issuer's own send in the same transaction. */
 export const PROVIDER_LZ_OFT = 3
 
 /** Circle CCTP v2 program ids. Same on Devnet and mainnet. */
@@ -51,7 +49,7 @@ export type SetBridgeRouteArgs = {
     dstChainId: bigint
     provider: number
     providerProgram: string
-    /** LayerZero only: the OFT token escrow account. Leave empty for CCTP and CCIP. */
+    /** Unused since `bridge_tokens_lz`; the program requires it absent. */
     providerAux?: string
     /** EVM treasury address, 0x-prefixed 20 bytes. */
     receiver: string
@@ -94,7 +92,8 @@ export function setBridgeRoute(instance: LendMirror, admin: Signer, args: SetBri
 export function cctpAccounts(mint: string, owner: string, destinationDomain: number) {
     const tmm = new PublicKey(CCTP_TOKEN_MESSENGER_MINTER_V2)
     const mt = new PublicKey(CCTP_MESSAGE_TRANSMITTER_V2)
-    const pda = (program: PublicKey, seeds: (Buffer | Uint8Array)[]) => PublicKey.findProgramAddressSync(seeds, program)[0]
+    const pda = (program: PublicKey, seeds: (Buffer | Uint8Array)[]) =>
+        PublicKey.findProgramAddressSync(seeds, program)[0]
     return {
         senderAuthorityPda: pda(tmm, [Buffer.from('sender_authority')]),
         denylistAccount: pda(tmm, [Buffer.from('denylist_account'), new PublicKey(owner).toBuffer()]),
@@ -199,7 +198,8 @@ export async function ccipTokenRemainingAccounts(args: {
 
     const registry = pda(router, [Buffer.from('token_admin_registry'), mintKey.toBuffer()])
     const registryInfo = await args.connection.getAccountInfo(registry)
-    if (!registryInfo) throw new Error(`Token ${args.mint} is not registered with CCIP on this cluster (no token admin registry)`)
+    if (!registryInfo)
+        throw new Error(`Token ${args.mint} is not registered with CCIP on this cluster (no token admin registry)`)
     // TokenAdminRegistry: discriminator 8, version 1, administrator 32, pending_administrator 32,
     // lookup_table 32, writable_indexes [u128; 2] (a bitmap over the table's entries, most
     // significant bit = entry 0), mint 32, supports_auto_derivation 1.
@@ -217,11 +217,21 @@ export async function ccipTokenRemainingAccounts(args: {
     const table = await args.connection.getAddressLookupTable(lookupTable)
     if (!table.value) throw new Error(`Lookup table ${lookupTable.toBase58()} not found`)
     const entries = table.value.state.addresses
-    if (entries.length < 9) throw new Error(`Lookup table ${lookupTable.toBase58()} has ${entries.length} entries; expected at least 9`)
+    if (entries.length < 9)
+        throw new Error(`Lookup table ${lookupTable.toBase58()} has ${entries.length} entries; expected at least 9`)
     const poolProgram = entries[2]
 
-    const userTokenAccount = getAssociatedTokenAddressSync(mintKey, new PublicKey(args.bridgeSigner), true, tokenProgram)
-    const meta = (key: PublicKey, isWritable: boolean): AccountMeta => ({ pubkey: publicKey(key.toBase58()), isSigner: false, isWritable })
+    const userTokenAccount = getAssociatedTokenAddressSync(
+        mintKey,
+        new PublicKey(args.bridgeSigner),
+        true,
+        tokenProgram
+    )
+    const meta = (key: PublicKey, isWritable: boolean): AccountMeta => ({
+        pubkey: publicKey(key.toBase58()),
+        isSigner: false,
+        isWritable,
+    })
     const accounts = [
         meta(userTokenAccount, true),
         // fee quoter's per-destination billing config for this token
@@ -251,7 +261,11 @@ export async function bridgeTokensCcip(
     const [wrapperAuthority] = instance.pda.wrapperAuthority(wrapper)
     const bridgeSigner = ccipPayerAddress(programId)
     const routeAccounts = ccipSendAccounts(args.route, bridgeSigner)
-    const { accounts: remaining, tokenProgram, lookupTable } = await ccipTokenRemainingAccounts({
+    const {
+        accounts: remaining,
+        tokenProgram,
+        lookupTable,
+    } = await ccipTokenRemainingAccounts({
         connection,
         route: args.route,
         mint: args.mint,
@@ -309,99 +323,52 @@ export async function bridgeTokensCcip(
 }
 
 /**
- * LayerZero OFT: quote the fee and the amount that will arrive, then build `bridge_tokens_oft`.
+ * `bridge_tokens_lz`: OUR half of a LayerZero bridge transaction.
  *
- * The OFT SDK builds the OFT program's own `send` with the bridge signer PDA as signer (a
- * "noop" signer: we only need its address). We reuse that instruction's account list: the first
- * nine are the OFT program's named accounts, the rest are the LayerZero Endpoint accounts that
- * our instruction passes through as remaining accounts.
+ * The transaction must carry the issuer's own `send` (see `lzSend.ts`) as the instruction right
+ * after this one; the program reads it through the instructions sysvar and releases the tokens
+ * to `authority`'s token account only when it goes, whole, to the route's receiver. See
+ * `BridgeTokensLz` in the program for why this is not a CPI (Solana's call-depth limit).
  */
-export async function bridgeTokensOft(
+export function bridgeTokensLz(
     instance: LendMirror,
-    rpc: RpcInterface,
     authority: Signer,
     args: BridgeTokensArgs & {
-        oftProgram: string
-        tokenEscrow: string
-        dstEid: number
-        /** EVM treasury, 0x-prefixed. Must equal the route's receiver. */
-        receiver: string
-        /** SOL moved onto the bridge signer for the LayerZero fee. Default: the quoted fee plus 10%. */
-        feeLamports?: bigint
+        /** Token program that owns the mint (classic Token or Token-2022). */
+        tokenProgram: string
     },
     ondemand: UmiPublicKey | undefined
-): Promise<{ instruction: WrappedInstruction; nativeFee: bigint; amountReceived: bigint }> {
+): WrappedInstruction {
     const programId = String(instance.programId)
     const [wrapper] = instance.pda.wrapper(args.vaultId, args.nftId)
     const [wrapperAuthority] = instance.pda.wrapperAuthority(wrapper)
-    const bridgeSigner = publicKey(ccipPayerAddress(programId))
-    const oftProgram = publicKey(args.oftProgram)
     const tokenMint = publicKey(args.mint)
-    const tokenEscrow = publicKey(args.tokenEscrow)
-    const to = evmAddressTo32(args.receiver)
-    const tokenSource = LendMirror.ata(bridgeSigner, tokenMint)
-
-    // What arrives after the OFT drops dust below its shared decimals, and what LayerZero charges.
-    const { oftReceipt } = await oft.quoteOft(
-        rpc,
-        { payer: bridgeSigner, tokenMint, tokenEscrow },
-        { dstEid: args.dstEid, to, amountLd: args.amount, minAmountLd: 0n },
-        oftProgram
-    )
-    const amountReceived = BigInt(oftReceipt.amountReceivedLd)
-    const { nativeFee } = await oft.quote(
-        rpc,
-        { payer: bridgeSigner, tokenMint, tokenEscrow },
-        { dstEid: args.dstEid, to, amountLd: args.amount, minAmountLd: amountReceived },
-        { oft: oftProgram }
-    )
-
-    const sdkSend = await oft.send(
-        rpc,
-        { payer: createNoopSigner(bridgeSigner), tokenMint, tokenEscrow, tokenSource },
-        { dstEid: args.dstEid, to, amountLd: args.amount, minAmountLd: amountReceived, nativeFee },
-        { oft: oftProgram }
-    )
-    const keys = sdkSend.instruction.keys
-    const [peer] = new OftPDA(oftProgram).peer(new OftPDA(oftProgram).oftStore(tokenEscrow)[0], args.dstEid)
-    const [oftStore] = new OftPDA(oftProgram).oftStore(tokenEscrow)
-    const eventAuthority = keys[7].pubkey
-    const endpointAccounts: AccountMeta[] = keys.slice(9).map((k) => ({ pubkey: k.pubkey, isSigner: false, isWritable: k.isWritable }))
-
-    const feeLamports = args.feeLamports ?? nativeFee + nativeFee / 10n
-    const instruction = instructions
-        .bridgeTokensOft(
-            { identity: authority, programs: instance.programRepo },
-            {
-                authority,
-                store: instance.pda.oapp()[0],
-                wrapper,
-                ondemand,
-                wrapperAuthority,
-                bridgeSigner,
-                bridgeRoute: publicKey(bridgeRouteAddress(programId, args.mint, args.dstChainId).toBase58()),
-                mint: tokenMint,
-                wrapperAta: LendMirror.ata(wrapperAuthority, tokenMint),
-                bridgeAta: tokenSource,
-                tokenProgram: publicKey(TOKEN_PROGRAM_ID),
-                associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
-                oftProgram,
-                peer,
-                oftStore,
-                tokenEscrow,
-                eventAuthority,
-                params: {
-                    amount: args.amount,
-                    dstChainId: args.dstChainId,
-                    maxFee: 0n,
-                    minFinalityThreshold: 0,
-                    feeLamports,
-                    minAmount: amountReceived,
-                    nativeFee,
-                    options: new Uint8Array(0),
-                },
-            }
-        )
-        .addRemainingAccounts(endpointAccounts).items[0]
-    return { instruction, nativeFee, amountReceived }
+    const tokenProgram = publicKey(args.tokenProgram)
+    return instructions.bridgeTokensLz(
+        { identity: authority, programs: instance.programRepo },
+        {
+            authority,
+            store: instance.pda.oapp()[0],
+            wrapper,
+            ondemand,
+            wrapperAuthority,
+            bridgeRoute: publicKey(bridgeRouteAddress(programId, args.mint, args.dstChainId).toBase58()),
+            mint: tokenMint,
+            wrapperAta: LendMirror.ata(wrapperAuthority, tokenMint, tokenProgram),
+            authorityAta: LendMirror.ata(authority.publicKey, tokenMint, tokenProgram),
+            tokenProgram,
+            associatedTokenProgram: publicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
+            params: {
+                amount: args.amount,
+                dstChainId: args.dstChainId,
+                // The guard reads everything else from the issuer's send instruction.
+                maxFee: 0n,
+                minFinalityThreshold: 0,
+                feeLamports: 0n,
+                minAmount: 0n,
+                nativeFee: 0n,
+                options: new Uint8Array(0),
+            },
+        }
+    ).items[0]
 }

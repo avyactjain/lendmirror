@@ -12,7 +12,7 @@ export const SEEDS = {
     JUP_POSITION: 'LendMirrorJupPositionV1',
     /** Chainlink router, fee quoter, RMN and destination for snapshot messages. */
     CCIP_ROUTE: 'LendMirrorCcipRouteV1',
-    /** Empty PDA that signs Chainlink sends and every token bridge, and pays their fees. */
+    /** Empty PDA that signs Chainlink sends and the Circle and Chainlink token bridges, and pays their fees. Not used by the LayerZero bridge. */
     CCIP_PAYER: 'LendMirrorCcipPayerV1',
     /** One PDA per Jupiter position: [WRAPPER, vault_id le, nft_id le]. */
     WRAPPER: 'LendMirrorPositionWrapperV1',

@@ -38,6 +38,24 @@ const profile: DeploymentProfile = {
         attestationApi: 'https://iris-api-sandbox.circle.com',
     },
     treasury: '0x4d4016ab3b238ee8F7146E141F9bBe9b144d3b0C',
+    // PayPal's test PYUSD: a public faucet (faucet.paxos.com), LayerZero's standard program in
+    // Paxos's deployment, and a two-way link to Sepolia. Used to rehearse the LayerZero bridge.
+    lzTokens: [
+        {
+            symbol: 'PYUSD',
+            mint: 'CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM',
+            decimals: 6,
+            issuerProgram: 'paxosVkYuJBKUQoZGAidRA47Qt4uidqG5fAt5kmr1nR',
+            dstEid: 40161, // Sepolia
+            tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
+            minUnderBps: 0, // burn-and-mint, no fee, shared decimals == local
+            options: [], // the peer's enforced options carry 183,500 gas on Sepolia
+            nativeFeeCapLamports: 50_000_000n, // devnet fees are quoted higher; only the real fee is charged
+            lookupTable: '9thqPdbR27A1yLWw2spwJLySemiGMXxPnEvfmXVk4KuK',
+            issuer: { kind: 'standard-oft', escrow: 'EXJZbFNmPhrNkJxJ3tq8RyGHzzxPcxNQxSgx6HUHoRfU' },
+            evmToken: '0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9', // PYUSD on Sepolia, 6 decimals
+        },
+    ],
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_DEVNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_DEVNET',

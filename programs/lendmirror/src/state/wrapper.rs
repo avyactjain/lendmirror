@@ -114,7 +114,8 @@ pub fn level_allows(level: u8, raises_risk: bool) -> bool {
     }
 }
 
-/// Allowlist for who may refresh and send one wrapper's snapshot.
+/// Per-wrapper helper list: wallets that may refresh this wrapper, mirror its snapshot,
+/// operate its position and bridge its tokens.
 /// Seeds: `["LendMirrorOnDemandV1", wrapper.key()]`.
 #[account]
 #[derive(InitSpace)]

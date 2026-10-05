@@ -42,6 +42,70 @@ const profile: DeploymentProfile = {
     },
     // LendMirrorTreasury proxy on Arbitrum, deployed 2026-09-29. Implementation 0xBED1911918D70c2E88b83f2C75b1763e2c49A795.
     treasury: '0x736AAC431E66de7D07eb61738CA3598a53a24Ca0',
+    // Tokens that leave over LayerZero, one entry per token and destination. Each entry says
+    // which issuer program to call and how; the client works out the send's ~40-50 accounts
+    // from it (lib/client/lzSend.ts). Real sends used as the reference are in
+    // tests/fixtures/lz-sends.ts, and the builder is tested against them.
+    lzTokens: [
+        {
+            symbol: 'USDai',
+            mint: 'USDai5XCUzNebYzUk6EuRiFCvnyoyEdj7VSyijYcz2A',
+            decimals: 6,
+            issuerProgram: 'BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm', // USD.AI "console_oft"
+            dstEid: 30110,
+            tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
+            minUnderBps: 0, // no bridge fee, shared decimals == local, nothing is dropped
+            options: [],
+            nativeFeeCapLamports: 15_000_000n, // observed ~0.00086 SOL; cap well above
+            lookupTable: 'FqntHN1ZimKh1aKtmuFMuaxa9E9d4cPxbH3PWKQsdRQf',
+            issuer: {
+                kind: 'usdai',
+                store: '5JZFgHYyVYuNk3BXYbKHiSzrk6EEVV9FLFPJmYvuPfis',
+                pauseConfig: '9bud53CNkxxpWkveVJzCZxUxhASSWGAsLjFsZXivndGh',
+                feeConfig: 'G4LEeN7fsJjTL9Q8GDGrZ9PhKnSQTjHJnVJr41qvd1Ls',
+                defaultRateLimit: 'FX56iS2Yve2bnweDNrx6F6Fo2DCg2hGCtxzRSwPtDZBn',
+                rateLimit: '8Ec2R3rRMZcSCMFosgKDtt6nd7SDduzF4hrBKbAw8bRB',
+                feeDeposit: '2nybkuuvEyMwUJHt5GZmHGFjVJm4b95enLey1SRX2hsP',
+            },
+            evmToken: '0x0A1a1A107E45b7Ced86833863f482BC5f4ed82EF', // USDai on Arbitrum, 18 decimals
+        },
+        {
+            symbol: 'sUSDai',
+            mint: 'sUSDai6Y3GxysDEtA9BVcEFTaog6UZpYUVxJiMhAKYE',
+            decimals: 6,
+            issuerProgram: 'BQ7nDFGKN4cYqmBkMXFCEzk3zPJhR6bNK9Maf8sQXrQm',
+            dstEid: 30110,
+            tokenProgram: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+            minUnderBps: 0,
+            options: [],
+            nativeFeeCapLamports: 15_000_000n,
+            lookupTable: '3heFusMjjqc511jibU9XC1UVbsjwCePmB8mSedsMULpA',
+            issuer: {
+                kind: 'usdai',
+                store: '2xVEUsPGGv9Fe3NFc4UmhWd7Y2Ni7MjiSCL8oQJ9bzLZ',
+                pauseConfig: 'DsSvSyrYW2sKKr6GVtbEkUYnQ2YyLngeFa9kUJdjo9bL',
+                feeConfig: 'DLiMd356ecgLNPDdnHwu5vFTQTQhFi7d17sB9iieZwwg',
+                defaultRateLimit: 'HS7VYsHA3EwxP7SZPmGsq9zkBozKUF2pdQ5ddPhkHac4',
+                rateLimit: '9eeKTte8JXy17tRkVQaQWKMiKZnkt2GT69h9jfhtF9CG',
+                feeDeposit: '256VLEmcW5UnjG2xt9arXYFNSRv7CTkULwbNTPuyjFDe',
+            },
+            evmToken: '0x0B2b2B2076d95dda7817e785989fE353fe955ef9', // sUSDai on Arbitrum, 18 decimals
+        },
+        {
+            symbol: 'USDT',
+            mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // Tether's native USDT
+            decimals: 6,
+            issuerProgram: 'Fuww9mfc8ntAwxPUzFia7VJFAdvLppyZwhPJoXySZXf7', // USDT0 Legacy Mesh
+            dstEid: 30110,
+            tokenProgram: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+            minUnderBps: 40, // USDT0 takes 0.03% on arrival; leave headroom under the program's 0.5%
+            options: [0, 3], // the bare v2 options header, exactly what USDT0's own app sends
+            nativeFeeCapLamports: 15_000_000n,
+            lookupTable: '6zcTrmdkiQp6dZHYUxVr6A2XVDSYi44X1rcPtvwNcrXi',
+            issuer: { kind: 'usdt0', escrow: 'F1YkdxaiLA1eJt12y3uMAQef48Td3zdJfYhzjphma8hG' },
+            evmToken: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USD\u20ae0 on Arbitrum, 6 decimals
+        },
+    ],
     env: {
         solanaKeypairPath: 'SOLANA_KEYPAIR_PATH_MAINNET',
         evmPrivateKey: 'EVM_PRIVATE_KEY_MAINNET',
