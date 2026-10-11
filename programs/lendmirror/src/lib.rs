@@ -178,12 +178,10 @@ pub mod lendmirror {
         BridgeTokensCcip::apply(&mut ctx, &params)
     }
 
-    // Owner, OnDemand caller, or sender; level 1 or 2. Send a LayerZero OFT token
-    // (USDT0, USDai, sUSDai) to the route's receiver.
-    pub fn bridge_tokens_oft<'info>(
-        mut ctx: Context<'_, '_, '_, 'info, BridgeTokensOft<'info>>,
-        params: BridgeTokensParams,
-    ) -> Result<()> {
-        BridgeTokensOft::apply(&mut ctx, &params)
+    // Owner, OnDemand caller, or sender; level 1 or 2. Release tokens for a LayerZero send
+    // (USDT, USDai, sUSDai) that sits in this same transaction, after verifying it goes,
+    // whole, to the route's receiver. See `BridgeTokensLz` for why this is not a CPI.
+    pub fn bridge_tokens_lz(mut ctx: Context<BridgeTokensLz>, params: BridgeTokensParams) -> Result<()> {
+        BridgeTokensLz::apply(&mut ctx, &params)
     }
 }

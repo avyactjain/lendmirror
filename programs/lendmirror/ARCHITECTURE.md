@@ -5,25 +5,25 @@ an admin-set access level, and bridges tokens only to a fixed EVM treasury.
 
 ## Files
 
-| file | responsibility | called by |
-|---|---|---|
-| `src/lib.rs` | program id, the `#[program]` entry points (one line each) | Solana runtime |
-| `src/seeds.rs` | every PDA seed this program owns, all `LendMirror…V1`; twin of `lib/client/seeds.ts` | every instruction with a `seeds =` constraint |
-| `src/state/store.rs` | `Store` PDA: admin, allowlists (snapshotters read and wrap, senders send and bridge), Jupiter program id | every instruction |
-| `src/state/wrapper.rs` | `PositionWrapper` per position, `OnDemandStrategy` caller list, `level_allows`, send guard | wrap, refresh, send, custody, operate, bridge |
-| `src/state/jupiter_position.rs` | decoders for Jupiter accounts, the 225-byte `PositionSnapshot` and its wire codec | refresh, send, EVM codec (mirror) |
-| `src/state/ccip_route.rs`, `src/state/bridge_route.rs` | admin-set destinations: where snapshots go (CCIP) and where tokens go (per mint + chain) | send, bridge |
-| `src/instructions/init_store.rs`, `set_peer_config.rs`, `set_allowlists.rs`, `set_ccip_route.rs` | admin setup | hardhat tasks |
-| `src/instructions/wrap_position.rs` | `wrap_position`, `attach_ondemand`, `set_ondemand_callers` | hardhat tasks |
-| `src/instructions/get_jupiter_position.rs` | `compute_position_snapshot`: read Position, Tick, VaultState/Config, walk liquidation branches | refresh, legacy `get_jupiter_position` |
-| `src/instructions/refresh_wrapper.rs` | fill `wrapper.snapshot` | tasks, `sync-all-positions` |
-| `src/instructions/send_position_snapshot.rs` | LayerZero CPI (Store signs) + Chainlink CPI (payer PDA signs), once per refresh | tasks, `sync-all-positions` |
-| `src/instructions/custody.rs` | `set_wrapper_level`, `deposit_position_nft`, `release_position_nft` | tasks |
-| `src/instructions/operate_position.rs` | Jupiter `operate_dex` CPI (smart vaults only) signed by the wrapper authority PDA, gated by level; checks every account Jupiter can pay into | task `operate-position` |
-| `src/instructions/bridge_tokens.rs` | `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_oft` | task `bridge-tokens` |
-| `src/instructions/send_ccip.rs`, `src/bridges.rs` | pure byte builders for Chainlink `ccip_send`, Circle `deposit_for_burn`, LayerZero OFT `send` | send, bridge |
-| `src/live_position.rs`, `src/tick_math.rs` | liquidation branch walk and tick ratio math | `compute_position_snapshot` |
-| `src/msg_codec.rs` | 32-byte LayerZero length header around the snapshot body | snapshot codec |
+| file                                                                                             | responsibility                                                                                                                               | called by                                     |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `src/lib.rs`                                                                                     | program id, the `#[program]` entry points (one line each)                                                                                    | Solana runtime                                |
+| `src/seeds.rs`                                                                                   | every PDA seed this program owns, all `LendMirror…V1`; twin of `lib/client/seeds.ts`                                                         | every instruction with a `seeds =` constraint |
+| `src/state/store.rs`                                                                             | `Store` PDA: admin, allowlists (snapshotters read and wrap, senders send and bridge), Jupiter program id                                     | every instruction                             |
+| `src/state/wrapper.rs`                                                                           | `PositionWrapper` per position, `OnDemandStrategy` caller list, `level_allows`, send guard                                                   | wrap, refresh, send, custody, operate, bridge |
+| `src/state/jupiter_position.rs`                                                                  | decoders for Jupiter accounts, the 225-byte `PositionSnapshot` and its wire codec                                                            | refresh, send, EVM codec (mirror)             |
+| `src/state/ccip_route.rs`, `src/state/bridge_route.rs`                                           | admin-set destinations: where snapshots go (CCIP) and where tokens go (per mint + chain)                                                     | send, bridge                                  |
+| `src/instructions/init_store.rs`, `set_peer_config.rs`, `set_allowlists.rs`, `set_ccip_route.rs` | admin setup                                                                                                                                  | hardhat tasks                                 |
+| `src/instructions/wrap_position.rs`                                                              | `wrap_position`, `attach_ondemand`, `set_ondemand_callers`                                                                                   | hardhat tasks                                 |
+| `src/instructions/get_jupiter_position.rs`                                                       | `compute_position_snapshot`: read Position, Tick, VaultState/Config, walk liquidation branches                                               | refresh, legacy `get_jupiter_position`        |
+| `src/instructions/refresh_wrapper.rs`                                                            | fill `wrapper.snapshot`                                                                                                                      | tasks, `sync-all-positions`                   |
+| `src/instructions/send_position_snapshot.rs`                                                     | LayerZero CPI (Store signs) + Chainlink CPI (payer PDA signs), once per refresh                                                              | tasks, `sync-all-positions`                   |
+| `src/instructions/custody.rs`                                                                    | `set_wrapper_level`, `deposit_position_nft`, `release_position_nft`                                                                          | tasks                                         |
+| `src/instructions/operate_position.rs`                                                           | Jupiter `operate_dex` CPI (smart vaults only) signed by the wrapper authority PDA, gated by level; checks every account Jupiter can pay into | task `operate-position`                       |
+| `src/instructions/bridge_tokens.rs`                                                              | `set_bridge_route`, `bridge_tokens_cctp`, `bridge_tokens_ccip`, `bridge_tokens_lz`                                                           | task `bridge-tokens`                          |
+| `src/instructions/send_ccip.rs`, `src/bridges.rs`                                                | pure byte builders for Chainlink `ccip_send`, Circle `deposit_for_burn`, LayerZero OFT `send`                                                | send, bridge                                  |
+| `src/live_position.rs`, `src/tick_math.rs`                                                       | liquidation branch walk and tick ratio math                                                                                                  | `compute_position_snapshot`                   |
+| `src/msg_codec.rs`                                                                               | 32-byte LayerZero length header around the snapshot body                                                                                     | snapshot codec                                |
 
 ## Data flow
 

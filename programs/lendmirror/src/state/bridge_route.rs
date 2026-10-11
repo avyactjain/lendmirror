@@ -12,7 +12,7 @@
 //!     exactly one route per (token, chain).
 //!
 //! Typical call: admin `set_bridge_route` once per token and chain → an allowed caller on a level 1 or 2 wrapper
-//! runs `bridge_tokens_cctp` / `bridge_tokens_ccip` with just an amount.
+//! runs `bridge_tokens_cctp`, `bridge_tokens_ccip` or `bridge_tokens_lz` with an amount and a chain id.
 
 use anchor_lang::prelude::*;
 
@@ -20,7 +20,8 @@ use anchor_lang::prelude::*;
 pub const PROVIDER_CCTP: u8 = 1;
 /// Chainlink CCIP token transfer (`ccip_send` with `token_amounts`).
 pub const PROVIDER_CCIP: u8 = 2;
-/// LayerZero OFT: a token whose issuer registered it with LayerZero (USDT0, USDai, sUSDai).
+/// LayerZero: a token whose issuer bridges it over LayerZero (USDT via USDT0, USDai, sUSDai).
+/// Served by `bridge_tokens_lz` (same-transaction guard), not by a CPI.
 pub const PROVIDER_LZ_OFT: u8 = 3;
 /// Wormhole NTT (USDS, sUSDS). Reserved: no instruction implements it yet.
 #[allow(dead_code)]
@@ -38,8 +39,8 @@ pub struct BridgeRoute {
     /// The program the bridge instruction CPIs into (CCTP TokenMessengerMinterV2, CCIP router,
     /// or the token's own LayerZero OFT program).
     pub provider_program: Pubkey,
-    /// Provider-specific account. LayerZero: the OFT token escrow, from which the OFT store and
-    /// peer addresses derive. Zero for CCTP and CCIP.
+    /// Unused. Was the LayerZero escrow before `bridge_tokens_lz` stopped deriving provider
+    /// accounts. Always zero; kept so existing routes decode.
     pub provider_aux: Pubkey,
     /// Destination on the EVM chain: our treasury contract, 20-byte address left-padded to 32.
     pub receiver: [u8; 32],
@@ -49,7 +50,9 @@ pub struct BridgeRoute {
     /// CCTP destination domain (Ethereum 0, Arbitrum 3, Base 6, Polygon 7) or the CCIP
     /// destination chain selector, depending on `provider`.
     pub domain_or_selector: u64,
-    /// CCIP only: gas for the destination `ccipReceive`. 0 for token-only transfers.
+    /// CCIP: gas for the destination `ccipReceive` (0 for token-only transfers). LayerZero:
+    /// the position of the token-source account in the issuer's `send` instruction, which the
+    /// `bridge_tokens_lz` guard pins to the caller's token account (reused field, no new seed).
     pub gas_limit: u64,
     pub enabled: bool,
     /// Per-transaction cap in token base units. A wrong route can lose at most this much.

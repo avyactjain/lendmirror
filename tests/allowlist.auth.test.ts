@@ -5,9 +5,9 @@
  * (see Anchor.toml [test.validator]).
  */
 import * as anchor from '@coral-xyz/anchor'
-import { Program, BN } from '@coral-xyz/anchor'
-import { expect } from 'chai'
+import { BN, Program } from '@coral-xyz/anchor'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
+import { expect } from 'chai'
 
 import idl from '../target/idl/lendmirror.json'
 
@@ -68,10 +68,7 @@ describe('allowlist auth', function () {
             [Buffer.from('OApp'), storePda.toBuffer()],
             ENDPOINT_PROGRAM
         )
-        const [eventAuthority] = PublicKey.findProgramAddressSync(
-            [Buffer.from('__event_authority')],
-            ENDPOINT_PROGRAM
-        )
+        const [eventAuthority] = PublicKey.findProgramAddressSync([Buffer.from('__event_authority')], ENDPOINT_PROGRAM)
         return [
             { pubkey: ENDPOINT_PROGRAM, isSigner: false, isWritable: false },
             { pubkey: payer, isSigner: false, isWritable: true },
@@ -90,10 +87,7 @@ describe('allowlist auth', function () {
 
     it('programData PDA is the BPF-loader PDA of this program', () => {
         expect(programData.toBase58()).to.equal(
-            PublicKey.findProgramAddressSync(
-                [PROGRAM_ID.toBuffer()],
-                BPF_LOADER_UPGRADEABLE_PROGRAM_ID
-            )[0].toBase58()
+            PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], BPF_LOADER_UPGRADEABLE_PROGRAM_ID)[0].toBase58()
         )
     })
 
@@ -198,10 +192,7 @@ describe('allowlist auth', function () {
     it('set_peer_config for send auth tests', async () => {
         const eidBuf = Buffer.alloc(4)
         eidBuf.writeUInt32BE(DST_EID)
-        const [peerPda] = PublicKey.findProgramAddressSync(
-            [PEER_SEED, storePda.toBuffer(), eidBuf],
-            PROGRAM_ID
-        )
+        const [peerPda] = PublicKey.findProgramAddressSync([PEER_SEED, storePda.toBuffer(), eidBuf], PROGRAM_ID)
         // Tuple enum variant PeerAddress([u8; 32]) — Anchor wants the field wrapped.
         await program.methods
             .setPeerConfig({
@@ -228,10 +219,7 @@ describe('allowlist auth', function () {
         vaultBuf.writeUInt16LE(vaultId)
         const nftBuf = Buffer.alloc(4)
         nftBuf.writeUInt32LE(nftId)
-        const [wrapperPda] = PublicKey.findProgramAddressSync(
-            [WRAPPER_SEED, vaultBuf, nftBuf],
-            PROGRAM_ID
-        )
+        const [wrapperPda] = PublicKey.findProgramAddressSync([WRAPPER_SEED, vaultBuf, nftBuf], PROGRAM_ID)
         try {
             await program.methods
                 .wrapPosition({ vaultId, nftId })
@@ -256,10 +244,7 @@ describe('allowlist auth', function () {
         vaultBuf.writeUInt16LE(vaultId)
         const nftBuf = Buffer.alloc(4)
         nftBuf.writeUInt32LE(nftId)
-        const [wrapperPda] = PublicKey.findProgramAddressSync(
-            [WRAPPER_SEED, vaultBuf, nftBuf],
-            PROGRAM_ID
-        )
+        const [wrapperPda] = PublicKey.findProgramAddressSync([WRAPPER_SEED, vaultBuf, nftBuf], PROGRAM_ID)
         await program.methods
             .wrapPosition({ vaultId, nftId })
             .accounts({
@@ -465,7 +450,12 @@ describe('allowlist auth', function () {
         try {
             await program.methods
                 .setBridgeRoute(params)
-                .accounts({ admin: stranger.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .accounts({
+                    admin: stranger.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .signers([stranger])
                 .rpc()
             expect.fail('expected ConstraintAddress')
@@ -475,7 +465,12 @@ describe('allowlist auth', function () {
         try {
             await program.methods
                 .setBridgeRoute({ ...params, provider: 9 })
-                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .rpc()
             expect.fail('expected WrongProvider')
         } catch (err) {
@@ -484,7 +479,12 @@ describe('allowlist auth', function () {
         try {
             await program.methods
                 .setBridgeRoute({ ...params, receiver: Array(32).fill(0) })
-                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .rpc()
             expect.fail('expected InvalidBridgeAccount')
         } catch (err) {
@@ -495,7 +495,12 @@ describe('allowlist auth', function () {
         try {
             await program.methods
                 .setBridgeRoute({ ...params, receiver: Array(32).fill(1) })
-                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .rpc()
             expect.fail('expected InvalidBridgeAccount: unpadded receiver')
         } catch (err) {
@@ -505,7 +510,12 @@ describe('allowlist auth', function () {
         try {
             await program.methods
                 .setBridgeRoute({ ...params, domainOrSelector: new BN('4294967296') })
-                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .rpc()
             expect.fail('expected InvalidBridgeAccount: domain does not fit u32')
         } catch (err) {
@@ -513,36 +523,72 @@ describe('allowlist auth', function () {
         }
         await program.methods
             .setBridgeRoute(params)
-            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .accounts({
+                admin: admin.publicKey,
+                store: storePda,
+                bridgeRoute: route,
+                systemProgram: SystemProgram.programId,
+            })
             .rpc()
         const stored = await program.account.bridgeRoute.fetch(route)
         expect(stored.provider).to.equal(1)
         expect(stored.enabled).to.equal(true)
         expect(Buffer.from(stored.receiver).toString('hex')).to.equal('00'.repeat(12) + '01'.repeat(20))
 
-        // A LayerZero route must carry the OFT escrow; a Circle route must not.
-        const escrow = Keypair.generate().publicKey
+        // No provider carries provider_aux any more; a LayerZero route must say where the
+        // issuer's send keeps its token-source account (gas_limit, 1..=63).
         try {
             await program.methods
-                .setBridgeRoute({ ...params, provider: 3 })
-                .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+                .setBridgeRoute({
+                    ...params,
+                    provider: 3,
+                    providerAux: Keypair.generate().publicKey,
+                    domainOrSelector: new BN(30110),
+                    gasLimit: new BN(9),
+                })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
                 .rpc()
-            expect.fail('expected InvalidBridgeAccount: OFT route without escrow')
+            expect.fail('expected InvalidBridgeAccount: provider_aux must be zero')
+        } catch (err) {
+            assertLogsMatch(err, /InvalidBridgeAccount|6022/)
+        }
+        try {
+            await program.methods
+                .setBridgeRoute({ ...params, provider: 3, domainOrSelector: new BN(30110) })
+                .accounts({
+                    admin: admin.publicKey,
+                    store: storePda,
+                    bridgeRoute: route,
+                    systemProgram: SystemProgram.programId,
+                })
+                .rpc()
+            expect.fail('expected InvalidBridgeAccount: LayerZero route without a token-source index')
         } catch (err) {
             assertLogsMatch(err, /InvalidBridgeAccount|6022/)
         }
         await program.methods
-            .setBridgeRoute({ ...params, provider: 3, providerAux: escrow, domainOrSelector: new BN(30110) })
-            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .setBridgeRoute({ ...params, provider: 3, domainOrSelector: new BN(30110), gasLimit: new BN(9) })
+            .accounts({
+                admin: admin.publicKey,
+                store: storePda,
+                bridgeRoute: route,
+                systemProgram: SystemProgram.programId,
+            })
             .rpc()
         const oftRoute = await program.account.bridgeRoute.fetch(route)
         expect(oftRoute.provider).to.equal(3)
-        expect(oftRoute.providerAux.toBase58()).to.equal(escrow.toBase58())
+        expect(oftRoute.gasLimit.toNumber()).to.equal(9)
     })
 
     it('bridge_tokens_cctp: level 0 is denied, level 2 reaches the Circle CPI', async () => {
         // A real SPL mint on the local validator, with the wrapper authority holding 10 units.
-        const { createMint, getOrCreateAssociatedTokenAccount, mintTo, getAssociatedTokenAddressSync } = await import('@solana/spl-token')
+        const { createMint, getOrCreateAssociatedTokenAccount, mintTo, getAssociatedTokenAddressSync } =
+            await import('@solana/spl-token')
         const mint = await createMint(provider.connection, admin, admin.publicKey, null, 6)
         const [wrapperPda] = wrapperAddress(1, 8002)
         const [wrapperAuthority] = PublicKey.findProgramAddressSync(
@@ -550,7 +596,13 @@ describe('allowlist auth', function () {
             PROGRAM_ID
         )
         const [bridgeSigner] = PublicKey.findProgramAddressSync([Buffer.from('LendMirrorCcipPayerV1')], PROGRAM_ID)
-        const wrapperAta = await getOrCreateAssociatedTokenAccount(provider.connection, admin, mint, wrapperAuthority, true)
+        const wrapperAta = await getOrCreateAssociatedTokenAccount(
+            provider.connection,
+            admin,
+            mint,
+            wrapperAuthority,
+            true
+        )
         await mintTo(provider.connection, admin, mint, wrapperAta.address, admin, 10)
         const bridgeAta = getAssociatedTokenAddressSync(mint, bridgeSigner, true)
         const [route] = bridgeRouteAddress(mint, 11155111n)
@@ -568,7 +620,12 @@ describe('allowlist auth', function () {
                 enabled: true,
                 maxAmountPerTx: new BN(5),
             })
-            .accounts({ admin: admin.publicKey, store: storePda, bridgeRoute: route, systemProgram: SystemProgram.programId })
+            .accounts({
+                admin: admin.publicKey,
+                store: storePda,
+                bridgeRoute: route,
+                systemProgram: SystemProgram.programId,
+            })
             .rpc()
 
         const eventData = Keypair.generate()
@@ -615,7 +672,10 @@ describe('allowlist auth', function () {
         })
 
         // Level 0 (set it back from 2): the wrapper constraint rejects before anything moves.
-        await program.methods.setWrapperLevel(0).accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda }).rpc()
+        await program.methods
+            .setWrapperLevel(0)
+            .accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda })
+            .rpc()
         try {
             await program.methods.bridgeTokensCctp(params(3)).accounts(accounts).signers([eventData]).rpc()
             expect.fail('expected LevelDenied')
@@ -624,7 +684,10 @@ describe('allowlist auth', function () {
         }
 
         // Over the route cap.
-        await program.methods.setWrapperLevel(2).accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda }).rpc()
+        await program.methods
+            .setWrapperLevel(2)
+            .accounts({ admin: admin.publicKey, store: storePda, wrapper: wrapperPda })
+            .rpc()
         try {
             await program.methods.bridgeTokensCctp(params(6)).accounts(accounts).signers([eventData]).rpc()
             expect.fail('expected AmountTooLarge')
@@ -639,7 +702,10 @@ describe('allowlist auth', function () {
             await program.methods.bridgeTokensCctp(params(3)).accounts(accounts).signers([eventData]).rpc()
             expect.fail('expected the CCTP program to be missing')
         } catch (err) {
-            assertLogsMatch(err, /Program is not deployed|ProgramAccountNotFound|invalid account data|not executable|UnsupportedProgramId|Unsupported program id|An account required by the instruction is missing/)
+            assertLogsMatch(
+                err,
+                /Program is not deployed|ProgramAccountNotFound|invalid account data|not executable|UnsupportedProgramId|Unsupported program id|An account required by the instruction is missing/
+            )
         }
         const balance = await provider.connection.getTokenAccountBalance(wrapperAta.address)
         expect(balance.value.amount).to.equal('10')
@@ -649,7 +715,10 @@ describe('allowlist auth', function () {
     function bridgeRouteAddress(mint: PublicKey, dstChainId: bigint): [PublicKey, number] {
         const chain = Buffer.alloc(8)
         chain.writeBigUInt64LE(dstChainId)
-        return PublicKey.findProgramAddressSync([Buffer.from('LendMirrorBridgeRouteV1'), mint.toBuffer(), chain], PROGRAM_ID)
+        return PublicKey.findProgramAddressSync(
+            [Buffer.from('LendMirrorBridgeRouteV1'), mint.toBuffer(), chain],
+            PROGRAM_ID
+        )
     }
 
     /** Wrapper PDA under the V1 seed. */

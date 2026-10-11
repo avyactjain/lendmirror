@@ -37,7 +37,8 @@ pub const JUP_POSITION_SEED: &[u8] = b"LendMirrorJupPositionV1";
 /// Seeds: `[CCIP_ROUTE_SEED]`.
 pub const CCIP_ROUTE_SEED: &[u8] = b"LendMirrorCcipRouteV1";
 
-/// Empty account that signs `ccip_send` and every token bridge, and pays their SOL fees.
+/// Empty account that signs `ccip_send` and the Circle and Chainlink token bridges, and pays
+/// their SOL fees. The LayerZero bridge does not use it.
 /// It must hold no data: Chainlink refuses a payer that is a data account.
 /// Seeds: `[CCIP_PAYER_SEED]`.
 pub const CCIP_PAYER_SEED: &[u8] = b"LendMirrorCcipPayerV1";

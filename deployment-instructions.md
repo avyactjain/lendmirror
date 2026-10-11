@@ -12,7 +12,7 @@ export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH" # Ancho
 set -a && source .env && set +a                                          # only needed for the bare `cast` lines below
 ```
 
-`.env` needs `DEPLOYMENT_TYPE=devnet` or `mainnet`, plus for that network: `SOLANA_KEYPAIR_PATH_*`, `EVM_PRIVATE_KEY_*`, `RPC_URL_SOLANA_*`, `RPC_URL_EVM_*`. The Solana key must be the program's upgrade authority.
+`.env` needs `DEPLOYMENT_TYPE=devnet` or `mainnet`, plus for that network: `SOLANA_KEYPAIR_PATH_*`, `EVM_PRIVATE_KEY_*`, `RPC_URL_SOLANA_*`, `RPC_URL_EVM_*`. The Solana key must be the program's upgrade authority. To run one command against the other network without editing the file, put `DEPLOYMENT_TYPE=devnet` (or `mainnet`) in front of it; a variable already set in the shell wins over `.env`. Hardhat also insists that the Arbitrum network has a URL, so with mainnet lines removed, pass a placeholder `RPC_URL_EVM_MAINNET=https://arb1.arbitrum.io/rpc` the same way.
 
 ## 1. Estimate the cost
 
@@ -36,12 +36,13 @@ EVM gas measured on Sepolia: `LendMirror` implementation 3.2M, treasury implemen
 npx lm build -- --features no-log-ix-name   # compile the Solana program for this network's program id
 npm run gen:api                             # regenerate the TypeScript client from the new IDL (always after a build)
 npx hardhat compile                         # compile the EVM contracts
-cargo test -p lendmirror                    # 42 Rust unit tests
+cargo test -p lendmirror                    # 49 Rust unit tests
 forge test                                  # 21 Solidity tests
-npx lm anchor test --skip-build             # 23 tests on a local validator
+npx lm anchor test --skip-build             # 30 tests on a local validator
+npx hardhat test tests/lz-send.test.ts      # 8 tests: the LayerZero send builders against real mainnet and devnet sends
 ```
 
-Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs custody, supply, borrow, payback, withdraw and release on smart vault 95, against cloned Jupiter mainnet accounts. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
+Optional, slower: `SOLANA_TEST_VALIDATOR=<agave 4.2+>/bin/solana-test-validator npm run test:fork` runs 23 tests: custody, supply, borrow, payback, withdraw and release on smart vault 95, then the LayerZero pairing (our release + USD.AI's real send, and eight refused tamperings) against cloned mainnet accounts. It funds the test wallet at genesis, so it needs no faucet. It needs a build stamped with the local test id: `LENDMIRROR_ID=GQDxkWJhMGppaXExXBC8hGWmfaUv9igo4PKdaLyc53T1 anchor build -p lendmirror -- --features no-log-ix-name`, then rebuild for your network before deploying.
 
 ## 3. Deploy or upgrade the Solana program
 
@@ -110,7 +111,8 @@ npx hardhat lz:oapp:evm:treasury:set-ccip-route                                 
 npx hardhat lz:oapp:evm:treasury:set-cctp-transmitter                                 # treasury: Circle's contract for USDC claims
 npx hardhat lz:oapp:evm:treasury:set-strategy --token <ERC20> --strategy <ADDRESS>    # treasury: where each token is forwarded (one per token)
 npx hardhat lz:oapp:solana:set-bridge-route --mint usdc --provider cctp               # USDC goes over Circle to the treasury
-npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (PST on mainnet, CCIP-BnM on Devnet)
+npx hardhat lz:oapp:solana:set-bridge-route --mint <MINT> --provider ccip             # a Chainlink token (CCIP-BnM on Devnet)
+npx hardhat lz:oapp:solana:set-bridge-route --mint USDai --provider oft --max-amount 1000000    # a LayerZero token; issuer program and destination come from config lzTokens (also: sUSDai, USDT)
 npx hardhat lz:oapp:solana:create-lookup-table                                        # pack the fixed accounts so sends fit in one transaction
 ```
 
@@ -130,6 +132,20 @@ npx hardhat lz:oapp:evm:treasury:claim-cctp --tx-hash <SOLANA_SIGNATURE>        
 npx hardhat lz:oapp:evm:treasury:forward --token <ERC20>                                               # move the treasury balance to the strategy
 ```
 
+A LayerZero token (USDT, USDai, sUSDai): same `bridge-tokens` call. The task sends two
+instructions — our release, then the issuer's own send — and the wallet pays the LayerZero fee
+(~0.001 SOL). Always dry-run first; it builds and simulates everything and sends nothing:
+
+```bash
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint USDai --amount 1000000 --dry-run   # simulate: logs, size, compute
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id <V> --nft-id <N> --mint USDai --amount 1000000             # the real send; watch it on layerzeroscan.com
+npx hardhat lz:oapp:evm:treasury:forward --token <ERC20_ON_ARBITRUM>                                           # after delivery (minutes)
+```
+
+The treasury needs a strategy per arriving token first (`treasury:set-strategy`); the Arbitrum
+addresses are in `config/mainnet.ts` under `lzTokens[].evmToken`. USDai and sUSDai arrive with
+18 decimals there, USD₮0 with 6.
+
 Mainnet only, with a small position (Jupiter on Devnet is an old build the SDK cannot read):
 
 ```bash
@@ -146,14 +162,48 @@ npx hardhat lz:oapp:solana:release-position-nft --vault-id <V> --nft-id <N>     
 
 ## Devnet state after the 2026-09-29 run
 
-| Item | Value |
-| --- | --- |
-| Store | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz` |
-| Bridge signer | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR` |
-| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6` |
-| Wrapper vault 1 / nft 29 | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 0 |
+| Item                                | Value                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| Store                               | `4ENeFwbyLWTVs6ikTsi7u3JBw2t6zt9dp8U8XQHArTsz`                                               |
+| Bridge signer                       | `ERZkW7D7pL1FfgRgTYaaYpWZFapq7RBc2d2NGxK4VBxR`                                               |
+| Sepolia `LendMirror` implementation | `0xBE499Eb4C9231d308De0C5b4A96225cd984a5BC6`                                                 |
+| Wrapper vault 1 / nft 29            | `YAmfx4EXUg6geGkGALEWMxrDWtiDNWafuHSZprzabBr`, level 1 since 2026-10-02                      |
+| PYUSD route (LayerZero → Sepolia)   | `FDQpQiT8bKgYkpm2MzxH9rTUYeTTbZP7X5GiZcDW7ybk`, cap 2 PYUSD, receiver = the Sepolia treasury |
+| Sepolia treasury strategy for PYUSD | `0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87` (tx `0x133dce7d…`)                              |
 
 Wrappers created before the seed module (under `LendMirrorWrapperV1`) are left behind. The same vault and nft now get a fresh wrapper under `LendMirrorPositionWrapperV1`.
+
+### Devnet LayerZero rehearsal (2026-10-02)
+
+The two-instruction bridge ran for real on devnet with PayPal's test PYUSD (public faucet at
+faucet.paxos.com; mint `CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM`, Token-2022), through
+Paxos's standard-OFT program to the Sepolia treasury. In order, after the program upgrade
+(slot 506593883) and a fresh IDL (`anchor idl close` then `init`: the old IDL account was too
+small and Anchor 0.31 has no resize):
+
+```bash
+npx hardhat lz:oapp:solana:set-bridge-route --mint PYUSD --provider oft --max-amount 2000000                          # route FDQpQiT8…
+npx hardhat lz:oapp:solana:fund-authority-token --vault-id 1 --nft-id 29 --mint CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM --amount 2000000
+npx hardhat lz:oapp:solana:set-wrapper-level --vault-id 1 --nft-id 29 --level 1
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --dry-run   # 1,085 bytes, 351k CU, every step ok
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000             # tx 4sqEyPrn…: wrapper 2 → 1, wallet unchanged, depth 5
+npx hardhat lz:oapp:evm:treasury:set-strategy --network sepolia --token 0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9 --strategy 0x9Dee2100Cb47734A7a629Db0a1B061Df865a9c87
+npx hardhat lz:oapp:evm:treasury:forward --network sepolia --token 0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9             # after delivery (~10 min, Sepolia tx 0x3da16658…): tx 0xaa578945…
+```
+
+The guard was then shown refusing on the live network, with the wrapper's balance untouched
+(`--tamper amount|receiver|no-send` builds a deliberately wrong pairing; the program answers
+`MissingBridgeSend`, error 6023, and the transaction never lands):
+
+```bash
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper amount      # send one unit less than released
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper receiver    # send somewhere else
+npx hardhat lz:oapp:solana:bridge-tokens --vault-id 1 --nft-id 29 --mint PYUSD --amount 1000000 --tamper no-send     # release with no send
+```
+
+`.env` here held only devnet credentials with `DEPLOYMENT_TYPE=mainnet`; every command ran with
+`DEPLOYMENT_TYPE=devnet` in front (dotenv never overrides a set variable). Hardhat still wants
+the Arbitrum network URL defined, so a placeholder `RPC_URL_EVM_MAINNET` was passed.
 
 ## Do not
 

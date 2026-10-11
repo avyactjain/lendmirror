@@ -1,9 +1,10 @@
 //! Byte-level builders for the bridge providers' Solana instructions.
 //!
-//! Owns: instruction DATA (discriminator + Borsh args) for Circle CCTP v2 `deposit_for_burn` and
-//! for a LayerZero OFT `send`. The Chainlink `ccip_send` builder lives in
-//! `instructions/send_ccip.rs` because the data-only send already used it. Does NOT own: account
-//! lists (see `instructions/bridge_tokens.rs`).
+//! Owns: instruction DATA for Circle CCTP v2 `deposit_for_burn` (built here and sent by CPI)
+//! and for a LayerZero OFT `send` (NOT sent by us: `bridge_tokens_lz` reads the issuer's own
+//! send instruction out of the transaction and `decode_oft_send` parses it). The Chainlink
+//! `ccip_send` builder lives in `instructions/send_ccip.rs` because the data-only send already
+//! used it. Does NOT own: account lists (see `instructions/bridge_tokens.rs`).
 //!
 //! Everything here is a pure function over plain values, so it is unit-tested byte by byte.
 
@@ -108,9 +109,45 @@ pub fn oft_send_data(
     data
 }
 
+/// Parse an issuer program's `send` instruction data, as found in the transaction.
+///
+/// `None` when the discriminator is not `send` or the bytes do not parse as `SendParams`
+/// exactly (trailing bytes also fail: the guard in `bridge_tokens_lz` demands empty options
+/// and no compose message, so a valid send for us is always exactly 81 bytes).
+pub fn decode_oft_send(data: &[u8]) -> Option<OftSendParams> {
+    if data.len() < 8 || data[..8] != OFT_SEND_DISCRIMINATOR {
+        return None;
+    }
+    OftSendParams::try_from_slice(&data[8..]).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_oft_send_roundtrips_the_builder() {
+        let to = [0xABu8; 32];
+        let data = oft_send_data(30110, to, 2_000_000, 1_990_000, &[], 840_356);
+        let p = decode_oft_send(&data).expect("builder bytes must decode");
+        assert_eq!(p.dst_eid, 30110);
+        assert_eq!(p.to, to);
+        assert_eq!(p.amount_ld, 2_000_000);
+        assert_eq!(p.min_amount_ld, 1_990_000);
+        assert!(p.options.is_empty());
+        assert!(p.compose_msg.is_none());
+    }
+
+    #[test]
+    fn decode_oft_send_rejects_bad_bytes() {
+        assert!(decode_oft_send(&[]).is_none(), "empty");
+        assert!(decode_oft_send(&[0u8; 84]).is_none(), "wrong discriminator");
+        let good = oft_send_data(30110, [1u8; 32], 1, 1, &[], 1);
+        let mut data = good.clone();
+        data.push(0);
+        assert!(decode_oft_send(&data).is_none(), "trailing byte");
+        assert!(decode_oft_send(&good[..good.len() - 1]).is_none(), "truncated");
+    }
 
     #[test]
     fn oft_send_bytes_follow_the_oft_program_order() {

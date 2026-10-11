@@ -14,7 +14,13 @@
 import { expect } from 'chai'
 import { readFileSync } from 'node:fs'
 import { mplToolbox } from '@metaplex-foundation/mpl-toolbox'
-import { WrappedInstruction, createSignerFromKeypair, publicKey, signerIdentity, unwrapOption } from '@metaplex-foundation/umi'
+import {
+    WrappedInstruction,
+    createSignerFromKeypair,
+    publicKey,
+    signerIdentity,
+    unwrapOption,
+} from '@metaplex-foundation/umi'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { fromWeb3JsPublicKey, toWeb3JsInstruction, toWeb3JsPublicKey } from '@metaplex-foundation/umi-web3js-adapters'
 import {
@@ -47,11 +53,23 @@ const PDA_FUNDING = 30_000_000n // 30 USDC moved into the wrapper authority's ac
 const SUPPLY = 20_000_000n // 20 USDC supplied as smart collateral (pool token1)
 const BORROW = 5_000_000n // 5 USDC
 const PAYBACK = 2_000_000n // 2 USDC
-const WITHDRAW = 5_000_000n // 5 USDC of collateral
+// 4 USDC of collateral. With the vault's state on 2026-10-05, withdrawing exactly 5 lands this small
+// position on a tick boundary where Jupiter's SDK and its program round differently
+// (VaultTickMismatch, every time, retries included). Another amount avoids the boundary.
+const WITHDRAW = 4_000_000n
 
 const loadEsm = new Function('s', 'return import(s)') as (s: string) => Promise<{
-    getInitPositionIx: (p: { vaultId: number; connection: Connection; signer: PublicKey }) => Promise<{ ix: any; nftId: number }>
-    getCurrentPosition: (p: { vaultId: number; positionId: number; connection: Connection; market: string }) => Promise<{ colRaw: { toString(): string }; debtRaw: { toString(): string } }>
+    getInitPositionIx: (p: {
+        vaultId: number
+        connection: Connection
+        signer: PublicKey
+    }) => Promise<{ ix: any; nftId: number }>
+    getCurrentPosition: (p: {
+        vaultId: number
+        positionId: number
+        connection: Connection
+        market: string
+    }) => Promise<{ colRaw: { toString(): string }; debtRaw: { toString(): string } }>
 }>
 
 describe('custody and smart-vault operate on a Jupiter mainnet fork', function () {
@@ -74,10 +92,19 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
     let authorityPda: PublicKey
 
     before(async () => {
-        const sig = await connection.requestAirdrop(wallet.publicKey, 20 * LAMPORTS_PER_SOL)
-        await connection.confirmTransaction(sig, 'confirmed')
-        const sig2 = await connection.requestAirdrop(holder.publicKey, 2 * LAMPORTS_PER_SOL)
-        await connection.confirmTransaction(sig2, 'confirmed')
+        // The runner gives the wallet SOL at genesis; the holder gets some from the wallet.
+        // (No faucet: on some macOS setups the validator's faucet is unreachable.)
+        await sendAndConfirmTransaction(
+            connection,
+            new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: wallet.publicKey,
+                    toPubkey: holder.publicKey,
+                    lamports: 2 * LAMPORTS_PER_SOL,
+                })
+            ),
+            [wallet]
+        )
         const balance = await connection.getBalance(wallet.publicKey, 'confirmed')
         expect(balance).to.be.greaterThan(10 * LAMPORTS_PER_SOL)
         expect(String(signer.publicKey)).to.equal(wallet.publicKey.toBase58(), 'umi signer is the wallet')
@@ -108,14 +135,32 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
         await sendAndConfirmTransaction(
             connection,
             new Transaction()
-                .add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, holderAta, holder.publicKey, positionMint))
-                .add(createTransferCheckedInstruction(getAssociatedTokenAddressSync(positionMint, wallet.publicKey), positionMint, holderAta, wallet.publicKey, 1, 0)),
+                .add(
+                    createAssociatedTokenAccountIdempotentInstruction(
+                        wallet.publicKey,
+                        holderAta,
+                        holder.publicKey,
+                        positionMint
+                    )
+                )
+                .add(
+                    createTransferCheckedInstruction(
+                        getAssociatedTokenAddressSync(positionMint, wallet.publicKey),
+                        positionMint,
+                        holderAta,
+                        wallet.publicKey,
+                        1,
+                        0
+                    )
+                ),
             [wallet]
         )
         // The ops wallet (a snapshotter) creates the wrapper. It is the owner for now.
         await send(instance.wrapPosition(signer, VAULT_ID, nftId))
         await waitVisible(toWeb3JsPublicKey(instance.pda.wrapper(VAULT_ID, nftId)[0]))
-        expect(String((await instance.getWrapper(umi.rpc, VAULT_ID, nftId))?.owner)).to.equal(wallet.publicKey.toBase58())
+        expect(String((await instance.getWrapper(umi.rpc, VAULT_ID, nftId))?.owner)).to.equal(
+            wallet.publicKey.toBase58()
+        )
 
         // The ops wallet cannot deposit: it does not hold the NFT.
         try {
@@ -123,19 +168,33 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
             expect.fail('expected a token account failure')
         } catch (err) {
             // Its ATA for the mint may exist with balance 0 (InvalidTokenAccount) or not at all.
-            expect(String(err)).to.match(/InvalidTokenAccount|AccountNotInitialized|3012|ConstraintTokenOwner|2015/, String(err).slice(0, 2000))
+            expect(String(err)).to.match(
+                /InvalidTokenAccount|AccountNotInitialized|3012|ConstraintTokenOwner|2015/,
+                String(err).slice(0, 2000)
+            )
         }
 
         // The holder deposits and takes ownership.
         await send(instance.depositPositionNft(holderSigner, VAULT_ID, nftId, vaultsProgram), [], 400_000, [holder])
-        await waitVisible(getAssociatedTokenAddressSync(positionMint, toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(VAULT_ID, nftId)[0])[0]), true))
+        await waitVisible(
+            getAssociatedTokenAddressSync(
+                positionMint,
+                toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(VAULT_ID, nftId)[0])[0]),
+                true
+            )
+        )
         let wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
         expect(wrapper?.custody).to.equal(true)
         expect(String(wrapper?.owner)).to.equal(holder.publicKey.toBase58(), 'depositor owns the wrapper')
 
         // The holder lets the ops wallet operate this one wrapper through the OnDemand list.
         await send(instance.attachOndemand(holderSigner, VAULT_ID, nftId), [], 400_000, [holder])
-        await send(instance.setOndemandCallers(holderSigner, VAULT_ID, nftId, [holderSigner.publicKey, signer.publicKey]), [], 400_000, [holder])
+        await send(
+            instance.setOndemandCallers(holderSigner, VAULT_ID, nftId, [holderSigner.publicKey, signer.publicKey]),
+            [],
+            400_000,
+            [holder]
+        )
         await waitVisible(toWeb3JsPublicKey(instance.pda.ondemand(instance.pda.wrapper(VAULT_ID, nftId)[0])[0]))
     })
 
@@ -146,7 +205,9 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
         expect(wrapper?.level).to.equal(1)
         expect(String(wrapper?.positionMint)).to.equal(positionMint.toBase58())
         authorityPda = toWeb3JsPublicKey(instance.pda.wrapperAuthority(instance.pda.wrapper(VAULT_ID, nftId)[0])[0])
-        const bal = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(positionMint, authorityPda, true))
+        const bal = await connection.getTokenAccountBalance(
+            getAssociatedTokenAddressSync(positionMint, authorityPda, true)
+        )
         expect(bal.value.amount).to.equal('1', 'NFT sits in the authority ATA')
 
         // The Jupiter SDK simulates a price read with the operate signer as fee payer, and
@@ -156,9 +217,24 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
         await sendAndConfirmTransaction(
             connection,
             new Transaction()
-                .add(SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: authorityPda, lamports: 50_000_000 }))
-                .add(createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, pdaUsdcAccount, authorityPda, USDC))
-                .add(createTransferCheckedInstruction(walletUsdc, USDC, pdaUsdcAccount, wallet.publicKey, PDA_FUNDING, 6)),
+                .add(
+                    SystemProgram.transfer({
+                        fromPubkey: wallet.publicKey,
+                        toPubkey: authorityPda,
+                        lamports: 50_000_000,
+                    })
+                )
+                .add(
+                    createAssociatedTokenAccountIdempotentInstruction(
+                        wallet.publicKey,
+                        pdaUsdcAccount,
+                        authorityPda,
+                        USDC
+                    )
+                )
+                .add(
+                    createTransferCheckedInstruction(walletUsdc, USDC, pdaUsdcAccount, wallet.publicKey, PDA_FUNDING, 6)
+                ),
             [wallet]
         )
         expect(await pdaUsdc()).to.equal(PDA_FUNDING)
@@ -167,7 +243,9 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
 
     it('level 1 supplies USDC as smart collateral', async () => {
         await operate({ col: { action: 'supply', token1: SUPPLY } })
-        const position = await connection.getAccountInfo(toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0]))
+        const position = await connection.getAccountInfo(
+            toWeb3JsPublicKey(jupiterPositionPda(vaultsProgram, VAULT_ID, nftId)[0])
+        )
         const fields = decodeJupiterPositionFields(position!.data)
         expect(fields.supplyAmount > 0n).to.equal(true, 'pool shares recorded on the Jupiter position')
         expect(await pdaUsdc()).to.equal(PDA_FUNDING - SUPPLY)
@@ -187,7 +265,9 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
         // Our six named accounts come first, then Jupiter's list; slot 2 is Jupiter's
         // signer_borrow_token_account, one of the accounts Jupiter pays borrowed tokens into.
         const redirect = (ix: WrappedInstruction): WrappedInstruction => {
-            const keys = ix.instruction.keys.map((k, i) => (i === 6 + 2 ? { ...k, pubkey: fromWeb3JsPublicKey(walletUsdc) } : k))
+            const keys = ix.instruction.keys.map((k, i) =>
+                i === 6 + 2 ? { ...k, pubkey: fromWeb3JsPublicKey(walletUsdc) } : k
+            )
             return { ...ix, instruction: { ...ix.instruction, keys } }
         }
         try {
@@ -242,8 +322,19 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
     })
 
     it('admin releases the NFT back to the wrapper owner', async () => {
-        await send(instance.releasePositionNft(signer, VAULT_ID, nftId, holderSigner.publicKey, fromWeb3JsPublicKey(positionMint)))
-        const bal = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(positionMint, holder.publicKey), 'confirmed')
+        await send(
+            instance.releasePositionNft(
+                signer,
+                VAULT_ID,
+                nftId,
+                holderSigner.publicKey,
+                fromWeb3JsPublicKey(positionMint)
+            )
+        )
+        const bal = await connection.getTokenAccountBalance(
+            getAssociatedTokenAddressSync(positionMint, holder.publicKey),
+            'confirmed'
+        )
         expect(bal.value.amount).to.equal('1', 'the holder has the NFT again')
         const wrapper = await instance.getWrapper(umi.rpc, VAULT_ID, nftId)
         expect(wrapper?.custody).to.equal(false)
@@ -293,7 +384,10 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
      * lookup tables; together they can exceed the transaction size limit).
      * `tamper` edits our instruction before sending, to prove the program's checks.
      */
-    async function operate(legs: { col?: DexLeg; debt?: DexLeg }, tamper?: (ix: WrappedInstruction) => WrappedInstruction) {
+    async function operate(
+        legs: { col?: DexLeg; debt?: DexLeg },
+        tamper?: (ix: WrappedInstruction) => WrappedInstruction
+    ) {
         const build = await buildOperatePosition({
             connection,
             rpc: umi.rpc,
@@ -307,14 +401,26 @@ describe('custody and smart-vault operate on a Jupiter mainnet fork', function (
         })
         if (build.setupIxs.length) await send(build.setupIxs, build.lookupTables, 1_400_000)
         const signature = await send(tamper ? tamper(build.operateIx) : build.operateIx, build.lookupTables, 1_400_000)
-        const tx = await connection.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' })
-        const depth = Math.max(...(tx?.meta?.logMessages ?? []).map((l) => Number((l.match(/invoke \[(\d+)\]/) ?? [])[1] ?? 0)))
+        const tx = await connection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed',
+        })
+        const depth = Math.max(
+            ...(tx?.meta?.logMessages ?? []).map((l) => Number((l.match(/invoke \[(\d+)\]/) ?? [])[1] ?? 0))
+        )
         console.log(`      (operate: ${tx?.meta?.computeUnitsConsumed} compute units, call depth ${depth})`)
         return build
     }
 
     async function pdaUsdc(): Promise<bigint> {
-        return BigInt((await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(USDC, authorityPda, true), 'confirmed')).value.amount)
+        return BigInt(
+            (
+                await connection.getTokenAccountBalance(
+                    getAssociatedTokenAddressSync(USDC, authorityPda, true),
+                    'confirmed'
+                )
+            ).value.amount
+        )
     }
 
     /**
